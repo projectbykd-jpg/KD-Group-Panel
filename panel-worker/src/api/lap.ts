@@ -95,61 +95,99 @@ export async function lapMotionImport(
 	const pgaPendingError: Rec[] = [];
 	const motionWdPga: Rec[] = [];
 
-	const createMap = new Map<string, Rec>();
+	// Rekonsiliasi CREATE vs PAID harus berdasarkan keberadaan REF di dataset
+	// pasangannya, lalu status tanggal dibandingkan HANYA untuk transaksi yang
+	// memang match. Baris "PGA PENDING / ERROR" tidak boleh diisi dengan semua
+	// row yang kebetulan ada di luar rentang tanggal atau dengan status SUCCESS.
+	const normRef = (item: Rec) => String(item.reference_no || item.invoice_no || "").trim();
+	const createByRef = new Map<string, Rec[]>();
 	for (const it of listCreate) {
-		const k = String(it.reference_no || it.invoice_no || "");
-		if (k) createMap.set(k, it);
+		const k = normRef(it);
+		if (!k) continue;
+		const arr = createByRef.get(k) || [];
+		arr.push(it);
+		createByRef.set(k, arr);
 	}
-	const paidKeys = new Set<string>();
+
+	const paidByRef = new Map<string, Rec[]>();
+	for (const it of listPaid) {
+		const k = normRef(it);
+		if (!k) continue;
+		const arr = paidByRef.get(k) || [];
+		arr.push(it);
+		paidByRef.set(k, arr);
+	}
 
 	let totalNominalPaidAt = 0;
 	let totalTransaksiPaid = 0;
+	let totalTransaksiCreate = 0;
+	let totalNominalCreatedAt = 0;
+
 	for (const item of listPaid) {
-		const key = String(item.reference_no || item.invoice_no || "");
-		if (key) paidKeys.add(key);
+		const key = normRef(item);
 		const createdAt = String(item.created_at || "");
 		const paidAt = String(item.paid_at || "");
 		const amount = num(item.amount || item.net_amount || 0);
 		const fee = num(item.fee_total_with_service_fee || item.surcharge || 0);
 		const statusDesc = String(item.paid_status_description || item.paid_status_desc || "SUCCESS").toUpperCase();
 		const isSuccess = item.paid_status === 1 || statusDesc === "SUCCESS" || statusDesc === "PAID";
-		const user = extractPureUsername(item);
 		const paidDay = paidAt.split(" ")[0] || "";
-		const createdDay = createdAt.split(" ")[0] || "";
-		const inRange = paidDay >= startDate && paidDay <= endDate;
 		const row: Rec = {
 			createdAt,
 			paidAt: paidAt || "-",
 			refNo: item.reference_no || item.invoice_no || "-",
 			game: item.game_name || "-",
-			user,
+			user: extractPureUsername(item),
 			vendor: item.pga || "-",
 			amount,
 			fee,
 			status: statusDesc,
 		};
-		if (isSuccess && inRange) {
-			motionDpPga.push(row);
-			totalNominalPaidAt += amount;
-			totalTransaksiPaid++;
-			if (!createMap.has(key) || createdDay < startDate || createdDay > endDate) {
-				pgaPendingError.push({ ...row, status: createdDay !== paidDay ? `BEDA TGL (CREATE: ${createdDay})` : "TIDAK ADA DI CREATE" });
-			}
-		} else {
-			pgaPendingError.push({ ...row, status: !inRange ? `BEDA TANGGAL PAID (${paidDay})` : statusDesc });
+
+		// Hanya transaksi PAID sukses yang paid_at masuk periode laporan yang
+		// masuk ke DP PGA.
+		const paidInRange = isSuccess && paidDay >= startDate && paidDay <= endDate;
+		if (!paidInRange) continue;
+
+		motionDpPga.push(row);
+		totalNominalPaidAt += amount;
+		totalTransaksiPaid++;
+
+		// Ada di PAID tapi ref tidak ditemukan di CREATE => pending/error.
+		// Kalau ketemu di CREATE, baru tanggal CREATE dibandingkan dengan PAID.
+		const creates = key ? (createByRef.get(key) || []) : [];
+		if (!creates.length) {
+			pgaPendingError.push({ ...row, status: "TIDAK ADA DI CREATE" });
+			continue;
+		}
+
+		const sameDateCreate = creates.some(c => String(c.created_at || "").split(" ")[0] === paidDay);
+		if (!sameDateCreate) {
+			const dates = [...new Set(creates.map(c => String(c.created_at || "").split(" ")[0]).filter(Boolean))];
+			const createDay = dates[0] || "-";
+			pgaPendingError.push({ ...row, status: `BEDA TGL (CREATE: ${createDay})` });
 		}
 	}
 
-	let totalTransaksiCreate = 0;
-	let totalNominalCreatedAt = 0;
+	// CREATE di periode laporan yang tidak punya pasangan PAID masuk PENDING/ERROR.
 	for (const item of listCreate) {
-		const key = String(item.reference_no || item.invoice_no || "");
-		totalNominalCreatedAt += num(item.amount || item.net_amount || 0);
+		const key = normRef(item);
+		const createdDay = String(item.created_at || "").split(" ")[0] || "";
+		if (createdDay < startDate || createdDay > endDate) continue;
+
 		totalTransaksiCreate++;
-		if (!paidKeys.has(key)) {
+		totalNominalCreatedAt += num(item.amount || item.net_amount || 0);
+
+		const paid = key ? (paidByRef.get(key) || []) : [];
+		const hasPaid = paid.some(p => {
+			const statusDesc = String(p.paid_status_description || p.paid_status_desc || "").toUpperCase();
+			const isSuccess = p.paid_status === 1 || statusDesc === "SUCCESS" || statusDesc === "PAID";
+			return isSuccess && String(p.paid_at || "").trim() !== "";
+		});
+		if (!hasPaid) {
 			pgaPendingError.push({
 				createdAt: item.created_at || "",
-				paidAt: item.paid_at || "-",
+				paidAt: "-",
 				refNo: item.reference_no || item.invoice_no || "-",
 				game: item.game_name || "-",
 				user: extractPureUsername(item),
