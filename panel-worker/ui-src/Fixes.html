@@ -19,7 +19,7 @@
     var r = role(), p = perms(), isBot = r === 'BOT', isAdmin = r === 'ADMIN', isOp = isAdmin || r === 'OPERATOR';
     document.querySelectorAll('[onclick*="copyTelegram"]').forEach(function (el) { setVisible(el, p.telegram && !isBot); });
     document.querySelectorAll('[onclick*="copyLinktree1"],[onclick*="copyLinktree2"]').forEach(function (el) { setVisible(el, p.linktree && !isBot); });
-    document.querySelectorAll('[onclick*="copyPanelZ"],[onclick*="sendToPanelZ"],[onclick*="sendToPanelZCustom"]').forEach(function (el) { setVisible(el, p.panelz && !isBot); });
+    document.querySelectorAll('[onclick*="copyPanelZ"],[onclick*="sendToPanelZCustom"]').forEach(function (el) { setVisible(el, p.panelz && !isBot); });
     document.querySelectorAll('.livechat-op-only').forEach(function (el) { setVisible(el, isOp); });
     var lc = document.querySelector('.nav-group[data-group="livechat"]');
     if (lc) setVisible(lc, isOp);

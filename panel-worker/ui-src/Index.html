@@ -709,7 +709,7 @@
           <div class="admin-panel" data-admin-panel="users">
           <div class="mini-card flex flex-col gap-4">
             <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
-              <div><div class="font-extrabold text-base">Kelola Users</div><div class="text-xs text-slate-400 mt-1">Tambah, edit, nonaktifkan, atau hapus akun. Perubahan langsung tersimpan ke sheet Users.</div></div>
+              <div><div class="font-extrabold text-base">Kelola Users</div><div class="text-xs text-slate-400 mt-1">Tambah, edit, nonaktifkan, atau hapus akun. Perubahan langsung tersimpan ke database panel.</div></div>
               <div class="flex gap-2"><button onclick="loadUsers(true)" class="glass-inner px-4 py-3 rounded-2xl text-xs font-bold"><i class="fa-solid fa-rotate mr-2"></i>REFRESH</button><button onclick="openUserModal()" class="bg-gradient-to-r from-cyan-400 to-blue-600 text-slate-950 px-4 py-3 rounded-2xl text-xs font-extrabold"><i class="fa-solid fa-user-plus mr-2"></i>TAMBAH USER</button></div>
             </div>
             <div class="flex flex-col sm:flex-row gap-3"><input id="userSearch" oninput="filterUserRows()" class="glass-inner rounded-2xl px-4 py-3 text-xs flex-1" placeholder="Cari username, nama, website, role..."><select id="userRoleFilter" onchange="filterUserRows()" class="glass-inner rounded-2xl px-4 py-3 text-xs"><option value="">Semua Role</option><option>ADMIN</option><option>OPERATOR</option><option>VIEWER</option><option>BOT</option></select><select id="userStatusFilter" onchange="filterUserRows()" class="glass-inner rounded-2xl px-4 py-3 text-xs"><option value="">Semua Status</option><option>AKTIF</option><option>NONAKTIF</option><option>TERKUNCI</option></select></div>
@@ -1228,7 +1228,7 @@
   <!-- MODAL KELOLA USER -->
   <div id="userEditModal" class="modal-shell" style="display:none" role="dialog" aria-modal="true" aria-labelledby="userModalTitle">
     <div class="glass-card popup-card w-full max-w-3xl rounded-[2rem] p-6 flex flex-col gap-5 relative max-h-[92vh] overflow-y-auto">
-      <div class="flex items-start justify-between gap-4"><div><div class="text-[10px] text-amber-400 font-bold tracking-widest">ADMIN • USER MANAGEMENT</div><h3 id="userModalTitle" class="text-lg font-extrabold mt-1">Tambah User</h3><p class="text-xs text-slate-400 mt-1">Data akan langsung diperbarui di sheet Users.</p></div><button onclick="closeUserModal()" class="w-10 h-10 rounded-xl glass-inner"><i class="fa-solid fa-xmark"></i></button></div>
+      <div class="flex items-start justify-between gap-4"><div><div class="text-[10px] text-amber-400 font-bold tracking-widest">ADMIN • USER MANAGEMENT</div><h3 id="userModalTitle" class="text-lg font-extrabold mt-1">Tambah User</h3><p class="text-xs text-slate-400 mt-1">Data akan langsung diperbarui di database panel.</p></div><button onclick="closeUserModal()" class="w-10 h-10 rounded-xl glass-inner"><i class="fa-solid fa-xmark"></i></button></div>
       <input type="hidden" id="userOriginalUsername">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
         <label class="text-xs text-slate-400">Username<input id="editUsername" class="glass-inner rounded-2xl px-4 py-3 text-white w-full mt-1" autocomplete="off"></label>
@@ -1246,7 +1246,7 @@
         <label class="glass-inner rounded-2xl p-4 flex items-center gap-3 text-xs font-bold"><input id="editPanelz" type="checkbox" class="w-4 h-4"> Panel-Z</label>
       </div>
       <div id="userModalError" class="text-xs text-rose-300 hidden"></div>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3"><button onclick="closeUserModal()" class="glass-inner py-3.5 rounded-2xl text-xs font-bold">BATAL</button><button id="saveUserBtn" onclick="saveUserFromModal()" class="bg-gradient-to-r from-emerald-400 to-teal-500 text-slate-950 py-3.5 rounded-2xl text-xs font-extrabold"><i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN KE SHEET USERS</button></div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3"><button onclick="closeUserModal()" class="glass-inner py-3.5 rounded-2xl text-xs font-bold">BATAL</button><button id="saveUserBtn" onclick="saveUserFromModal()" class="bg-gradient-to-r from-emerald-400 to-teal-500 text-slate-950 py-3.5 rounded-2xl text-xs font-extrabold"><i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN USER</button></div>
     </div>
   </div>
 
@@ -1317,26 +1317,6 @@
     </div>
   </div>
 
-  <!-- MODAL RESULT -->
-  <div id="resultModal" role="dialog" aria-modal="true" style="display:none; position:fixed; inset:0; background:rgba(2,6,23,.92); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); z-index:1000000; justify-content:center; align-items:center; padding:1rem;" class="fade-in">
-    <div class="glass-card bg-slate-900/95 text-white p-6 sm:p-8 rounded-[2.5rem] w-full max-w-md text-center border border-white/10 shadow-2xl flex flex-col gap-5">
-      <div class="flex items-center justify-center gap-2.5">
-        <div class="w-9 h-9 rounded-2xl bg-cyan-500/20 flex items-center justify-center"><i class="fas fa-paper-plane text-cyan-400 text-sm"></i></div>
-        <h2 class="text-base font-bold tracking-wider neon-cyan">HASIL PENGIRIMAN</h2>
-      </div>
-      <div id="modalResult" class="glass-inner p-4 rounded-2xl border border-white/5 text-left"></div>
-      <button onclick="closeModal()" class="w-full bg-gradient-to-r from-cyan-400 to-blue-600 hover:from-cyan-300 hover:to-blue-500 text-slate-950 font-extrabold text-xs py-4 rounded-2xl transition-all shadow-lg shadow-cyan-500/20 cursor-pointer">
-        Tutup
-      </button>
-    </div>
-  </div>
-
-
-  <div id="sendConfirmModal" class="modal-shell" role="dialog" aria-modal="true"><div class="glass-card popup-card w-full max-w-lg rounded-[2rem] p-6 flex flex-col gap-5 relative">
-    <div><div class="text-[10px] text-cyan-400 font-bold tracking-widest">KONFIRMASI PENGIRIMAN</div><h3 class="text-lg font-extrabold mt-1">Periksa data sebelum dikirim</h3></div>
-    <div id="sendPreviewData" class="glass-inner rounded-2xl p-4 text-xs font-mono whitespace-pre-wrap"></div><div id="destinationPreview" class="grid gap-2"></div><div id="duplicateWarning" style="display:none" class="rounded-2xl p-4 bg-rose-500/10 border border-rose-500/30 text-xs text-rose-200"></div>
-    <div class="grid grid-cols-2 gap-3"><button onclick="closeSendConfirm()" class="glass-inner py-3 rounded-2xl font-bold text-xs">BATAL</button><button id="confirmSendBtn" onclick="confirmSendNow()" class="bg-gradient-to-r from-cyan-400 to-blue-600 text-slate-950 py-3 rounded-2xl font-extrabold text-xs">YA, KIRIM SEKARANG</button></div>
-  </div></div>
   <div id="sendResultModal" class="modal-shell" role="dialog" aria-modal="true"><div class="send-result-card glass-card popup-card w-full rounded-[1.7rem] flex flex-col"><div class="flex items-start justify-between gap-3"><div><div class="text-[9px] text-emerald-400 font-bold tracking-[.2em]">HASIL PENGIRIMAN</div><h3 class="text-base font-extrabold mt-1">Status setiap website & sistem</h3><div id="resultSummary" class="result-summary"></div></div><button onclick="document.getElementById('sendResultModal').classList.remove('open')" class="w-9 h-9 shrink-0 rounded-xl glass-inner"><i class="fa-solid fa-xmark"></i></button></div><div id="systemResultList" class="grid gap-2.5"></div><button onclick="document.getElementById('sendResultModal').classList.remove('open')" class="glass-inner py-2.5 rounded-xl font-bold text-[10px]">TUTUP</button></div></div>
 
 

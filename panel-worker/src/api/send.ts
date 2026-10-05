@@ -219,13 +219,21 @@ export async function retryFailedSystem(
 export async function sendToPanelZOnly(env: Env, token: string, market: string, angka: string) {
 	const session = await requireSession(env, token);
 	const profile = session.profile;
-	let last = "Website tidak ditemukan";
+	// Hasil SETIAP website dikumpulkan -- dulu cuma hasil website terakhir yang
+	// disimpan, jadi kegagalan di website sebelumnya tertutup "Berhasil".
+	const results: { website: string; msg: string }[] = [];
 	for (const website of profile.websites) {
 		const acc = await getSiteAccount(env, website);
-		if (!acc) continue;
-		last = await sendCustomPanelZ(market, angka, acc.panelz);
+		// Website tanpa Panel-Z memang tidak dikirimi -- bukan kegagalan.
+		if (!acc || !acc.panelz.url || !acc.panelz.user) continue;
+		results.push({ website, msg: await sendCustomPanelZ(market, angka, acc.panelz) });
 	}
-	const success = last.includes("Berhasil");
+	const success = results.length > 0 && results.every((r) => r.msg.includes("Berhasil"));
+	const last = !results.length
+		? "Panel-Z belum dikonfigurasi untuk website akun ini"
+		: results.length === 1
+			? results[0].msg
+			: results.map((r) => `${r.website}: ${r.msg}`).join(" | ");
 	await logActivity(
 		env,
 		profile.username,
