@@ -1,4 +1,5 @@
 // Akses D1: profil user + settings/maintenance. Port getUserProfile_ / getMaintenanceSettings_.
+import { parseMenus, type MenuKey } from "./menus";
 
 export interface UserProfile {
 	id: number;
@@ -11,11 +12,36 @@ export interface UserProfile {
 	passwordHash: string;
 	failedLogin: number;
 	lockedUntil: string | null; // "yyyy-MM-dd HH:mm:ss" GMT+7 atau null
+	menus: MenuKey[] | null; // null = default semua menu role-nya (lihat lib/menus.ts)
 }
 
 const USER_PROFILE_COLUMNS = `id, username, password_hash, websites,
 	        perm_telegram, perm_linktree, perm_panelz,
-	        role, status, display_name, failed_login, locked_until`;
+	        role, status, display_name, failed_login, locked_until, menus`;
+
+// Kolom users.menus ditambahkan sesudah database produksi berjalan. Daripada
+// butuh migrasi manual, kolom dibuat otomatis saat query pertama menemukan
+// kolom itu belum ada (sekali per isolate), lalu query diulang.
+let menusColumnReady = false;
+export async function ensureUserMenusColumn(env: Env): Promise<void> {
+	if (menusColumnReady) return;
+	try {
+		await env.DB.prepare(`ALTER TABLE users ADD COLUMN menus TEXT NOT NULL DEFAULT ''`).run();
+	} catch {
+		/* kolom sudah ada */
+	}
+	menusColumnReady = true;
+}
+export async function withUserMenusColumn<T>(env: Env, fn: () => Promise<T>): Promise<T> {
+	try {
+		return await fn();
+	} catch (e) {
+		if (!/no such column: menus/i.test(String(e instanceof Error ? e.message : e))) throw e;
+		menusColumnReady = false;
+		await ensureUserMenusColumn(env);
+		return fn();
+	}
+}
 
 function rowToProfile(row: Record<string, unknown>): UserProfile {
 	let sites: string[] = [];
@@ -43,15 +69,18 @@ function rowToProfile(row: Record<string, unknown>): UserProfile {
 		passwordHash: String(row.password_hash ?? ""),
 		failedLogin: Number(row.failed_login ?? 0),
 		lockedUntil: (row.locked_until as string) || null,
+		menus: parseMenus(row.menus),
 	};
 }
 
 export async function getUserProfile(env: Env, username: string): Promise<UserProfile | null> {
 	const lc = String(username ?? "").trim().toLowerCase();
 	if (!lc) return null;
-	const row = await env.DB.prepare(`SELECT ${USER_PROFILE_COLUMNS} FROM users WHERE username_lc = ?`)
-		.bind(lc)
-		.first<Record<string, unknown>>();
+	const row = await withUserMenusColumn(env, () =>
+		env.DB.prepare(`SELECT ${USER_PROFILE_COLUMNS} FROM users WHERE username_lc = ?`)
+			.bind(lc)
+			.first<Record<string, unknown>>(),
+	);
 	return row ? rowToProfile(row) : null;
 }
 
@@ -70,11 +99,11 @@ export async function getUserProfiles(env: Env, usernames: string[]): Promise<Ma
 	// walau daftar usernya panjang (batas D1/SQLite default 100 variabel).
 	for (let i = 0; i < lcs.length; i += 50) {
 		const chunk = lcs.slice(i, i + 50);
-		const res = await env.DB.prepare(
-			`SELECT ${USER_PROFILE_COLUMNS} FROM users WHERE username_lc IN (${chunk.map(() => "?").join(",")})`,
-		)
-			.bind(...chunk)
-			.all<Record<string, unknown>>();
+		const res = await withUserMenusColumn(env, () =>
+			env.DB.prepare(`SELECT ${USER_PROFILE_COLUMNS} FROM users WHERE username_lc IN (${chunk.map(() => "?").join(",")})`)
+				.bind(...chunk)
+				.all<Record<string, unknown>>(),
+		);
 		for (const row of res.results ?? []) {
 			const p = rowToProfile(row);
 			out.set(p.username.toLowerCase(), p);

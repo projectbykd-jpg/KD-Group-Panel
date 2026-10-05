@@ -17,7 +17,7 @@ import {
 } from "../lib/invest";
 
 async function investUser(env: Env, token: string): Promise<string> {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: "invest" });
 	return s.username;
 }
 

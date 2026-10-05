@@ -197,7 +197,7 @@ async function runSend(env: Env, session: Session, rawText: string, opts: SendOp
 }
 
 export async function smartAutoSendFast(env: Env, token: string, rawText: string) {
-	const session = await requireSession(env, token);
+	const session = await requireSession(env, token, { menu: "result" });
 	return runSend(env, session, rawText, { targets: SYSTEMS, forceDuplicate: false });
 }
 
@@ -208,7 +208,7 @@ export async function retryFailedSystem(
 	systemName: string,
 	websiteName?: string,
 ) {
-	const session = await requireSession(env, token);
+	const session = await requireSession(env, token, { menu: "result" });
 	return runSend(env, session, rawText, {
 		targets: [String(systemName ?? "").toLowerCase()],
 		forceDuplicate: true,
@@ -217,7 +217,7 @@ export async function retryFailedSystem(
 }
 
 export async function sendToPanelZOnly(env: Env, token: string, market: string, angka: string) {
-	const session = await requireSession(env, token);
+	const session = await requireSession(env, token, { menu: "result" });
 	const profile = session.profile;
 	// Hasil SETIAP website dikumpulkan -- dulu cuma hasil website terakhir yang
 	// disimpan, jadi kegagalan di website sebelumnya tertutup "Berhasil".

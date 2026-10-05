@@ -10,6 +10,7 @@
 //      server (lihat catatan di lib/livechat-bot.ts).
 import { requireSession } from "./auth";
 import { constEq } from "../lib/crypto";
+import type { MenuKey } from "../lib/menus";
 import { logActivity } from "../lib/activity";
 import {
 	deleteTemplate,
@@ -23,8 +24,8 @@ import {
 	syncSessionsFromScript,
 } from "../lib/livechat-bot";
 
-async function gatePanel(env: Env, token: string) {
-	const s = await requireSession(env, token);
+async function gatePanel(env: Env, token: string, menu: MenuKey) {
+	const s = await requireSession(env, token, { menu });
 	if (s.profile.role !== "ADMIN" && s.profile.role !== "OPERATOR") {
 		throw new Error("Menu Live Chat hanya untuk ADMIN atau OPERATOR.");
 	}
@@ -39,12 +40,12 @@ function gateBotKey(env: Env, key: string) {
 // --- Panel ---
 
 export async function livechatListSessions(env: Env, token: string) {
-	await gatePanel(env, token);
+	await gatePanel(env, token, "livechat-sessions");
 	return { success: true, sessions: await listSessions(env) };
 }
 
 export async function livechatSetBotEnabled(env: Env, token: string, sessionKey: string, enabled: boolean) {
-	const s = await gatePanel(env, token);
+	const s = await gatePanel(env, token, "livechat-sessions");
 	if (!sessionKey) throw new Error("session_key wajib.");
 	await setSessionBot(env, sessionKey, enabled);
 	await logActivity(env, s.username, "LIVE CHAT BOT", `${enabled ? "Aktifkan" : "Matikan"} auto-reply untuk sesi ${sessionKey}`, "BERHASIL", "");
@@ -52,12 +53,12 @@ export async function livechatSetBotEnabled(env: Env, token: string, sessionKey:
 }
 
 export async function livechatListTemplates(env: Env, token: string) {
-	await gatePanel(env, token);
+	await gatePanel(env, token, "livechat-templates");
 	return { success: true, templates: await listTemplates(env) };
 }
 
 export async function livechatSaveTemplate(env: Env, token: string, data: Record<string, unknown>) {
-	const s = await gatePanel(env, token);
+	const s = await gatePanel(env, token, "livechat-templates");
 	await saveTemplate(env, {
 		id: data.id ? Number(data.id) : undefined,
 		replyText: String(data.replyText ?? data.reply_text ?? ""),
@@ -69,7 +70,7 @@ export async function livechatSaveTemplate(env: Env, token: string, data: Record
 }
 
 export async function livechatDeleteTemplate(env: Env, token: string, id: number) {
-	const s = await gatePanel(env, token);
+	const s = await gatePanel(env, token, "livechat-templates");
 	if (!id) throw new Error("id template wajib.");
 	await deleteTemplate(env, id);
 	await logActivity(env, s.username, "LIVE CHAT TEMPLATE", "Hapus template balasan #" + id, "BERHASIL", "");
@@ -77,7 +78,7 @@ export async function livechatDeleteTemplate(env: Env, token: string, id: number
 }
 
 export async function livechatRecentLogs(env: Env, token: string) {
-	await gatePanel(env, token);
+	await gatePanel(env, token, "livechat-sessions");
 	return { success: true, logs: await recentLogs(env) };
 }
 

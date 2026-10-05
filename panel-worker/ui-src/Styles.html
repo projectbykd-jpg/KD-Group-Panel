@@ -2457,6 +2457,22 @@ table tbody tr:hover td{
 .offline-banner i{margin-right:6px}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 
+/* ===== Admin -> Users: Akses Menu ===== */
+.menu-access{display:flex;flex-direction:column;gap:12px;padding:14px;border-radius:18px;background:rgba(2,6,23,.38);border:1px solid rgba(148,163,184,.12)}
+.menu-access.is-locked .menu-access-grid{opacity:.45;pointer-events:none}
+.menu-access-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.menu-access-title{font-size:12px;font-weight:800;color:#f1f5f9;display:flex;align-items:center;gap:7px}
+.menu-access-title i{color:#fbbf24}
+.menu-access-hint{font-size:11px;color:#94a3b8;margin-top:3px}
+.menu-access-all{display:inline-flex;align-items:center;gap:8px;font-size:11px;font-weight:800;color:#e2e8f0;padding:7px 11px;border-radius:12px;background:rgba(148,163,184,.08);border:1px solid rgba(148,163,184,.14);cursor:pointer}
+.menu-access-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+.menu-access-group{display:flex;flex-direction:column;gap:6px;padding:10px;border-radius:14px;background:rgba(15,23,42,.55);border:1px solid rgba(148,163,184,.08)}
+.menu-access-group-name{font-size:9px;font-weight:900;letter-spacing:.14em;text-transform:uppercase;color:#64748b}
+.menu-access-item{display:flex;align-items:center;gap:9px;min-height:30px;font-size:12px;font-weight:700;color:#e2e8f0;cursor:pointer}
+.menu-access-item input,.menu-access-all input{width:15px;height:15px;accent-color:#22d3ee}
+.user-menu-chip{margin-top:5px;display:inline-flex;align-items:center;gap:5px;font-size:9px;font-weight:800;color:#94a3b8}
+.user-menu-chip i{color:#fbbf24;font-size:8px}
+
 /* ===== Koneksi Blogger (BOT) ===== */
 .blogger-alert{display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:18px;
   background:linear-gradient(135deg,rgba(244,63,94,.14),rgba(244,63,94,.06));border:1px solid rgba(251,113,133,.32)}

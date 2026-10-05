@@ -1279,15 +1279,24 @@
         <label class="text-xs text-slate-400">Password<input id="editPassword" type="text" class="glass-inner rounded-2xl px-4 py-3 text-white w-full mt-1" autocomplete="new-password" placeholder="Kosongkan jika tidak diubah"></label>
         <label class="text-xs text-slate-400 md:col-span-2">Website<input id="editWebsite" class="glass-inner rounded-2xl px-4 py-3 text-white w-full mt-1" placeholder="Contoh: HUGO,FOLA"></label>
         <label class="text-xs text-slate-400">Nama Pengguna<input id="editDisplayName" class="glass-inner rounded-2xl px-4 py-3 text-white w-full mt-1"></label>
-        <label class="text-xs text-slate-400">Role<select id="editRole" class="glass-inner rounded-2xl px-4 py-3 text-white w-full mt-1"><option>OPERATOR</option><option>ADMIN</option><option>VIEWER</option><option>BOT</option></select></label>
+        <label class="text-xs text-slate-400">Role<select id="editRole" onchange="syncUserMenuAccessState()" class="glass-inner rounded-2xl px-4 py-3 text-white w-full mt-1"><option>OPERATOR</option><option>ADMIN</option><option>VIEWER</option><option>BOT</option></select></label>
         <label class="text-xs text-slate-400">Status Akun<select id="editStatus" class="glass-inner rounded-2xl px-4 py-3 text-white w-full mt-1"><option>AKTIF</option><option>NONAKTIF</option><option>TERKUNCI</option></select></label>
-        <label class="text-xs text-slate-400">Session Timeout (menit)<input id="editTimeout" type="number" min="5" max="1440" class="glass-inner rounded-2xl px-4 py-3 text-white w-full mt-1" value="60"></label>
         <label class="text-xs text-slate-400 md:col-span-2">Catatan Admin<textarea id="editNote" rows="2" class="glass-inner rounded-2xl px-4 py-3 text-white w-full mt-1"></textarea></label>
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <label class="glass-inner rounded-2xl p-4 flex items-center gap-3 text-xs font-bold"><input id="editTelegram" type="checkbox" class="w-4 h-4"> Telegram</label>
         <label class="glass-inner rounded-2xl p-4 flex items-center gap-3 text-xs font-bold"><input id="editLinktree" type="checkbox" class="w-4 h-4"> LinkTree</label>
         <label class="glass-inner rounded-2xl p-4 flex items-center gap-3 text-xs font-bold"><input id="editPanelz" type="checkbox" class="w-4 h-4"> Panel-Z</label>
+      </div>
+      <div class="menu-access" id="editMenuAccess">
+        <div class="menu-access-head">
+          <div>
+            <div class="menu-access-title"><i class="fa-solid fa-key"></i>Akses Menu</div>
+            <div id="editMenuAccessHint" class="menu-access-hint">Centang menu yang boleh dibuka user ini. Dashboard selalu tersedia.</div>
+          </div>
+          <label class="menu-access-all"><input id="editMenusAll" type="checkbox" onchange="toggleAllUserMenus(this.checked)"> Semua menu</label>
+        </div>
+        <div id="editMenusList" class="menu-access-grid"></div>
       </div>
       <div id="userModalError" class="text-xs text-rose-300 hidden"></div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3"><button onclick="closeUserModal()" class="glass-inner py-3.5 rounded-2xl text-xs font-bold">BATAL</button><button id="saveUserBtn" onclick="saveUserFromModal()" class="bg-gradient-to-r from-emerald-400 to-teal-500 text-slate-950 py-3.5 rounded-2xl text-xs font-extrabold"><i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN USER</button></div>

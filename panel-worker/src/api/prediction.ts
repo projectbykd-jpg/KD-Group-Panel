@@ -27,22 +27,22 @@ import { listActiveSessions } from "../lib/session";
 const now7 = () => new Date(Date.now() + 7 * 60 * 60 * 1000);
 
 export async function getPredictionStatusData(env: Env, token: string) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: "prediction" });
 	return getPredictionStatusDataInternal(env, s.profile);
 }
 
 export async function generatePredictionCopyBundle(env: Env, index: number, token: string) {
-	const s = await requireSession(env, token);
+	const s = await requireSession(env, token, { menu: "prediction" });
 	return generatePredictionCopyBundleInternal(env, Number(index), s.profile);
 }
 
 export async function generateClosingPredictionCopy(env: Env, token: string, slot: string) {
-	const s = await requireSession(env, token);
+	const s = await requireSession(env, token, { menu: "prediction" });
 	return generateClosingPredictionCopyInternal(s.profile, String(slot || ""));
 }
 
 export async function sendPredictionAuto(env: Env, index: number, token: string, onlyWebsites?: string[]) {
-	const s = await requireSession(env, token);
+	const s = await requireSession(env, token, { menu: "prediction" });
 	const scheduleIndex = Number(index);
 	const config = JADWAL_PREDIKSI_CONFIG[scheduleIndex];
 	if (!config) {
@@ -66,7 +66,7 @@ export async function sendPredictionAuto(env: Env, index: number, token: string,
 }
 
 export async function sendClosingPredictionAuto(env: Env, token: string, onlyWebsites: string[] | undefined, slot: string) {
-	const s = await requireSession(env, token);
+	const s = await requireSession(env, token, { menu: "prediction" });
 	const activeSlot = normalizeClosingSlot(String(slot || ""));
 	const ctx = validatePredictionContext(s.profile, onlyWebsites ?? null);
 	if (ctx.error) return { success: false, blocked: true, message: ctx.error, websiteResults: [], kind: "closing" };

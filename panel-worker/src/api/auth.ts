@@ -5,6 +5,7 @@ import { createSession, deleteSession, loadSession } from "../lib/session";
 import { logActivity } from "../lib/activity";
 import { tsNow, tsPlusMinutes } from "../lib/time";
 import { clearLoginFailures, loginBlockedMinutes, recordLoginFailure } from "../lib/login-throttle";
+import { hasMenu, menuLabel, type MenuKey } from "../lib/menus";
 
 const SERVER_VERSION = "PANEL-WORKER-1.0";
 
@@ -17,6 +18,8 @@ export function publicProfile(p: UserProfile, token: string, maintenance: Mainte
 		displayName: p.displayName,
 		permissions: p.permissions,
 		websites: p.websites,
+		// null = semua menu (default); array = hanya menu ini (+ Dashboard).
+		menus: p.role === "ADMIN" ? null : p.menus,
 		maintenance,
 		sessionToken: token,
 		serverVersion: SERVER_VERSION,
@@ -108,7 +111,7 @@ export interface Session {
 export async function requireSession(
 	env: Env,
 	token: string,
-	opts: { admin?: boolean; ignoreMaintenance?: boolean; allowBot?: boolean } = {},
+	opts: { admin?: boolean; ignoreMaintenance?: boolean; allowBot?: boolean; menu?: MenuKey | readonly MenuKey[] } = {},
 ): Promise<Session> {
 	// Status maintenance TIDAK bergantung pada sesi/profil -> dimulai barengan
 	// dengan pembacaan sesi, bukan menunggu giliran sesudahnya. Fungsi ini jalan
@@ -137,6 +140,11 @@ export async function requireSession(
 	// (opts.allowBot). Semua handler lama otomatis menolak BOT.
 	if (p.role === "BOT" && !opts.allowBot) {
 		throw new Error("Akun BOT hanya bisa mengakses fitur BOT.");
+	}
+	// Hak akses menu per user (diatur admin). Pesannya sengaja tidak memuat
+	// kata "sesi"/"akun sedang" supaya panel tidak mengira sesinya habis.
+	if (opts.menu && !hasMenu(p, opts.menu)) {
+		throw new Error(`Menu ${menuLabel(opts.menu)} tidak diizinkan untuk akun ini. Minta admin membukanya di Admin -> Users.`);
 	}
 	return { token: String(token), username: p.username, profile: p, maintenance };
 }

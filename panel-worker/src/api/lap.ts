@@ -2,6 +2,8 @@
 // Fase A: kredensial (Setting) + Lap Motion + Lap Mozart (API JSON, jalan langsung
 // di Worker). Lap Admin (scraper berat) menyusul lewat GitHub Actions.
 import { requireSession } from "./auth";
+import { hasMenu, LAP_MENU_KEYS, type MenuKey } from "../lib/menus";
+import type { UserProfile } from "../lib/db";
 import { constEq } from "../lib/crypto";
 import { logActivity } from "../lib/activity";
 import { tsNow } from "../lib/time";
@@ -32,8 +34,22 @@ function credsForClient(c: LapCreds) {
 	};
 }
 
+// Modul hasil laporan -> menu pemiliknya (dipakai menyaring lapGetResults
+// supaya user yang cuma boleh Lap Motion tidak ikut menarik data Lap Admin).
+function lapModuleMenu(module: string): MenuKey {
+	const m = module.replace(/^_/, "").toLowerCase();
+	if (m.startsWith("motion")) return "lap-motion";
+	if (m.startsWith("mozart")) return "lap-mozart";
+	return "lap-admin";
+}
+function filterLapResults<T extends Record<string, unknown>>(profile: UserProfile, results: T): T {
+	const out: Record<string, unknown> = {};
+	for (const [k, v] of Object.entries(results || {})) if (hasMenu(profile, lapModuleMenu(k))) out[k] = v;
+	return out as T;
+}
+
 export async function lapGetConfig(env: Env, token: string) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: LAP_MENU_KEYS });
 	// Konfigurasi dipisah dari hasil. Snapshot laporan bisa besar; jangan ikut
 	// ditarik setiap kali operator membuka/pindah menu.
 	const creds = await lapLoadCreds(env, s.username);
@@ -41,13 +57,13 @@ export async function lapGetConfig(env: Env, token: string) {
 }
 
 export async function lapGetResults(env: Env, token: string, modules: unknown) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
-	const wanted = Array.isArray(modules) ? modules.map(String) : [];
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: LAP_MENU_KEYS });
+	const wanted = (Array.isArray(modules) ? modules.map(String) : []).filter((m) => hasMenu(s.profile, lapModuleMenu(m)));
 	return { success: true, results: await lapLoadResultsModules(env, s.username, wanted) };
 }
 
 export async function lapSaveConfig(env: Env, token: string, data: Record<string, unknown>) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: LAP_MENU_KEYS });
 	const c = await lapSaveCreds(env, s.username, {
 		linkAdmin: str(data.linkAdmin),
 		cookieAdmin: str(data.cookiesAdmin ?? data.cookieAdmin),
@@ -84,7 +100,7 @@ export async function lapMotionImport(
 	depoCreateRows: unknown,
 	wdRows: unknown,
 ) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: "lap-motion" });
 	const listPaid = (Array.isArray(depoPaidRows) ? depoPaidRows : []) as Rec[];
 	const listCreate = (Array.isArray(depoCreateRows) ? depoCreateRows : []) as Rec[];
 	const listWd = (Array.isArray(wdRows) ? wdRows : []) as Rec[];
@@ -281,7 +297,7 @@ export async function lapRunMozart(
 	endDate: string,
 	_opts: { depo?: boolean; wd?: boolean; panelId?: number } = {},
 ) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: "lap-mozart" });
 	const c = await lapLoadCreds(env, s.username);
 	if (!c.cookieMozart) return { success: false, message: "Cookie Mozart belum diisi di menu Setting!" };
 	if (!env.MOZART_GAS_URL || !env.MOZART_GAS_KEY) {
@@ -473,7 +489,7 @@ export async function lapMozartImport(
 	accountsRaw?: unknown,
 	panelsRaw?: unknown,
 ) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: "lap-mozart" });
 	const dRaw = Array.isArray(depositRows) ? (depositRows as Rec[]) : [];
 	const wRaw = Array.isArray(withdrawRows) ? (withdrawRows as Rec[]) : [];
 	const accIdx = buildAccIndex(accountsRaw);
@@ -627,7 +643,7 @@ async function dispatchScrapeJob(
 }
 
 export async function lapRunAdmin(env: Env, token: string, startDate: string, endDate: string) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: "lap-admin" });
 	const c = await lapLoadCreds(env, s.username);
 	if (!c.linkAdmin || !c.cookieAdmin) return { success: false, message: "Link & Cookie Admin belum diisi di menu Setting!" };
 	const r = await dispatchScrapeJob(env, s.username, "admin", startDate, endDate, c.linkAdmin);
@@ -638,7 +654,7 @@ export async function lapRunAdmin(env: Env, token: string, startDate: string, en
 }
 
 export async function lapAdminStatus(env: Env, token: string, jobId: string) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: "lap-admin" });
 	const row = await getTurso(env).prepare(`SELECT * FROM lap_job WHERE id = ? AND username = ?`)
 		.bind(jobId, s.username)
 		.first<Record<string, string>>();
@@ -649,7 +665,7 @@ export async function lapAdminStatus(env: Env, token: string, jobId: string) {
 		message: row.message,
 		updatedAt: row.updated_at,
 	};
-	if (row.status === "done") out.results = await lapLoadResults(env, s.username);
+	if (row.status === "done") out.results = filterLapResults(s.profile, await lapLoadResults(env, s.username));
 	return out;
 }
 

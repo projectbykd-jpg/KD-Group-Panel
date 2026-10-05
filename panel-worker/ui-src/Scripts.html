@@ -1036,6 +1036,10 @@
       if (isBot && !botRoute) page = 'bot-dashboard';
       if (!isBot && botRoute) page = 'home';
       if (page === 'admin' && !isAdmin) page = isBot ? 'bot-dashboard' : 'home';
+      if (!isBot && currentProfile && !menuAllowed(page)) {
+        toast('Menu ini tidak diizinkan untuk akun Anda. Hubungi admin.');
+        page = 'home';
+      }
       const pages = {
         home:'main-panel', result:'result-page', prediction:'prediction-page', activity:'activity-page',
         admin:'admin-page', invest:'invest-page', 'pga-pending':'pga-pending-page',
@@ -3726,6 +3730,68 @@
     }
     document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document.getElementById("popupCloseBtn").style.display !== "none") closeActionPopup(); });
 
+    // ===== Hak akses menu per user (diatur di Admin -> Users) =====
+    // Cermin src/lib/menus.ts. Server tetap menolak menu yang tidak diizinkan;
+    // bagian ini hanya menyembunyikan tombolnya supaya rapi.
+    const MENU_ACCESS_ITEMS = [
+      { key: 'result', label: 'Result', group: 'Utama' },
+      { key: 'prediction', label: 'Prediksi', group: 'Utama' },
+      { key: 'invest', label: 'AutoCheck Invest', group: 'Utama' },
+      { key: 'lap-admin', label: 'Lap Admin', group: 'Laporan Harian' },
+      { key: 'lap-motion', label: 'Lap Motion', group: 'Laporan Harian' },
+      { key: 'pga-pending', label: 'PGA Pending', group: 'Laporan Harian' },
+      { key: 'lap-mozart', label: 'Lap Mozart', group: 'Laporan Harian' },
+      { key: 'activity', label: 'Aktivitas', group: 'Lainnya' },
+      { key: 'livechat-sessions', label: 'Sesi Chat', group: 'Live Chat' },
+      { key: 'livechat-templates', label: 'Template Balasan', group: 'Live Chat' }
+    ];
+    const MENU_ACCESS_KEYS = MENU_ACCESS_ITEMS.map(m => m.key);
+    function menuAllowed(page) {
+      const role = String((currentProfile && currentProfile.role) || '').trim().toUpperCase();
+      if (page === 'home') return true;
+      if (page === 'admin') return role === 'ADMIN';
+      if (BOT_PAGES.includes(page)) return role === 'BOT';
+      if (role === 'ADMIN') return true;
+      if (LIVECHAT_PAGES.includes(page) && role !== 'OPERATOR') return false;
+      const menus = currentProfile && Array.isArray(currentProfile.menus) ? currentProfile.menus : null;
+      if (!menus) return true;
+      if (page === 'lap-setting') return ['lap-admin', 'lap-motion', 'lap-mozart'].some(k => menus.includes(k));
+      return menus.includes(page);
+    }
+    function setMenuVisible(el, yes) {
+      if (!el) return;
+      if (yes) { el.hidden = false; el.style.removeProperty('display'); }
+      else { el.hidden = true; el.style.setProperty('display', 'none', 'important'); }
+    }
+    function applyMenuAccess() {
+      if (!currentProfile) return;
+      const role = String(currentProfile.role || '').trim().toUpperCase();
+      if (role === 'BOT') return; // menu BOT diatur applyProfileUI
+      NAV_KEYS.forEach(key => {
+        if (key === 'home' || key === 'admin' || BOT_PAGES.includes(key)) return;
+        setMenuVisible(document.getElementById('nav-' + key), menuAllowed(key));
+      });
+      // Grup sidebar disembunyikan kalau semua isinya tidak boleh.
+      [['utama', ['result', 'prediction', 'invest']],
+       ['lapor', ['lap-admin', 'lap-motion', 'pga-pending', 'lap-mozart', 'lap-setting']],
+       ['livechat', LIVECHAT_PAGES]].forEach(([group, keys]) => {
+        const any = keys.some(menuAllowed);
+        setMenuVisible(document.querySelector('.nav-group[data-group="' + group + '"]'), any);
+        const mob = document.querySelector('.mobile-nav-item[data-mobile-group="' + group + '"]');
+        if (mob) setMenuVisible(mob, any);
+      });
+      setMenuVisible(document.querySelector('.mobile-nav-item[data-mobile-page="activity"]'), menuAllowed('activity'));
+      // "Lainnya" di HP berisi Live Chat & Admin -- sembunyikan kalau kosong.
+      setMenuVisible(document.querySelector('.mobile-nav-item[data-mobile-group="more"]'), role === 'ADMIN' || LIVECHAT_PAGES.some(menuAllowed));
+      // Akses cepat di Dashboard.
+      document.querySelectorAll('#main-panel [onclick^="switchPage("]').forEach(el => {
+        const m = String(el.getAttribute('onclick')).match(/switchPage\('([\w-]+)'\)/);
+        if (m) setMenuVisible(el, menuAllowed(m[1]));
+      });
+    }
+    window.applyMenuAccess = applyMenuAccess;
+    window.menuAllowed = menuAllowed;
+
     function applyProfileUI() {
       const role = String((currentProfile && currentProfile.role) || '').trim().toUpperCase();
       const isAdmin = role === 'ADMIN';
@@ -3780,6 +3846,7 @@
       document.querySelectorAll('.bot-only, [data-role-only="BOT"]').forEach(el => setRoleOnly(el, false));
       document.querySelectorAll('.activity-admin-only').forEach(el => setRoleOnly(el, isAdmin, ''));
 
+      applyMenuAccess();
       restoreNavGroups();
       const filterGrid = document.getElementById('activityFilterGrid');
       if (filterGrid) filterGrid.classList.toggle('activity-admin-grid', isAdmin);
@@ -4341,7 +4408,7 @@
           <td class="font-extrabold text-white" title="${escapeHtml(u.username)}">${escapeHtml(u.username)}</td>
           <td title="${escapeHtml(u.displayName||'-')}">${escapeHtml(u.displayName||'-')}</td>
           <td title="${escapeHtml(u.websites||'-')}">${escapeHtml(u.websites||'-')}</td>
-          <td><span class="px-2 py-1 rounded-full bg-amber-500/10 text-amber-300 text-[9px] font-bold">${escapeHtml(u.role)}</span></td>
+          <td><span class="px-2 py-1 rounded-full bg-amber-500/10 text-amber-300 text-[9px] font-bold">${escapeHtml(u.role)}</span><div class="user-menu-chip" title="Menu yang boleh dibuka"><i class="fa-solid fa-key"></i>Menu ${escapeHtml(userMenuSummary(u))}</div></td>
           <td><span class="px-2 py-1 rounded-full ${u.status==='AKTIF'?'bg-emerald-500/10 text-emerald-300':'bg-rose-500/10 text-rose-300'} text-[9px] font-bold">${escapeHtml(u.status)}</span></td>
           <td>${boolBadge(u.telegram,'')}</td>
           <td>${boolBadge(u.linktree,'')}</td>
@@ -4447,21 +4514,68 @@
       document.getElementById('editDisplayName').value=u?u.displayName:'';
       document.getElementById('editRole').value=u?u.role:'OPERATOR';
       document.getElementById('editStatus').value=u?u.status:'AKTIF';
-      document.getElementById('editTimeout').value=u?u.timeout:60;
       document.getElementById('editNote').value=u?u.note:'';
       document.getElementById('editTelegram').checked=u?u.telegram:true;
       document.getElementById('editLinktree').checked=u?u.linktree:true;
       document.getElementById('editPanelz').checked=u?u.panelz:true;
+      renderUserMenuAccess(u ? u.menus : null);
       document.getElementById('userModalError').classList.add('hidden');
       document.getElementById('userEditModal').style.display='flex';document.body.classList.add('modal-open');
     }
+    // Checklist "Akses Menu" di modal user. null = semua menu (default).
+    function renderUserMenuAccess(menus) {
+      const list = document.getElementById('editMenusList');
+      if (!list) return;
+      const all = !Array.isArray(menus);
+      const groups = [];
+      MENU_ACCESS_ITEMS.forEach(m => { let g = groups.find(x => x.name === m.group); if (!g) groups.push(g = { name: m.group, items: [] }); g.items.push(m); });
+      list.innerHTML = groups.map(g => '<div class="menu-access-group"><div class="menu-access-group-name">' + escapeHtml(g.name) + '</div>' +
+        g.items.map(m => '<label class="menu-access-item"><input type="checkbox" value="' + escapeHtml(m.key) + '"' + (all || menus.includes(m.key) ? ' checked' : '') +
+          ' onchange="syncUserMenusAllBox()"><span>' + escapeHtml(m.label) + '</span></label>').join('') + '</div>').join('');
+      syncUserMenusAllBox();
+      syncUserMenuAccessState();
+    }
+    function toggleAllUserMenus(on) {
+      document.querySelectorAll('#editMenusList input[type=checkbox]').forEach(cb => { cb.checked = on; });
+      syncUserMenusAllBox();
+    }
+    function syncUserMenusAllBox() {
+      const boxes = Array.from(document.querySelectorAll('#editMenusList input[type=checkbox]'));
+      const allBox = document.getElementById('editMenusAll');
+      if (!allBox) return;
+      const n = boxes.filter(b => b.checked).length;
+      allBox.checked = n === boxes.length;
+      allBox.indeterminate = n > 0 && n < boxes.length;
+    }
+    function syncUserMenuAccessState() {
+      const role = String((document.getElementById('editRole') || {}).value || '').toUpperCase();
+      const box = document.getElementById('editMenuAccess');
+      const hint = document.getElementById('editMenuAccessHint');
+      const locked = role === 'ADMIN' || role === 'BOT';
+      if (box) box.classList.toggle('is-locked', locked);
+      document.querySelectorAll('#editMenuAccess input[type=checkbox]').forEach(cb => { cb.disabled = locked; });
+      if (hint) hint.textContent = role === 'ADMIN' ? 'ADMIN selalu bisa membuka semua menu.'
+        : role === 'BOT' ? 'Akun BOT hanya bisa membuka menu BOT.'
+        : 'Centang menu yang boleh dibuka user ini. Dashboard selalu tersedia.';
+    }
+    function collectUserMenus() {
+      const boxes = Array.from(document.querySelectorAll('#editMenusList input[type=checkbox]'));
+      const keys = boxes.filter(b => b.checked).map(b => b.value);
+      return keys.length === boxes.length ? 'all' : keys;
+    }
+    function userMenuSummary(u) {
+      if (u.role === 'ADMIN') return 'Semua';
+      if (!Array.isArray(u.menus)) return 'Semua';
+      return u.menus.length + '/' + MENU_ACCESS_ITEMS.length;
+    }
+
     function closeUserModal(){document.getElementById('userEditModal').style.display='none';document.body.classList.remove('modal-open');}
     function saveUserFromModal(){
       const btn=document.getElementById('saveUserBtn'),err=document.getElementById('userModalError');err.classList.add('hidden');
-      const payload={originalUsername:document.getElementById('userOriginalUsername').value,username:document.getElementById('editUsername').value.trim(),password:document.getElementById('editPassword').value,websites:document.getElementById('editWebsite').value.trim(),displayName:document.getElementById('editDisplayName').value.trim(),role:document.getElementById('editRole').value,status:document.getElementById('editStatus').value,timeout:Number(document.getElementById('editTimeout').value||60),note:document.getElementById('editNote').value.trim(),telegram:document.getElementById('editTelegram').checked,linktree:document.getElementById('editLinktree').checked,panelz:document.getElementById('editPanelz').checked};
+      const payload={originalUsername:document.getElementById('userOriginalUsername').value,username:document.getElementById('editUsername').value.trim(),password:document.getElementById('editPassword').value,websites:document.getElementById('editWebsite').value.trim(),displayName:document.getElementById('editDisplayName').value.trim(),role:document.getElementById('editRole').value,status:document.getElementById('editStatus').value,menus:collectUserMenus(),note:document.getElementById('editNote').value.trim(),telegram:document.getElementById('editTelegram').checked,linktree:document.getElementById('editLinktree').checked,panelz:document.getElementById('editPanelz').checked};
       if(!payload.username||(!payload.originalUsername&&!payload.password)){err.textContent='Username dan password wajib diisi untuk akun baru.';err.classList.remove('hidden');return;}
       btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin mr-2"></i>MENYIMPAN...';
-      google.script.run.withSuccessHandler(res=>{btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN USER';closeUserModal();toast(res.message||'User berhasil disimpan');loadUsers(true);loadDashboard(true,'admin');}).withFailureHandler(e=>{btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN USER';err.textContent=(e&&e.message)||'Gagal menyimpan user';err.classList.remove('hidden');}).adminSaveUser(currentSessionToken,payload);
+      google.script.run.withSuccessHandler(res=>{btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN USER';if(apiFailed(res)){err.textContent=apiMessage(res,'Gagal menyimpan user');err.classList.remove('hidden');return;}closeUserModal();toast(res.message||'User berhasil disimpan');loadUsers(true);loadDashboard(true,'admin');}).withFailureHandler(e=>{btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN USER';err.textContent=(e&&e.message)||'Gagal menyimpan user';err.classList.remove('hidden');}).adminSaveUser(currentSessionToken,payload);
     }
 
     let centerNoticeResolver = null;
