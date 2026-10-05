@@ -33,7 +33,7 @@
     let resultData = {};
     let currentProfile = null;
     let pendingSendText = ""; let pendingPreview = null; let lastSendResult = null; let maintenanceState = false; let inactivityTimer; let adminUsersData = []; let activePredictionIndex = null; let activePredictionKind = "schedule"; let activeClosingSlot = ""; let lastPredictionPendingWebsites = [];
-    const activityViews = { activity:{page:1,pageSize:75}, admin:{page:1,pageSize:75} };
+    const activityView = { page:1, pageSize:75 };
 
     /* ===== FX: micro-interaction bergaya animejs.com (staggered reveal, count-up,
        spring pop). Semua opsional — kalau anime.js gagal dimuat atau user pilih
@@ -166,9 +166,9 @@
        Apps Script tak punya WebSocket/SSE, jadi panel polling 1 endpoint gabungan
        (getLivePanelData) dengan interval yang menyesuaikan keaktifan user & tab. */
     let currentPage = 'home';
-    let currentAdminPanel = 'dashboard';                    // tab admin yang sedang dibuka
-    const pageDataCache = { activity:null, admin:null };   // hasil render terakhir per halaman
-    const pageFetchedAt = { activity:0, admin:0, prediction:0, users:0, sesi:0 };
+    let currentAdminPanel = 'users';                        // tab admin yang sedang dibuka
+    const pageDataCache = { activity:null };               // hasil render terakhir per halaman
+    const pageFetchedAt = { activity:0, prediction:0, users:0, sesi:0, invest:0, bot:0 };
     let headerSummaryLoadedOnce = false;
     let livePollTimer = null;
     let livePollInFlight = false;
@@ -836,9 +836,9 @@
       clearLocalSession();
       stopLivePolling();
       stopInvestPolling();
-      clearTimeout(lapAdminPollTimer);
-      pageDataCache.activity = null; pageDataCache.admin = null;
-      pageFetchedAt.activity = 0; pageFetchedAt.admin = 0; pageFetchedAt.prediction = 0;
+      lapResetForLogout();
+      pageDataCache.activity = null;
+      pageFetchedAt.activity = 0; pageFetchedAt.prediction = 0;
       headerSummaryLoadedOnce = false;
       clearTimeout(inactivityTimer);
       document.getElementById('user').value = '';
@@ -880,7 +880,7 @@
       clearLocalSession();
       stopLivePolling();
       stopInvestPolling();
-      clearTimeout(lapAdminPollTimer);
+      lapResetForLogout();
       clearTimeout(inactivityTimer);
       headerSummaryLoadedOnce = false;
       document.getElementById('pass').value = '';
@@ -1028,6 +1028,48 @@
       });
     }
 
+    // ===== Prefetch: mulai ambil data saat menu baru DISENTUH (hover/tap),
+    // ~100-300 ms sebelum menunya benar-benar dibuka. =====
+    function prefetchPage(page) {
+      if (!currentUser || !currentProfile || page === currentPage || !menuAllowed(page)) return;
+      if (LAP_PAGES.includes(page)) lapPrefetch(page);
+      else if (page === 'prediction' && Date.now() - pageFetchedAt.prediction > NAV_FRESH_MS && !window.__predPrefetching) {
+        window.__predPrefetching = true;
+        loadPredictionStatus();
+        setTimeout(() => { window.__predPrefetching = false; }, 1500);
+      }
+    }
+    (function installNavPrefetch() {
+      let hoverTimer = null;
+      const pageOf = el => {
+        const m = String((el && el.getAttribute('onclick')) || '').match(/(?:switchPage|mobileNavPage)\('([\w-]+)'\)/);
+        return m ? m[1] : '';
+      };
+      const target = e => e.target && e.target.closest ? e.target.closest('[onclick*="switchPage(\'"], [onclick*="mobileNavPage(\'"]') : null;
+      document.addEventListener('pointerover', e => {
+        const el = target(e); if (!el) return;
+        clearTimeout(hoverTimer);
+        hoverTimer = setTimeout(() => prefetchPage(pageOf(el)), 70);
+      }, { passive: true });
+      document.addEventListener('pointerdown', e => { const el = target(e); if (el) prefetchPage(pageOf(el)); }, { passive: true });
+      document.addEventListener('focusin', e => { const el = target(e); if (el) prefetchPage(pageOf(el)); });
+    })();
+    // Menu yang terakhir sering dibuka -> datanya disiapkan diam-diam sesudah
+    // login, jadi pembukaan pertama pun langsung tampil.
+    function rememberRecentPage(page) {
+      if (!LAP_PAGES.includes(page) && page !== 'prediction') return;
+      try {
+        const list = JSON.parse(localStorage.getItem('kd_recent_pages') || '[]').filter(p => p !== page);
+        list.unshift(page);
+        localStorage.setItem('kd_recent_pages', JSON.stringify(list.slice(0, 3)));
+      } catch (e) {}
+    }
+    function warmRecentPages() {
+      let list = [];
+      try { list = JSON.parse(localStorage.getItem('kd_recent_pages') || '[]'); } catch (e) {}
+      list.filter(p => p !== 'lap-setting').slice(0, 2).forEach((p, i) => setTimeout(() => prefetchPage(p), 600 * i));
+    }
+
     function switchPage(page) {
       const role = String((currentProfile && currentProfile.role) || '').trim().toUpperCase();
       const isAdmin = role === 'ADMIN';
@@ -1036,6 +1078,10 @@
       if (isBot && !botRoute) page = 'bot-dashboard';
       if (!isBot && botRoute) page = 'home';
       if (page === 'admin' && !isAdmin) page = isBot ? 'bot-dashboard' : 'home';
+      if (!isBot && currentProfile && !menuAllowed(page)) {
+        toast('Menu ini tidak diizinkan untuk akun Anda. Hubungi admin.');
+        page = 'home';
+      }
       const pages = {
         home:'main-panel', result:'result-page', prediction:'prediction-page', activity:'activity-page',
         admin:'admin-page', invest:'invest-page', 'pga-pending':'pga-pending-page',
@@ -1072,14 +1118,17 @@
       const kicker = document.getElementById('headerKicker');
       if (kicker) kicker.textContent = HEADER_KICKER[page] || 'KD-GROUP PANEL';
 
-      if (LAP_PAGES.includes(page)) renderLapPage(page);
+      if (LAP_PAGES.includes(page)) {
+        renderLapPage(page);
+        if (page !== 'lap-setting' && Date.now() - lapJobsState.fetchedAt > 10000) lapJobsFetch();
+      }
+      rememberRecentPage(page);
       if (BOT_PAGES.includes(page)) renderBotSubpage(page);
       if (LIVECHAT_PAGES.includes(page)) renderLivechatSubpage(page);
 
       if (page === 'home') loadHomeDashboard(false);
 
       if (page !== 'invest') stopInvestPolling();
-      if (page !== 'lap-admin') clearTimeout(lapAdminPollTimer);
       if (page !== 'pga-pending') { stopPgaPendingPolling(); if (wdListedTimer) { clearInterval(wdListedTimer); wdListedTimer = null; } }
       if (!LIVECHAT_PAGES.includes(page)) stopLivechatPolling();
 
@@ -1098,26 +1147,31 @@
       currentPage = page;
 
       if (page === 'prediction') {
+        if (!pageFetchedAt.prediction) {
+          const tbody = document.getElementById('prediction-table-body');
+          if (tbody && !tbody.children.length) renderSkeletonRows('prediction-table-body', 6, 4, 'pred-skeleton-row');
+        }
         if (Date.now() - pageFetchedAt.prediction > NAV_FRESH_MS) loadPredictionStatus();
       }
 
       if (page === 'activity') {
         // Render instan dari cache (0 ms) -> refresh diam-diam hanya bila sudah basi.
-        if (pageDataCache.activity) applyDashboardData(pageDataCache.activity, 'activity', true);
+        if (pageDataCache.activity) applyDashboardData(pageDataCache.activity);
         if (!pageDataCache.activity || Date.now() - pageFetchedAt.activity > NAV_FRESH_MS) {
-          loadDashboard(false, 'activity');
+          loadDashboard(false);
         }
       }
 
       if (page === 'admin') {
         // Buka tab admin terakhir yang dipakai; tiap panel memuat datanya sendiri.
-        let savedTab = 'dashboard';
-        try { savedTab = localStorage.getItem('daygroup_admin_tab') || 'dashboard'; } catch (e) {}
+        let savedTab = 'users';
+        try { savedTab = localStorage.getItem('daygroup_admin_tab') || 'users'; } catch (e) {}
         switchAdminPanel(savedTab, true);
       }
 
       if (page === 'invest') {
-        loadInvestConfig();
+        // Form setting tetap di DOM; muat ulang dari server hanya kalau basi.
+        if (Date.now() - pageFetchedAt.invest > 30000) loadInvestConfig();
       }
 
       if (page === 'pga-pending') {
@@ -1154,36 +1208,52 @@
       'lap-setting': []
     };
 
+    let lapConfigWaiters = null;
     function lapEnsureConfig(cb) {
       if (lapConfig) { cb && cb(); return; }
+      if (lapConfigWaiters) { lapConfigWaiters.push(cb); return; }
+      lapConfigWaiters = [cb];
+      const finish = () => { const w = lapConfigWaiters || []; lapConfigWaiters = null; w.forEach(f => f && f()); };
       google.script.run.withSuccessHandler(res => {
         if (res && res.success) lapConfig = res.config || {};
-        cb && cb();
-      }).withFailureHandler(() => cb && cb()).lapGetConfig(currentSessionToken);
+        finish();
+      }).withFailureHandler(finish).lapGetConfig(currentSessionToken);
     }
 
-    function lapLoadPageResults(page, cb, force) {
-      const modules = LAP_PAGE_MODULES[page] || LAP_PAGE_MODULES['lap-admin'];
-      if (!modules.length) {
-        lapResults = {};
-        cb && cb(true);
-        return;
-      }
-      const cached = lapPageCache[page];
-      if (!force && cached && Date.now() - cached.at < LAP_CACHE_MS) {
-        lapResults = cached.results;
-        cb && cb(true);
-        return;
-      }
+    // Ambil hasil laporan untuk satu menu. Hasil disimpan di cache per menu
+    // beserta "tanda tangan" ringkas, supaya refresh di belakang layar hanya
+    // menggambar ulang tabel kalau datanya memang berubah.
+    const lapInflight = Object.create(null);
+    function lapResultsSig(results) {
+      return Object.keys(results || {}).sort().map(k => {
+        const v = results[k];
+        if (!Array.isArray(v)) return k + ':' + JSON.stringify(v).length;
+        return k + ':' + v.length + ':' + (/Meta$/.test(k) ? JSON.stringify(v) : JSON.stringify(v[0] || null) + JSON.stringify(v[v.length - 1] || null));
+      }).join('|');
+    }
+    function lapFetchResults(page, cb) {
+      const modules = LAP_PAGE_MODULES[page] || [];
+      if (!modules.length) { cb && cb(true, {}, false); return; }
+      if (lapInflight[page]) { lapInflight[page].push(cb); return; }
+      lapInflight[page] = [cb];
+      const finish = (ok, results, changed) => { const cbs = lapInflight[page] || []; delete lapInflight[page]; cbs.forEach(f => f && f(ok, results, changed)); };
       google.script.run.withSuccessHandler(res => {
         const ok = !!(res && res.success);
-        lapResults = ok && res.results ? res.results : {};
-        if (ok) lapPageCache[page] = { at: Date.now(), results: lapResults };
-        cb && cb(ok);
-      }).withFailureHandler(() => {
-        lapResults = {};
-        cb && cb(false);
-      }).lapGetResults(currentSessionToken, modules);
+        const results = ok && res.results ? res.results : {};
+        const prev = lapPageCache[page];
+        const sig = ok ? lapResultsSig(results) : '';
+        const changed = !prev || prev.sig !== sig;
+        if (ok) lapPageCache[page] = { at: Date.now(), results, sig };
+        finish(ok, results, changed);
+      }).withFailureHandler(() => finish(false, {}, false)).lapGetResults(currentSessionToken, modules);
+    }
+    // Dipanggil saat kursor/jari menyentuh menu laporan: data mulai diambil
+    // ~100-300 ms sebelum menu benar-benar terbuka.
+    function lapPrefetch(page) {
+      if (!LAP_PAGES.includes(page) || !menuAllowed(page)) return;
+      lapEnsureConfig();
+      const c = lapPageCache[page];
+      if (!c || Date.now() - c.at > LAP_CACHE_MS) lapFetchResults(page);
     }
 
     function lapRefresh(page) {
@@ -1191,34 +1261,70 @@
       toast('Memuat data terbaru...');
     }
 
+    const LAP_PAGE_META = {
+      'lap-admin': ['fa-table-list', 'Lap Admin', 'Register · Report Agent · Check Selisih Koin · Withdraw PGA-IDF'],
+      'lap-motion': ['fa-bolt-lightning', 'Lap Motion', 'Motion DP PGA · PGA Pending/Error · PGA Withdraw'],
+      'lap-mozart': ['fa-cubes-stacked', 'Lap Mozart', 'Deposit & Withdraw Mozart (m-banking)'],
+      'lap-setting': ['fa-sliders', 'Setting Laporan Harian', 'Kredensial per operator — tersimpan di database panel.']
+    };
+    function lapSkeletonHtml(page) {
+      const m = LAP_PAGE_META[page] || LAP_PAGE_META['lap-admin'];
+      const bar = w => '<span class="skeleton-bar" style="width:' + w + '"></span>';
+      return lapHeaderCard(m[0], m[1], m[2], `
+        <div class="lap-skeleton" aria-busy="true" aria-label="Memuat data laporan">
+          <div class="lap-skeleton-note"><i class="fa-solid fa-circle-notch fa-spin"></i>Memuat data laporan...</div>
+          <div class="lap-skeleton-stats">${'<div class="lap-skeleton-card">' + bar('45%') + bar('70%') + '</div>'}${'<div class="lap-skeleton-card">' + bar('55%') + bar('60%') + '</div>'}${'<div class="lap-skeleton-card">' + bar('40%') + bar('75%') + '</div>'}${'<div class="lap-skeleton-card">' + bar('50%') + bar('65%') + '</div>'}</div>
+          <div class="lap-skeleton-table">${[90, 80, 86, 72, 84].map(w => bar(w + '%')).join('')}</div>
+        </div>`);
+    }
+
     function renderLapPage(page, force) {
       const host = document.getElementById('lap-page');
       if (!host) return;
       const seq = ++lapRenderSeq;
-      lapEnsureConfig(() => {
-        lapLoadPageResults(page, ok => {
-          if (seq !== lapRenderSeq) return;
-          Object.keys(lapTblState).forEach(k => delete lapTblState[k]);
-          if (page === 'lap-setting') lapRenderSetting(host);
-          else if (page === 'lap-motion') lapRenderMotion(host);
-          else if (page === 'lap-mozart') lapRenderMozart(host);
-          else lapRenderAdmin(host);
-          lapTblMountAll();
-          const card = host.querySelector('.glass-card');
-          if (card) {
-            FX.reveal(card.querySelectorAll(':scope > .grid > .glass-inner, :scope > .grid > div'), { y: 12, step: 34 });
-            FX.reveal(card.querySelectorAll('.lap-tbl'), { y: 14, step: 40, start: 120 });
-          }
-          FX.countUp(host);
-        }, force);
-      });
+      const paint = (results) => {
+        if (seq !== lapRenderSeq) return;
+        lapResults = results || {};
+        Object.keys(lapTblState).forEach(k => delete lapTblState[k]);
+        if (page === 'lap-setting') lapRenderSetting(host);
+        else if (page === 'lap-motion') lapRenderMotion(host);
+        else if (page === 'lap-mozart') lapRenderMozart(host);
+        else lapRenderAdmin(host);
+        lapTblMountAll();
+        lapJobsPaint();
+        const card = host.querySelector('.glass-card');
+        if (card) {
+          FX.reveal(card.querySelectorAll(':scope > .grid > .glass-inner, :scope > .grid > div'), { y: 12, step: 34 });
+          FX.reveal(card.querySelectorAll('.lap-tbl'), { y: 14, step: 40, start: 120 });
+        }
+        FX.countUp(host);
+      };
+      const cached = lapPageCache[page];
+      // 1) Instan: data terakhir dari cache (umur berapa pun). Kalau sudah basi,
+      //    ambil yang baru di belakang layar & gambar ulang HANYA bila berubah.
+      if (!force && lapConfig && (cached || !(LAP_PAGE_MODULES[page] || []).length)) {
+        paint(cached ? cached.results : {});
+        if (!cached || Date.now() - cached.at < LAP_CACHE_MS) return;
+        lapFetchResults(page, (ok, results, changed) => {
+          if (ok && changed && seq === lapRenderSeq && currentPage === page) paint(results);
+        });
+        return;
+      }
+      // 2) Belum pernah dimuat: tampilkan kerangka seketika (dulu layar kosong
+      //    total selama menunggu), lalu ambil config & hasil BERSAMAAN.
+      if (!force || !host.querySelector('.glass-card')) host.innerHTML = lapSkeletonHtml(page);
+      let pending = 2, out = null;
+      const done = () => { if (--pending === 0) paint(out); };
+      lapEnsureConfig(done);
+      lapFetchResults(page, (ok, results) => { out = ok ? results : (cached ? cached.results : {}); done(); });
     }
 
+    // Judul halaman Laporan Harian -- pola .page-head yang sama dengan menu lain.
     function lapHeaderCard(icon, title, sub, inner) {
       return `<div class="glass-card rounded-3xl p-5 sm:p-6 flex flex-col gap-4">
-        <div class="flex items-center gap-3.5 border-b border-white/[0.06] pb-4">
-          <div class="w-10 h-10 rounded-xl bg-white/[0.04] border border-white/10 flex items-center justify-center text-sky-300 text-base shrink-0"><i class="fa-solid ${icon}"></i></div>
-          <div class="min-w-0"><h2 class="text-base font-extrabold text-white tracking-tight leading-tight">${title}</h2><p class="text-[11px] text-slate-400 mt-0.5">${sub}</p></div>
+        <div class="page-head tone-sky">
+          <div class="page-head-icon"><i class="fa-solid ${icon}"></i></div>
+          <div class="page-head-text"><div class="page-eyebrow">Laporan Harian</div><h2 class="page-title">${title}</h2><p class="page-sub">${sub}</p></div>
         </div>${inner}</div>`;
     }
 
@@ -1421,45 +1527,55 @@
     // ---------- SETTING ----------
     function lapRenderSetting(host) {
       const c = lapConfig || {};
-      host.innerHTML = lapHeaderCard('fa-sliders', 'Setting Laporan Harian', 'Kredensial per operator — tersimpan di database panel.', `
-        <div class="glass-inner rounded-2xl p-4 border border-cyan-500/15 text-[11px] text-slate-400 leading-relaxed">
-          Ambil di DevTools (F12): <b>Cookie Admin</b> → Application ▸ Cookies ▸ nilai <code class="text-cyan-300">PHPSESSID</code> (format <code>PHPSESSID=xxx</code>).
-          <b>Token Motion</b> → Network ▸ header <code class="text-cyan-300">x-access-token</code>. <b>Cookie Mozart</b> → Application ▸ Cookies ▸ <code class="text-cyan-300">atoken</code> (atau seluruh string cookie).
+      const attr = v => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+      // Label SELALU terlihat: dulu cuma placeholder, jadi begitu field terisi
+      // operator tidak tahu lagi field mana untuk apa.
+      const field = (id, label, value, placeholder, hint, wide) => `
+          <label class="lap-field${wide ? ' sm:col-span-2' : ''}" for="${id}">
+            <span class="lap-field-label">${label}</span>
+            <input id="${id}" value="${attr(value)}" placeholder="${attr(placeholder)}" autocomplete="off" spellcheck="false" class="lap-field-input">
+            ${hint ? `<span class="lap-field-hint">${hint}</span>` : ''}
+          </label>`;
+      host.innerHTML = lapHeaderCard('fa-sliders', 'Setting Laporan Harian', 'Kredensial per operator — tersimpan di database panel, dipakai semua menu Laporan Harian.', `
+        <div class="callout callout-info"><i class="fa-solid fa-circle-info"></i><span>Ambil di DevTools (F12): <b>Cookie Admin</b> → Application ▸ Cookies ▸ nilai <code>PHPSESSID</code> (format <code>PHPSESSID=xxx</code>). <b>Token Motion</b> → Network ▸ header <code>x-access-token</code>.</span></div>
+        <div class="lap-setting-section">
+          <div class="lap-setting-title"><i class="fa-solid fa-table-list"></i>Panel Admin <span>dipakai Lap Admin</span></div>
+          <div class="grid sm:grid-cols-2 gap-3">
+            ${field('lapLinkAdmin', 'Link Admin', c.linkAdmin, 'https://ag.suksesbogil.com')}
+            ${field('lapCookieAdmin', 'Cookie Admin', c.cookiesAdmin, 'PHPSESSID=...')}
+          </div>
         </div>
-        <div class="grid gap-3 mt-1">
+        <div class="lap-setting-section">
+          <div class="lap-setting-title"><i class="fa-solid fa-bolt-lightning"></i>Motion <span>dipakai Lap Motion &amp; PGA Pending</span></div>
           <div class="grid sm:grid-cols-2 gap-3">
-            <input id="lapLinkAdmin" placeholder="Link Admin (https://ag.suksesbogil.com)" value="${(c.linkAdmin||'').replace(/"/g,'&quot;')}" class="glass-inner rounded-xl px-3 py-2.5 text-xs text-slate-100">
-            <input id="lapCookieAdmin" placeholder="Cookie Admin — PHPSESSID=..." value="${(c.cookiesAdmin||'').replace(/"/g,'&quot;')}" class="glass-inner rounded-xl px-3 py-2.5 text-xs text-slate-100">
+            ${field('lapLinkMotion', 'Link Motion', c.linkMotion, 'https://motionv2.com')}
+            ${field('lapTokenMotion', 'Token Motion (x-access-token)', c.tokenMotion, 'isi manual dari tab Network', 'Dipakai skrip Console.')}
+            ${field('lapVendorIdMotion', 'Vendor ID Motion', c.vendorIdMotion, 'mis. 12 atau 12,15', 'Dipakai langsung oleh skrip Deposit. Satu login menangani beberapa website? Isi beberapa Vendor ID dipisah koma.', true)}
           </div>
-          <div class="grid sm:grid-cols-2 gap-3">
-            <input id="lapLinkMotion" placeholder="Link Motion (https://motionv2.com)" value="${(c.linkMotion||'').replace(/"/g,'&quot;')}" class="glass-inner rounded-xl px-3 py-2.5 text-xs text-slate-100">
-            <input id="lapTokenMotion" placeholder="Token Motion (x-access-token) — isi manual dari Network tab, ini yang dipakai skrip Console" value="${(c.tokenMotion||'').replace(/"/g,'&quot;')}" class="glass-inner rounded-xl px-3 py-2.5 text-xs text-slate-100">
-          </div>
-          <div>
-            <input id="lapVendorIdMotion" placeholder="Vendor ID Motion (simpan di sini — dipakai langsung oleh skrip Deposit)" value="${(c.vendorIdMotion||'').replace(/"/g,'&quot;')}" class="w-full glass-inner rounded-xl px-3 py-2.5 text-xs text-slate-100">
-            <p class="text-[10px] text-slate-500 mt-1 leading-relaxed">Isi Vendor ID Motion di sini lalu klik <b>SIMPAN KONFIGURASI</b>. Skrip Deposit akan memakai nilai ini langsung. Kalau satu login menangani beberapa website, isi beberapa Vendor ID dipisah koma.</p>
-          </div>
-          <div class="grid sm:grid-cols-2 gap-3">
-            <input id="lapLinkMozart" placeholder="Link Mozart (opsional)" value="${(c.linkMozart||'').replace(/"/g,'&quot;')}" class="glass-inner rounded-xl px-3 py-2.5 text-xs text-slate-100">
-            <input id="lapTokenMozart" placeholder="Cookie Mozart — TIDAK dipakai lagi (pakai skrip di menu Lap Mozart)" value="${(c.tokenMozart||'').replace(/"/g,'&quot;')}" class="glass-inner rounded-xl px-3 py-2.5 text-xs text-slate-100">
-          </div>
-          <div>
-            <label class="text-[10px] font-bold text-slate-400 uppercase">Nama Rekening / Panel Mozart <span class="text-slate-500 normal-case">— 1 baris = <code>nomor/id = Nama</code>. Untuk panel pakai <code>panel:&lt;id&gt; = NAMA</code></span></label>
-            <textarea id="lapMozartAccounts" rows="5" placeholder="6822057825 = BCA PENI PEBRIANI&#10;384901047325533 = BRI AJIS ABDUL M TOPIK&#10;2059553011 = BRI AJIS ABDUL M TOPIK&#10;panel:4 = HUGOTOGEL&#10;panel:2 = FOLATOTO" class="w-full mt-1 glass-inner rounded-xl px-3 py-2.5 text-xs text-slate-100 font-mono leading-relaxed">${(c.mozartAccounts||'').replace(/</g,'&lt;')}</textarea>
-          </div>
-          <button id="lapSaveBtn" onclick="lapSaveSetting()" class="bg-gradient-to-r from-emerald-400 to-teal-500 text-slate-950 font-extrabold py-2.5 rounded-xl text-xs mt-1"><i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN KONFIGURASI</button>
+        </div>
+        <div class="lap-setting-section">
+          <div class="lap-setting-title"><i class="fa-solid fa-cubes-stacked"></i>Mozart <span>label tabel Bank Deposit / Withdraw</span></div>
+          <label class="lap-field" for="lapMozartAccounts">
+            <span class="lap-field-label">Nama Rekening / Panel Mozart</span>
+            <textarea id="lapMozartAccounts" rows="5" spellcheck="false" placeholder="6822057825 = BCA PENI PEBRIANI&#10;384901047325533 = BRI AJIS ABDUL M TOPIK&#10;panel:4 = HUGOTOGEL" class="lap-field-input font-mono leading-relaxed">${(c.mozartAccounts||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</textarea>
+            <span class="lap-field-hint">1 baris = <code>nomor/id = Nama</code>. Untuk panel pakai <code>panel:&lt;id&gt; = NAMA</code>.</span>
+          </label>
+        </div>
+        <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+          <button id="lapSaveBtn" onclick="lapSaveSetting()" class="bg-gradient-to-r from-emerald-400 to-teal-500 text-slate-950 font-extrabold px-6 py-3 rounded-xl text-xs"><i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN KONFIGURASI</button>
           <span id="lapSaveStatus" class="text-[11px] text-slate-400"></span>
         </div>`);
     }
     function lapSaveSetting() {
+      // Link/Cookie Mozart sengaja TIDAK dikirim: tidak dipakai lagi (data
+      // Mozart masuk lewat skrip Console). Field yang tidak dikirim tetap
+      // memakai nilai lama di server (pick() di lapSaveCreds), jadi aman.
       const payload = {
         linkAdmin: document.getElementById('lapLinkAdmin').value.trim(),
         cookiesAdmin: document.getElementById('lapCookieAdmin').value.trim(),
         linkMotion: document.getElementById('lapLinkMotion').value.trim(),
         tokenMotion: document.getElementById('lapTokenMotion').value.trim(),
         vendorIdMotion: document.getElementById('lapVendorIdMotion').value.trim(),
-        linkMozart: document.getElementById('lapLinkMozart').value.trim(),
-        tokenMozart: document.getElementById('lapTokenMozart').value.trim(),
         mozartAccounts: (document.getElementById('lapMozartAccounts') && document.getElementById('lapMozartAccounts').value.trim()) || ''
       };
       const btn = document.getElementById('lapSaveBtn'), st = document.getElementById('lapSaveStatus');
@@ -2044,6 +2160,7 @@
       const codeWd = lapMotionConsoleScript('withdraw');
       const escCode = c => c.replace(/[&<>]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]));
       host.innerHTML = lapHeaderCard('fa-bolt-lightning', 'Lap Motion', 'Motion DP PGA · PGA Pending/Error · PGA Withdraw', `
+        ${lapJobsCardHtml('motion')}
         <div class="glass-inner rounded-2xl p-4 border border-amber-500/20 text-[11px] text-slate-300 leading-relaxed">
           <div class="font-bold text-amber-300 mb-1"><i class="fa-solid fa-shield-halved mr-1"></i>Motion kadang menolak trafik server</div>
           motionv2.com sesekali menantang/menolak request dari Worker (WAF) -- hasilnya data bisa muncul 0 padahal aslinya ada.
@@ -2181,6 +2298,7 @@
       const wdOkSum = wdOk.reduce((n,r) => n + Number(r.amount||0), 0);
       const code = lapMozartConsoleScript();
       host.innerHTML = lapHeaderCard('fa-cubes-stacked', 'Lap Mozart', 'Deposit & Withdraw Mozart (m-banking)', `
+        ${lapJobsCardHtml('mozart')}
         <div class="glass-inner rounded-2xl p-4 border border-amber-500/20 text-[11px] text-slate-300 leading-relaxed">
           <div class="font-bold text-amber-300 mb-1"><i class="fa-solid fa-shield-halved mr-1"></i>Mozart diproteksi Cloudflare</div>
           Server tidak bisa menarik data Mozart (semua IP server diblokir), dan bookmarklet ditolak proteksi situs Mozart (<code>about:blank#blocked</code>).
@@ -2267,7 +2385,6 @@
     }
 
     // ---------- ADMIN (via GitHub Actions) ----------
-    let lapAdminJobId = null, lapAdminPollTimer = null;
     function lapRenderAdmin(host) {
       const reg = lapResults.register || [];
       const ra = lapResults.reportAgent || [];
@@ -2286,7 +2403,7 @@
 
       host.innerHTML = lapHeaderCard('fa-table-list', 'Lap Admin', 'Register · Report Agent · Check Selisih Koin · Withdraw PGA-IDF', `
         ${lapDateBar('lapAdmin', lapRunAdmin)}
-        <div id="lapAdminProgress" class="text-[11px] text-cyan-300 mt-1"></div>
+        ${lapJobsCardHtml('admin')}
         <div class="glass-inner rounded-2xl p-3 mt-3">
           <div class="flex items-center justify-between mb-1.5"><span class="text-[10px] font-bold text-slate-400 uppercase">Laporan Register</span>
             <button onclick="window.__lapCopyLaporan()" class="glass-inner px-3 py-1 rounded-lg text-[10px] font-bold"><i class="fa-regular fa-copy mr-1"></i>COPY</button></div>
@@ -2331,7 +2448,6 @@
       if (lapTblState.register) lapTblState.register.prefilter = rows => lapAdminF.refType==='all' ? rows : rows.filter(r => r.type === lapAdminF.refType);
       if (lapTblState.report_agent) lapTblState.report_agent.prefilter = rows => rows.filter(r =>
         lapAdminF.actions.has((r.action||'').trim()) && lapAdminF.agents.has((r.operator||'').trim()));
-      if (lapAdminJobId && !reg.length) lapPollAdmin();
     }
     function raChip(label, fn) { return `<span class="lap-chip on" onclick="${fn}">${escapeHtml(label)}</span>`; }
     let lapAdminF = { refType:'all', actions:new Set(), agents:new Set() };
@@ -2359,42 +2475,148 @@
         const sd = lapDateVal('lapAdminStart'), ed = lapDateVal('lapAdminEnd');
         if (!sd || !ed) { toast('Pilih tanggal'); return; }
         lapBusy('lapAdmin', true, 'Memicu GitHub Actions...');
-        const prog = document.getElementById('lapAdminProgress');
         google.script.run.withSuccessHandler(res => {
-          if (!res || !res.success) { lapBusy('lapAdmin', false, ''); toast((res && res.message) || 'Gagal'); return; }
-          lapAdminJobId = res.jobId;
-          if (prog) prog.textContent = res.message || 'Berjalan...';
-          lapPollAdmin();
+          if (apiFailed(res)) { lapBusy('lapAdmin', false, ''); toast(apiMessage(res, 'Gagal memicu tarik data')); return; }
+          // Tampilkan progres SEKETIKA (tidak menunggu putaran polling pertama).
+          if (res.jobId && !lapJobsState.jobs.some(j => j.id === res.jobId)) {
+            lapJobsState.jobs.unshift({ id: res.jobId, kind: 'admin', status: 'pending', message: res.message || '', startDate: sd, endDate: ed, source: 'github', createdAt: lapWibNow(), updatedAt: lapWibNow() });
+          }
+          lapBusy('lapAdmin', true, res.reused ? 'Proses sebelumnya masih berjalan — progres di bawah.' : 'Berjalan — boleh pindah menu, progres tetap tersimpan.');
+          lapJobsPaint();
+          lapJobsFetch();
         }).withFailureHandler(e => { lapBusy('lapAdmin', false, ''); toast((e && e.message) || 'Gagal'); })
           .lapRunAdmin(currentSessionToken, sd, ed);
       });
     }
-    function lapPollAdmin() {
-      clearTimeout(lapAdminPollTimer);
-      if (!lapAdminJobId) return;
-      const prog = document.getElementById('lapAdminProgress');
-      google.script.run.withSuccessHandler(res => {
-        if (!res || !res.success) { lapBusy('lapAdmin', false, ''); if (prog) prog.textContent = (res && res.message) || 'Job hilang'; return; }
-        if (prog) prog.textContent = ({pending:'⏳ Antre di GitHub Actions...', running:'⚙️ Scraping berjalan...', done:'✅ Selesai', error:'❌ '+res.message}[res.status]) || res.status;
-        if (res.status === 'done') {
-          lapBusy('lapAdmin', false, '');
+
+    // ===== Progres & riwayat "Tarik Data" (disimpan di server: lap_job) =====
+    // Pemantau ini GLOBAL: tetap jalan walau operator pindah menu, dan setelah
+    // reload langsung melanjutkan job yang masih berjalan. Poll hanya selama
+    // ada job aktif (pending/running), jadi tidak membebani server saat diam.
+    let lapJobsState = { jobs: [], fetchedAt: 0, offsetMs: 0 };
+    let lapJobsTimer = null;
+    let lapJobsTicker = null;
+    const LAP_JOB_KIND_LABEL = { admin: 'Lap Admin', motion: 'Lap Motion', mozart: 'Lap Mozart' };
+    const lapJobIsActive = j => j.status === 'pending' || j.status === 'running';
+    // Waktu server = WIB tanpa zona ("yyyy-MM-dd HH:mm:ss").
+    function lapWibMs(ts) { const d = new Date(String(ts || '').replace(' ', 'T') + '+07:00'); return isNaN(d) ? 0 : d.getTime(); }
+    function lapWibNow() { return new Date(Date.now() + lapJobsState.offsetMs + 7 * 3600 * 1000).toISOString().slice(0, 19).replace('T', ' '); }
+    function lapFmtDur(ms) {
+      const s = Math.max(0, Math.round(ms / 1000));
+      return s >= 3600 ? Math.floor(s / 3600) + 'j ' + Math.floor(s % 3600 / 60) + 'm' : Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+    }
+    function lapJobsFetch(cb) {
+      if (!currentUser || !LAP_PAGES.some(menuAllowed)) { cb && cb(); return; }
+      clearTimeout(lapJobsTimer);
+      google.script.run.withSuccessHandler(r => {
+        if (apiFailed(r)) { lapJobsSchedule(); cb && cb(); return; }
+        const wasActive = new Map(lapJobsState.jobs.filter(lapJobIsActive).map(j => [j.id, j]));
+        lapJobsState = { jobs: r.jobs || [], fetchedAt: Date.now(), offsetMs: r.now ? lapWibMs(r.now) - Date.now() : 0 };
+        lapJobsState.jobs.forEach(j => { if (wasActive.has(j.id) && !lapJobIsActive(j)) lapJobFinished(j); });
+        lapJobsPaint();
+        lapJobsSchedule();
+        cb && cb();
+      }).withFailureHandler(() => { lapJobsSchedule(); cb && cb(); }).lapJobs(currentSessionToken);
+    }
+    function lapJobsSchedule() {
+      clearTimeout(lapJobsTimer);
+      const active = lapJobsState.jobs.some(lapJobIsActive);
+      if (currentUser && active) lapJobsTimer = setTimeout(() => lapJobsFetch(), 5000);
+      // Detik berjalan pada progres (murah: cuma update teks yang terlihat).
+      if (active && !lapJobsTicker) lapJobsTicker = setInterval(lapJobsTick, 1000);
+      if (!active && lapJobsTicker) { clearInterval(lapJobsTicker); lapJobsTicker = null; }
+      const busy = document.getElementById('navLapBusy');
+      if (busy) busy.hidden = !active;
+      const busyMobile = document.getElementById('navLapBusyMobile');
+      if (busyMobile) busyMobile.hidden = !active;
+    }
+    function lapJobFinished(j) {
+      const label = LAP_JOB_KIND_LABEL[j.kind] || 'Laporan';
+      if (j.status === 'done') {
+        if (j.kind === 'admin') {
           lapPageCache['lap-admin'] = null;
-          lapResults = res.results || lapResults;
-          lapAdminJobId = null;
-          renderLapPage('lap-admin', true);
-          toast('Lap Admin selesai — ' + (lapResults.register||[]).length + ' akun register');
-          return;
+          lapBusy('lapAdmin', false, '');
+          if (currentPage === 'lap-admin') renderLapPage('lap-admin', true);
         }
-        if (res.status === 'error') { lapBusy('lapAdmin', false, ''); toast(res.message || 'Gagal'); lapAdminJobId = null; return; }
-        lapAdminPollTimer = setTimeout(lapPollAdmin, 5000);
-      }).withFailureHandler(() => { lapAdminPollTimer = setTimeout(lapPollAdmin, 7000); })
-        .lapAdminStatus(currentSessionToken, lapAdminJobId);
+        toast(label + ' selesai — data terbaru sudah tersimpan.');
+      } else {
+        if (j.kind === 'admin') lapBusy('lapAdmin', false, '');
+        toast(label + ' gagal: ' + (j.message || j.status));
+      }
+    }
+    function lapJobsTick() {
+      document.querySelectorAll('[data-lap-since]').forEach(el => {
+        el.textContent = lapFmtDur(Date.now() + lapJobsState.offsetMs - lapWibMs(el.getAttribute('data-lap-since')));
+      });
+    }
+    function lapJobsCardHtml(kind) {
+      return '<div class="lap-jobs" data-lap-jobs="' + escapeHtml(kind) + '"></div>';
+    }
+    function lapJobStatusBadge(j) {
+      const map = { pending: ['is-run', 'fa-hourglass-half', 'Antre'], running: ['is-run', 'fa-gear fa-spin', 'Berjalan'], done: ['is-ok', 'fa-check', 'Selesai'], error: ['is-bad', 'fa-xmark', 'Gagal'], stale: ['is-bad', 'fa-triangle-exclamation', 'Macet'] };
+      const m = map[j.status] || ['is-run', 'fa-circle', j.status];
+      return '<span class="lap-job-badge ' + m[0] + '"><i class="fa-solid ' + m[1] + '"></i>' + escapeHtml(m[2]) + '</span>';
+    }
+    function lapJobSteps(j) {
+      // Job GitHub Actions: Dipicu -> Antre -> Mengambil data -> Tersimpan.
+      const steps = ['Dipicu', 'Antre di GitHub Actions', 'Mengambil data', 'Tersimpan di panel'];
+      const at = j.status === 'pending' ? 1 : j.status === 'running' ? 2 : j.status === 'done' ? 4 : (j.updatedAt && j.updatedAt !== j.createdAt ? 2 : 1);
+      const failed = j.status === 'error' || j.status === 'stale';
+      return '<ol class="lap-steps">' + steps.map((s, i) => {
+        const state = i < at ? 'done' : i === at ? (failed ? 'fail' : 'now') : 'todo';
+        const icon = state === 'done' ? 'fa-check' : state === 'fail' ? 'fa-xmark' : state === 'now' ? 'fa-circle-notch fa-spin' : 'fa-circle';
+        return '<li class="is-' + state + '"><span class="lap-step-dot"><i class="fa-solid ' + icon + '"></i></span><span class="lap-step-label">' + escapeHtml(s) + '</span></li>';
+      }).join('') + '</ol>';
+    }
+    function lapJobsPaint() {
+      document.querySelectorAll('[data-lap-jobs]').forEach(box => {
+        const kind = box.getAttribute('data-lap-jobs');
+        const jobs = lapJobsState.jobs.filter(j => j.kind === kind);
+        const active = jobs.find(lapJobIsActive);
+        const label = LAP_JOB_KIND_LABEL[kind] || 'Laporan';
+        let html = '<div class="lap-jobs-head"><span><i class="fa-solid fa-list-check"></i>Progres &amp; Riwayat Tarik Data</span>' +
+          '<button type="button" class="lap-jobs-refresh" onclick="lapJobsFetch()" title="Muat ulang progres" aria-label="Muat ulang progres"><i class="fa-solid fa-rotate"></i></button></div>';
+        if (active) {
+          html += '<div class="lap-job-active">' +
+            '<div class="lap-job-active-top"><b>' + escapeHtml(label) + ' · ' + escapeHtml(active.startDate || '') + (active.endDate && active.endDate !== active.startDate ? ' s/d ' + escapeHtml(active.endDate) : '') + '</b>' +
+            '<span class="lap-job-elapsed-wrap"><i class="fa-regular fa-clock"></i><span data-lap-since="' + escapeHtml(active.createdAt) + '">' + lapFmtDur(Date.now() + lapJobsState.offsetMs - lapWibMs(active.createdAt)) + '</span></span></div>' +
+            lapJobSteps(active) +
+            '<div class="lap-job-note">' + escapeHtml(active.message || '') + ' <span class="text-slate-500">— boleh ditinggal ke menu lain, progres tetap tersimpan.</span></div></div>';
+        }
+        const rows = jobs.filter(j => j !== active).slice(0, 5);
+        if (rows.length) {
+          html += '<div class="lap-jobs-table-wrap"><table class="lap-jobs-table"><thead><tr><th>Waktu</th><th>Periode</th><th>Status</th><th>Durasi</th><th>Keterangan</th></tr></thead><tbody>' +
+            rows.map(j => {
+              const dur = lapWibMs(j.updatedAt) - lapWibMs(j.createdAt);
+              return '<tr><td>' + escapeHtml(String(j.createdAt).slice(5, 16)) + '</td>' +
+                '<td>' + escapeHtml(j.startDate || '-') + (j.endDate && j.endDate !== j.startDate ? '<br><span class="text-slate-500">s/d ' + escapeHtml(j.endDate) + '</span>' : '') + '</td>' +
+                '<td>' + lapJobStatusBadge(j) + '</td>' +
+                '<td>' + (j.source === 'import' ? '<span class="text-slate-500">import</span>' : (dur > 0 ? lapFmtDur(dur) : '-')) + '</td>' +
+                '<td class="lap-job-msg">' + escapeHtml(j.message || '') + '</td></tr>';
+            }).join('') + '</tbody></table></div>';
+        } else if (!active) {
+          html += '<div class="lap-jobs-empty">' + (lapJobsState.fetchedAt ? 'Belum ada riwayat tarik data ' + escapeHtml(label) + '.' : '<i class="fa-solid fa-circle-notch fa-spin mr-1.5"></i>Memuat riwayat...') + '</div>';
+        }
+        box.innerHTML = html;
+      });
+      if (lapJobsState.jobs.some(j => j.kind === 'admin' && lapJobIsActive(j))) lapBusy('lapAdmin', true, 'Berjalan — boleh pindah menu, progres tetap tersimpan.');
+    }
+    function lapResetForLogout() {
+      clearTimeout(lapJobsTimer); lapJobsTimer = null;
+      if (lapJobsTicker) { clearInterval(lapJobsTicker); lapJobsTicker = null; }
+      lapJobsState = { jobs: [], fetchedAt: 0, offsetMs: 0 };
+      lapConfig = null;
+      Object.keys(lapPageCache).forEach(k => delete lapPageCache[k]);
+      window.__kdWarmed = false;
     }
 
     /* Menu admin: tampilkan satu panel per waktu (tidak numpuk scroll). */
-    const ADMIN_PANELS = ['dashboard','users','sites','sesi','autopost','backup','maintenance'];
+    const ADMIN_PANELS = ['users','sites','sesi','autopost','maintenance'];
     function switchAdminPanel(key, fromNav) {
-      if (ADMIN_PANELS.indexOf(key) < 0) key = 'dashboard';
+      // Tab lama yang tersimpan di localStorage: 'backup' kini bagian dari
+      // Maintenance, 'dashboard' sudah jadi menu Aktivitas.
+      if (key === 'backup') key = 'maintenance';
+      if (ADMIN_PANELS.indexOf(key) < 0) key = 'users';
       currentAdminPanel = key;
       try { localStorage.setItem('daygroup_admin_tab', key); } catch (e) {}
 
@@ -2406,10 +2628,7 @@
       if (sel && sel.value !== key) sel.value = key;
 
       // Muat data panel yang dibuka (pakai cache/freshness di masing-masing loader).
-      if (key === 'dashboard') {
-        if (pageDataCache.admin) applyDashboardData(pageDataCache.admin, 'admin', true);
-        if (!pageDataCache.admin || Date.now() - pageFetchedAt.admin > NAV_FRESH_MS) loadDashboard(false, 'admin');
-      } else if (key === 'users') {
+      if (key === 'users') {
         if (Date.now() - pageFetchedAt.users > NAV_FRESH_MS) { loadUsers(); pageFetchedAt.users = Date.now(); }
       } else if (key === 'sites') {
         if (!sitesData.length || Date.now() - (pageFetchedAt.sites||0) > NAV_FRESH_MS) { loadSites(); pageFetchedAt.sites = Date.now(); }
@@ -2417,6 +2636,8 @@
         if (Date.now() - pageFetchedAt.sesi > NAV_FRESH_MS) { loadActiveSessions(); pageFetchedAt.sesi = Date.now(); }
       } else if (key === 'autopost') {
         loadAutoPostStatus();
+      } else if (key === 'maintenance') {
+        loadMaintenanceState();
       }
       if (!fromNav) pumpLivePoll(true);
     }
@@ -2481,9 +2702,10 @@
     function renderClosingPredictionCard(closing) {
       const card = document.getElementById('closingPredictionCard');
       if (!card) return;
+      card.classList.toggle('is-empty', !closing);
       if (!closing) {
         card.style.display = 'block';
-        card.innerHTML = '<div class="text-xs font-bold text-rose-200">Data kata-kata penutup belum tersedia dari server. Klik Refresh Status; kalau tetap kosong, hubungi admin.</div>';
+        card.innerHTML = '<div class="callout callout-warn"><i class="fa-solid fa-triangle-exclamation"></i><span>Data kata-kata penutup belum tersedia dari server. Klik <b>Refresh Status</b>; kalau tetap kosong, hubungi admin.</span></div>';
         return;
       }
 
@@ -2536,18 +2758,32 @@
         </div>`;
     }
 
-    function loadPredictionStatus() {
-      if (currentUser) {
+    function loadPredictionStatus(manual) {
+      if (manual === true && currentUser) {
         google.script.run.withFailureHandler(() => {}).logClientActivity(currentSessionToken, "REFRESH STATUS PREDIKSI", "Memuat ulang jadwal dan status prediksi", "INFO", "");
       }
 
+      const showPredictionError = message => {
+        const info = document.getElementById('pred-info-text');
+        if (info) { info.hidden = false; info.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i><span>' + escapeHtml(message) + '</span>'; }
+        // Jangan biarkan skeleton berputar selamanya kalau belum pernah ada data.
+        const tbody = document.getElementById('prediction-table-body');
+        if (tbody && !globalPredictionsData.length) tbody.innerHTML = '<tr><td colspan="4" class="table-empty-cell"><span class="table-empty-inner"><i class="fa-solid fa-triangle-exclamation"></i>' + escapeHtml(message) + '</span></td></tr>';
+      };
       google.script.run
         .withSuccessHandler(data => {
+          if (apiFailed(data) || !Array.isArray(data.schedules)) { showPredictionError(apiMessage(data, 'Gagal memuat status prediksi.')); return; }
           pageFetchedAt.prediction = Date.now();
           globalPredictionsData = (data && data.schedules) || [];
           globalClosingPrediction = (data && data.closing) || null;
           const info = document.getElementById('pred-info-text');
-          if (info && data && data.infoText) info.textContent = data.infoText;
+          if (info) {
+            // Hanya tampil kalau akun belum punya akses Telegram / website.
+            const warn = (data.telegramAllowed === false || !(data.websites || []).length)
+              ? (data.infoText || 'Akun ini belum bisa mengirim prediksi.') : '';
+            info.hidden = !warn;
+            if (warn) info.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i><span>' + escapeHtml(warn) + '</span>';
+          }
 
           renderClosingPredictionCard(globalClosingPrediction);
 
@@ -2579,6 +2815,7 @@
         })
         .withFailureHandler(err => {
           const message = (err && err.message) || 'Gagal memuat status prediksi.';
+          showPredictionError(message);
           toast(message);
         })
         .getPredictionStatusData(currentSessionToken);
@@ -2868,10 +3105,10 @@
       if (document.hidden) return 180000;
       if (livePollFailStreak >= 4) return 90000; // endpoint bermasalah -> jangan spam
       const idle = Date.now() - lastUserActivityAt;
-      // Halaman Aktivitas / Dashboard admin butuh refresh log lebih sering.
+      // Halaman Aktivitas butuh refresh log lebih sering.
       // Halaman lain (Result/Prediksi/Invest/Lap) cuma perlu status header -> lebih lambat,
       // hemat request Worker & baca D1 (16 CS x poll cepat = dekat limit 100k req/hari).
-      const onLog = currentPage === 'activity' || (currentPage === 'admin' && currentAdminPanel === 'dashboard');
+      const onLog = currentPage === 'activity';
       if (idle > 300000) return onLog ? 75000 : 150000;
       if (idle > 90000)  return onLog ? 45000 : 90000;
       return onLog ? 20000 : 45000;
@@ -2882,13 +3119,11 @@
       livePollTimer = setTimeout(() => pumpLivePoll(false), livePollDelayMs());
     }
 
-    function activityFiltersActive(mode){
-      const dirty = ['Search','UserFilter','ActionFilter','StatusFilter','DateFrom','DateTo'].some(s => {
-        const el = document.getElementById(activityId(mode, s));
+    function activityFiltersActive(){
+      return ACTIVITY_FILTERS.some(suffix => {
+        const el = activityEl(suffix);
         return el && String(el.value || '').trim();
       });
-      const src = document.getElementById(activityId(mode, 'SourceFilter'));
-      return dirty || (src && src.value && src.value !== 'ALL');
     }
 
     function pumpLivePoll(immediate){
@@ -2902,14 +3137,11 @@
       }
       livePollStartedAt = Date.now();
 
-      const adminDash = currentPage === 'admin' && currentAdminPanel === 'dashboard';
-      const onLogPage = currentPage === 'activity' || adminDash;
-      const mode = currentPage === 'admin' ? 'admin' : 'activity';
-      const wantActivity = onLogPage
-        && activityViews[mode].page === 1
-        && !activityFiltersActive(mode);
+      const wantActivity = currentPage === 'activity'
+        && activityView.page === 1
+        && !activityFiltersActive();
       const wantSessions = currentPage === 'admin' && currentAdminPanel === 'sesi';
-      const req = wantActivity ? getActivityRequest(mode) : null;
+      const req = wantActivity ? getActivityRequest(false) : null;
 
       livePollInFlight = true;
       google.script.run
@@ -2931,7 +3163,7 @@
               headerSummaryLoadedOnce = true;
             }
             if (res.activity && wantActivity && res.activity.stats && Array.isArray(res.activity.rows)) {
-              applyDashboardData(res.activity, mode, true);
+              applyDashboardData(res.activity);
             }
             if (res.sessions && wantSessions) renderActiveSessions(res.sessions);
           }
@@ -3726,6 +3958,68 @@
     }
     document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document.getElementById("popupCloseBtn").style.display !== "none") closeActionPopup(); });
 
+    // ===== Hak akses menu per user (diatur di Admin -> Users) =====
+    // Cermin src/lib/menus.ts. Server tetap menolak menu yang tidak diizinkan;
+    // bagian ini hanya menyembunyikan tombolnya supaya rapi.
+    const MENU_ACCESS_ITEMS = [
+      { key: 'result', label: 'Result', group: 'Utama' },
+      { key: 'prediction', label: 'Prediksi', group: 'Utama' },
+      { key: 'invest', label: 'AutoCheck Invest', group: 'Utama' },
+      { key: 'lap-admin', label: 'Lap Admin', group: 'Laporan Harian' },
+      { key: 'lap-motion', label: 'Lap Motion', group: 'Laporan Harian' },
+      { key: 'pga-pending', label: 'PGA Pending', group: 'Laporan Harian' },
+      { key: 'lap-mozart', label: 'Lap Mozart', group: 'Laporan Harian' },
+      { key: 'activity', label: 'Aktivitas', group: 'Lainnya' },
+      { key: 'livechat-sessions', label: 'Sesi Chat', group: 'Live Chat' },
+      { key: 'livechat-templates', label: 'Template Balasan', group: 'Live Chat' }
+    ];
+    const MENU_ACCESS_KEYS = MENU_ACCESS_ITEMS.map(m => m.key);
+    function menuAllowed(page) {
+      const role = String((currentProfile && currentProfile.role) || '').trim().toUpperCase();
+      if (page === 'home') return true;
+      if (page === 'admin') return role === 'ADMIN';
+      if (BOT_PAGES.includes(page)) return role === 'BOT';
+      if (role === 'ADMIN') return true;
+      if (LIVECHAT_PAGES.includes(page) && role !== 'OPERATOR') return false;
+      const menus = currentProfile && Array.isArray(currentProfile.menus) ? currentProfile.menus : null;
+      if (!menus) return true;
+      if (page === 'lap-setting') return ['lap-admin', 'lap-motion', 'lap-mozart'].some(k => menus.includes(k));
+      return menus.includes(page);
+    }
+    function setMenuVisible(el, yes) {
+      if (!el) return;
+      if (yes) { el.hidden = false; el.style.removeProperty('display'); }
+      else { el.hidden = true; el.style.setProperty('display', 'none', 'important'); }
+    }
+    function applyMenuAccess() {
+      if (!currentProfile) return;
+      const role = String(currentProfile.role || '').trim().toUpperCase();
+      if (role === 'BOT') return; // menu BOT diatur applyProfileUI
+      NAV_KEYS.forEach(key => {
+        if (key === 'home' || key === 'admin' || BOT_PAGES.includes(key)) return;
+        setMenuVisible(document.getElementById('nav-' + key), menuAllowed(key));
+      });
+      // Grup sidebar disembunyikan kalau semua isinya tidak boleh.
+      [['utama', ['result', 'prediction', 'invest']],
+       ['lapor', ['lap-admin', 'lap-motion', 'pga-pending', 'lap-mozart', 'lap-setting']],
+       ['livechat', LIVECHAT_PAGES]].forEach(([group, keys]) => {
+        const any = keys.some(menuAllowed);
+        setMenuVisible(document.querySelector('.nav-group[data-group="' + group + '"]'), any);
+        const mob = document.querySelector('.mobile-nav-item[data-mobile-group="' + group + '"]');
+        if (mob) setMenuVisible(mob, any);
+      });
+      setMenuVisible(document.querySelector('.mobile-nav-item[data-mobile-page="activity"]'), menuAllowed('activity'));
+      // "Lainnya" di HP berisi Live Chat & Admin -- sembunyikan kalau kosong.
+      setMenuVisible(document.querySelector('.mobile-nav-item[data-mobile-group="more"]'), role === 'ADMIN' || LIVECHAT_PAGES.some(menuAllowed));
+      // Akses cepat di Dashboard.
+      document.querySelectorAll('#main-panel [onclick^="switchPage("]').forEach(el => {
+        const m = String(el.getAttribute('onclick')).match(/switchPage\('([\w-]+)'\)/);
+        if (m) setMenuVisible(el, menuAllowed(m[1]));
+      });
+    }
+    window.applyMenuAccess = applyMenuAccess;
+    window.menuAllowed = menuAllowed;
+
     function applyProfileUI() {
       const role = String((currentProfile && currentProfile.role) || '').trim().toUpperCase();
       const isAdmin = role === 'ADMIN';
@@ -3780,13 +4074,22 @@
       document.querySelectorAll('.bot-only, [data-role-only="BOT"]').forEach(el => setRoleOnly(el, false));
       document.querySelectorAll('.activity-admin-only').forEach(el => setRoleOnly(el, isAdmin, ''));
 
+      applyMenuAccess();
       restoreNavGroups();
+      if (!window.__kdWarmed) {
+        window.__kdWarmed = true;
+        // Lanjutkan pantauan tarik data yang masih berjalan (mis. sesudah reload),
+        // lalu siapkan data menu yang biasa dibuka -- saat browser sedang santai.
+        setTimeout(() => { lapJobsFetch(); warmRecentPages(); }, 1500);
+      }
       const filterGrid = document.getElementById('activityFilterGrid');
       if (filterGrid) filterGrid.classList.toggle('activity-admin-grid', isAdmin);
+      const dateRow = document.getElementById('activityDateRow');
+      if (dateRow) dateRow.classList.toggle('is-compact', !isAdmin);
       const scope = document.getElementById('activityScopeText');
       if (scope) scope.textContent = isAdmin
-        ? 'Admin melihat gabungan Activity Log hari ini dan BackUp Activity Log.'
-        : 'Setiap user hanya melihat riwayat akunnya sendiri pada hari ini.';
+        ? 'Aktivitas semua user selama 7 hari terakhir (log lebih lama dihapus otomatis).'
+        : 'Riwayat akun Anda sendiri hari ini.';
     }
     function escapeHtml(s){return String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
     // Argumen string yang AMAN ditaruh di atribut handler inline, mis.
@@ -3916,7 +4219,7 @@
       if (!body) return;
 
       if (!Array.isArray(rows) || !rows.length) {
-        body.innerHTML = '<tr><td colspan="7" class="table-empty-cell"><span class="table-empty-inner"><i class="fa-solid fa-clock-rotate-left"></i>Belum ada aktivitas yang cocok dengan filter.</span></td></tr>';
+        body.innerHTML = '<tr><td colspan="6" class="table-empty-cell"><span class="table-empty-inner"><i class="fa-solid fa-clock-rotate-left"></i>Belum ada aktivitas yang cocok dengan filter.</span></td></tr>';
         return;
       }
 
@@ -3924,9 +4227,6 @@
         const dateParts = String(row[0] || '').split(' ');
         const date = dateParts[0] || '-';
         const time = dateParts.slice(1).join(' ') || '';
-        const source = String(row[6] || 'HARI INI').toUpperCase();
-        const sourceClass = source === 'BACKUP' ? 'activity-source-backup' : 'activity-source-current';
-        const sourceLabel = source === 'BACKUP' ? 'BACKUP' : 'HARI INI';
 
         return `<tr class="activity-log-row">
           <td class="log-time-cell">
@@ -3938,39 +4238,38 @@
           <td>${activityStatusBadge(row[3])}</td>
           <td>${expandableLogText(row[4], 'Tidak ada keterangan')}</td>
           <td>${expandableLogText(row[5], 'Tidak ada data')}</td>
-          <td><span class="activity-source-chip ${sourceClass}"><i class="fa-solid ${source === 'BACKUP' ? 'fa-box-archive' : 'fa-bolt'}"></i>${sourceLabel}</span></td>
         </tr>`;
       }).join('');
       FX.reveal(Array.from(body.querySelectorAll('tr')).slice(0, 28), { y: 8, step: 12, duration: 320, scale: 1 });
     }
 
-    function activityId(mode, suffix) {
-      return mode === 'admin' ? 'adminActivity' + suffix : 'activity' + suffix;
-    }
+    // Riwayat aktivitas hanya punya SATU tampilan (menu Aktivitas). Dulu Admin
+    // punya salinan kedua ("Dashboard & Aktivitas") dengan id adminActivity*.
+    const ACTIVITY_FILTERS = ['Search','UserFilter','ActionFilter','StatusFilter','DateFrom','DateTo'];
+    function activityEl(suffix) { return document.getElementById('activity' + suffix); }
 
-    function renderSkeletonRows(target, count) {
+    function renderSkeletonRows(target, count, cols, rowClass) {
       const body = document.getElementById(target);
       if (!body) return;
-      const cols = 7;
-      const row = `<tr class="activity-log-row">${Array.from({length: cols}).map(() => `<td><span class="skeleton-bar" style="width:${60 + Math.round(Math.random()*30)}%"></span></td>`).join('')}</tr>`;
+      cols = cols || 7;
+      rowClass = rowClass == null ? 'activity-log-row' : rowClass;
+      const row = `<tr class="${rowClass}">${Array.from({length: cols}).map(() => `<td><span class="skeleton-bar" style="width:${60 + Math.round(Math.random()*30)}%"></span></td>`).join('')}</tr>`;
       body.innerHTML = row.repeat(count || 6);
     }
 
-    function getActivityRequest(mode, withFacets) {
-      const state = activityViews[mode] || activityViews.activity;
+    function getActivityRequest(withFacets) {
       const value = suffix => {
-        const el = document.getElementById(activityId(mode, suffix));
+        const el = activityEl(suffix);
         return el ? String(el.value || '').trim() : '';
       };
 
       return {
-        page: state.page,
-        pageSize: state.pageSize,
+        page: activityView.page,
+        pageSize: activityView.pageSize,
         query: value('Search'),
         username: value('UserFilter'),
         action: value('ActionFilter'),
         status: value('StatusFilter'),
-        source: value('SourceFilter') || 'ALL',
         dateFrom: value('DateFrom'),
         dateTo: value('DateTo'),
         // filterOptions (DISTINCT full-scan D1) hanya saat load manual, bukan auto-refresh
@@ -3989,175 +4288,127 @@
       if ([...select.options].some(option => option.value === current)) select.value = current;
     }
 
-    function updateActivityMeta(mode, data) {
+    function updateActivityMeta(data) {
       const pagination = data.pagination || {page:1,totalPages:1,total:0,hasPrev:false,hasNext:false};
-      const sourceInfo = data.sourceInfo || {};
-      const prefix = mode === 'admin' ? 'adminActivity' : 'activity';
 
-      const meta = document.getElementById(prefix + 'Meta');
+      const meta = activityEl('Meta');
       if (meta) {
-        const scanNote = sourceInfo.scanLimited
-          ? ` • backup file utama dibatasi ${sourceInfo.backupScanned} baris terbaru`
-          : '';
-        const archiveNote = Number(sourceInfo.archiveScanned || 0) > 0
-          ? ` • +${sourceInfo.archiveScanned} baris dari file arsip terpisah`
-          : '';
-        meta.textContent = `${pagination.total} data ditemukan • ${sourceInfo.currentTotal || 0} hari ini • ${sourceInfo.backupTotal || 0} backup${scanNote}${archiveNote}`;
+        const scope = data.role === 'ADMIN' ? 'semua user, 7 hari terakhir' : 'akun Anda, hari ini';
+        meta.textContent = `${pagination.total} aktivitas ditemukan • ${scope}`;
       }
 
-      const label = document.getElementById(prefix + 'PageLabel');
+      const label = activityEl('PageLabel');
       if (label) label.textContent = `Halaman ${pagination.page} / ${pagination.totalPages}`;
 
-      const prev = document.getElementById(prefix + 'PrevBtn');
-      const next = document.getElementById(prefix + 'NextBtn');
+      const prev = activityEl('PrevBtn');
+      const next = activityEl('NextBtn');
       if (prev) prev.disabled = !pagination.hasPrev;
       if (next) next.disabled = !pagination.hasNext;
 
-      activityViews[mode].page = pagination.page || 1;
+      activityView.page = pagination.page || 1;
     }
 
-    function applyActivityFilters(mode) {
-      activityViews[mode].page = 1;
-      loadDashboard(true, mode);
+    function applyActivityFilters() {
+      activityView.page = 1;
+      loadDashboard(true);
     }
 
-    function resetActivityFilters(mode) {
-      ['Search','UserFilter','ActionFilter','StatusFilter','DateFrom','DateTo'].forEach(suffix => {
-        const el = document.getElementById(activityId(mode, suffix));
+    function resetActivityFilters() {
+      ACTIVITY_FILTERS.forEach(suffix => {
+        const el = activityEl(suffix);
         if (el) el.value = '';
       });
-      const source = document.getElementById(activityId(mode, 'SourceFilter'));
-      if (source) source.value = 'ALL';
-      activityViews[mode].page = 1;
-      loadDashboard(true, mode);
+      activityView.page = 1;
+      loadDashboard(true);
     }
 
-    function changeActivityPage(mode, direction) {
-      activityViews[mode].page = Math.max(1, activityViews[mode].page + Number(direction || 0));
-      loadDashboard(false, mode);
+    function changeActivityPage(direction) {
+      activityView.page = Math.max(1, activityView.page + Number(direction || 0));
+      loadDashboard(false);
     }
 
-    const lastLogSignature = { activity:'', admin:'' };
+    let lastLogSignature = '';
 
-    // Render data dashboard ke DOM. Dipakai loadDashboard (fetch manual) DAN live-poll.
-    function applyDashboardData(data, mode, silent) {
-      mode = mode === 'admin' ? 'admin' : 'activity';
-      const isAdminMode = mode === 'admin';
-      const bodyTarget = isAdminMode ? 'adminActivityBody' : 'activityBody';
-      const userStats = document.getElementById('userStats');
-      const adminStats = document.getElementById('adminStats');
-      const adminStatus = document.getElementById('adminLoadStatus');
+    // Render data aktivitas ke DOM. Dipakai loadDashboard (fetch manual) DAN live-poll.
+    function applyDashboardData(data) {
       if (!data.pagination) data.pagination = { page:1, pageSize:75, total:(data.rows||[]).length, totalPages:1, hasPrev:false, hasNext:false };
 
+      const userStats = document.getElementById('userStats');
       if (userStats) userStats.innerHTML = statCards(data.stats);
-      if (isAdminMode && adminStats) adminStats.innerHTML = statCards(data.stats);
 
       // Hanya render ulang tabel bila isinya benar-benar berubah -> tidak mengganggu
       // baris log yang sedang dibuka user saat auto-refresh.
       const sig = (data.rows.length ? String(data.rows[0][0]) + '|' + String(data.rows[0][4] || '') : 'empty')
         + '#' + ((data.pagination && data.pagination.total) || 0)
         + '@' + ((data.pagination && data.pagination.page) || 1);
-      if (lastLogSignature[mode] !== sig) {
-        renderLogs(data.rows, bodyTarget);
-        lastLogSignature[mode] = sig;
+      if (lastLogSignature !== sig) {
+        renderLogs(data.rows, 'activityBody');
+        lastLogSignature = sig;
       }
-      updateActivityMeta(mode, data);
+      updateActivityMeta(data);
 
       const options = data.filterOptions || null;
-      fillActivitySelect(activityId(mode, 'UserFilter'), 'Semua User', options && options.usernames);
-      fillActivitySelect(activityId(mode, 'ActionFilter'), 'Semua Aksi', options && options.actions);
-      fillActivitySelect(activityId(mode, 'StatusFilter'), 'Semua Status', options && options.statuses);
+      fillActivitySelect('activityUserFilter', 'Semua User', options && options.usernames);
+      fillActivitySelect('activityActionFilter', 'Semua Aksi', options && options.actions);
+      fillActivitySelect('activityStatusFilter', 'Semua Status', options && options.statuses);
 
-      if (data.role === 'ADMIN') {
-        const maintenance = data.maintenance || {enabled:false,message:''};
-        maintenanceState = !!maintenance.enabled;
-        const switchEl = document.getElementById('maintenanceSwitch');
-        const messageEl = document.getElementById('maintenanceMessage');
-        if (switchEl) switchEl.classList.toggle('on', maintenanceState);
-        if (messageEl && document.activeElement !== messageEl) messageEl.value = maintenance.message || '';
-      } else if (data.maintenance) {
-        setMaintenanceLock(data.maintenance.enabled, data.maintenance.message);
-      }
+      // Form maintenance admin punya loader sendiri (loadMaintenanceState) --
+      // data aktivitas bisa dari cache lama, jadi tidak dipakai untuk form itu.
+      if (data.maintenance && data.role !== 'ADMIN') setMaintenanceLock(data.maintenance.enabled, data.maintenance.message);
 
-      if (!silent && isAdminMode && adminStatus) {
-        adminStatus.className = 'text-xs text-emerald-300 rounded-2xl border border-emerald-500/25 bg-emerald-500/5 px-4 py-3';
-        adminStatus.textContent = `Data berhasil dimuat • ${data.pagination.total} aktivitas ditemukan`;
-        setTimeout(() => adminStatus.style.display = 'none', 2200);
-      }
-
-      pageDataCache[mode] = data;
-      pageFetchedAt[mode] = Date.now();
+      pageDataCache.activity = data;
+      pageFetchedAt.activity = Date.now();
     }
 
-    function loadDashboard(forceRefresh, mode) {
-      mode = mode === 'admin' ? 'admin' : 'activity';
-      const isAdminMode = mode === 'admin';
-      const adminStatus = document.getElementById('adminLoadStatus');
-      const userStats = document.getElementById('userStats');
-      const adminStats = document.getElementById('adminStats');
-      const bodyTarget = isAdminMode ? 'adminActivityBody' : 'activityBody';
-
-      if (isAdminMode && adminStatus) {
-        adminStatus.style.display = 'block';
-        adminStatus.className = 'text-xs text-cyan-300 rounded-2xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3';
-        adminStatus.textContent = 'Memuat statistik, Activity Log, dan BackUp Activity Log...';
-      }
-
-      if (!currentUser) {
-        if (adminStatus) {
-          adminStatus.className = 'text-xs text-rose-300 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3';
-          adminStatus.textContent = 'Sesi user tidak ditemukan. Silakan logout lalu login kembali.';
-        }
-        return;
-      }
+    function loadDashboard(forceRefresh) {
+      if (!currentUser) return;
 
       // Skeleton hanya kalau belum ada data yang bisa ditampilkan (hindari "kedip"
       // saat refresh diam-diam / polling).
-      if (!pageDataCache[mode]) renderSkeletonRows(bodyTarget, 6);
+      if (!pageDataCache.activity) { renderSkeletonRows('activityBody', 6, 6); lastLogSignature = ''; }
+      const meta = activityEl('Meta');
       const slowNoticeTimer = setTimeout(() => {
-        if (isAdminMode && adminStatus) adminStatus.textContent = 'Masih memuat, data cukup banyak... mohon tunggu sebentar.';
+        if (meta) meta.textContent = 'Masih memuat, data cukup banyak... mohon tunggu sebentar.';
       }, 5000);
 
       google.script.run
         .withSuccessHandler(data => {
           clearTimeout(slowNoticeTimer);
-          try {
-            if (!data || !data.stats || !Array.isArray(data.rows)) {
-              throw new Error('Format data dashboard dari server tidak lengkap. Coba muat ulang halaman.');
-            }
-            applyDashboardData(data, mode);
-          } catch (err) {
-            renderLogs([], bodyTarget);
-            if (adminStatus) {
-              adminStatus.className = 'text-xs text-rose-300 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3';
-              adminStatus.textContent = err.message;
-            }
+          if (apiFailed(data) || !data.stats || !Array.isArray(data.rows)) {
+            const message = apiMessage(data, 'Format data aktivitas dari server tidak lengkap. Coba muat ulang halaman.');
+            if (!pageDataCache.activity) renderLogs([], 'activityBody');
+            if (meta) meta.textContent = message;
+            return;
           }
+          applyDashboardData(data);
         })
         .withFailureHandler(error => {
           clearTimeout(slowNoticeTimer);
-          const message = (error && error.message) || 'Gagal menghubungi server dashboard.';
-          renderLogs([], bodyTarget);
-          if (adminStatus) {
-            adminStatus.className = 'text-xs text-rose-300 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3';
-            adminStatus.textContent = message + ' Coba muat ulang; kalau berlanjut, hubungi admin.';
-          }
+          const message = (error && error.message) || 'Gagal menghubungi server.';
+          if (!pageDataCache.activity) renderLogs([], 'activityBody');
+          if (meta) meta.textContent = message + ' Coba muat ulang; kalau berlanjut, hubungi admin.';
           toast(message);
         })
-        .getDashboardData(currentSessionToken, getActivityRequest(mode, true));
+        .getDashboardData(currentSessionToken, getActivityRequest(true));
     }
 
     function runActivityBackupNow() {
       const status = document.getElementById('backupActivityStatus');
-      if (status) status.textContent = 'Menjalankan backup...';
+      const btn = document.getElementById('logPruneBtn');
+      if (status) status.textContent = 'Memangkas log lebih tua dari 7 hari...';
+      if (btn) btn.disabled = true;
       google.script.run
         .withSuccessHandler(result => {
-          if (status) status.textContent = result.message || 'Backup selesai.';
-          toast(result.message || 'Backup selesai.');
-          loadDashboard(true, 'admin');
+          if (btn) btn.disabled = false;
+          const message = apiMessage(result, apiFailed(result) ? 'Gagal membersihkan log.' : 'Log lama sudah dibersihkan.');
+          if (status) status.textContent = message;
+          toast(message);
+          // Jumlah baris berubah -> menu Aktivitas memuat ulang saat dibuka berikutnya.
+          if (!apiFailed(result)) pageFetchedAt.activity = 0;
         })
         .withFailureHandler(error => {
-          const message = (error && error.message) || 'Backup gagal.';
+          if (btn) btn.disabled = false;
+          const message = (error && error.message) || 'Gagal membersihkan log.';
           if (status) status.textContent = message;
           toast(message);
         })
@@ -4252,22 +4503,6 @@
         .adminRunAutoPostNow(currentSessionToken);
     }
 
-    function installActivityBackupTrigger() {
-      const status = document.getElementById('backupActivityStatus');
-      if (status) status.textContent = 'Mengaktifkan trigger backup harian...';
-      google.script.run
-        .withSuccessHandler(result => {
-          if (status) status.textContent = result.message || 'Auto Backup aktif.';
-          toast(result.message || 'Auto Backup aktif.');
-        })
-        .withFailureHandler(error => {
-          const message = (error && error.message) || 'Gagal mengaktifkan Auto Backup.';
-          if (status) status.textContent = message;
-          toast(message);
-        })
-        .setupActivityBackupTrigger(currentSessionToken);
-    }
-
     let lastSessionsSignature = '';
     function renderActiveSessions(data) {
       const meta = document.getElementById('activeSessionsMeta');
@@ -4341,7 +4576,7 @@
           <td class="font-extrabold text-white" title="${escapeHtml(u.username)}">${escapeHtml(u.username)}</td>
           <td title="${escapeHtml(u.displayName||'-')}">${escapeHtml(u.displayName||'-')}</td>
           <td title="${escapeHtml(u.websites||'-')}">${escapeHtml(u.websites||'-')}</td>
-          <td><span class="px-2 py-1 rounded-full bg-amber-500/10 text-amber-300 text-[9px] font-bold">${escapeHtml(u.role)}</span></td>
+          <td><span class="px-2 py-1 rounded-full bg-amber-500/10 text-amber-300 text-[9px] font-bold">${escapeHtml(u.role)}</span><div class="user-menu-chip" title="Menu yang boleh dibuka"><i class="fa-solid fa-key"></i>Menu ${escapeHtml(userMenuSummary(u))}</div></td>
           <td><span class="px-2 py-1 rounded-full ${u.status==='AKTIF'?'bg-emerald-500/10 text-emerald-300':'bg-rose-500/10 text-rose-300'} text-[9px] font-bold">${escapeHtml(u.status)}</span></td>
           <td>${boolBadge(u.telegram,'')}</td>
           <td>${boolBadge(u.linktree,'')}</td>
@@ -4447,21 +4682,68 @@
       document.getElementById('editDisplayName').value=u?u.displayName:'';
       document.getElementById('editRole').value=u?u.role:'OPERATOR';
       document.getElementById('editStatus').value=u?u.status:'AKTIF';
-      document.getElementById('editTimeout').value=u?u.timeout:60;
       document.getElementById('editNote').value=u?u.note:'';
       document.getElementById('editTelegram').checked=u?u.telegram:true;
       document.getElementById('editLinktree').checked=u?u.linktree:true;
       document.getElementById('editPanelz').checked=u?u.panelz:true;
+      renderUserMenuAccess(u ? u.menus : null);
       document.getElementById('userModalError').classList.add('hidden');
       document.getElementById('userEditModal').style.display='flex';document.body.classList.add('modal-open');
     }
+    // Checklist "Akses Menu" di modal user. null = semua menu (default).
+    function renderUserMenuAccess(menus) {
+      const list = document.getElementById('editMenusList');
+      if (!list) return;
+      const all = !Array.isArray(menus);
+      const groups = [];
+      MENU_ACCESS_ITEMS.forEach(m => { let g = groups.find(x => x.name === m.group); if (!g) groups.push(g = { name: m.group, items: [] }); g.items.push(m); });
+      list.innerHTML = groups.map(g => '<div class="menu-access-group"><div class="menu-access-group-name">' + escapeHtml(g.name) + '</div>' +
+        g.items.map(m => '<label class="menu-access-item"><input type="checkbox" value="' + escapeHtml(m.key) + '"' + (all || menus.includes(m.key) ? ' checked' : '') +
+          ' onchange="syncUserMenusAllBox()"><span>' + escapeHtml(m.label) + '</span></label>').join('') + '</div>').join('');
+      syncUserMenusAllBox();
+      syncUserMenuAccessState();
+    }
+    function toggleAllUserMenus(on) {
+      document.querySelectorAll('#editMenusList input[type=checkbox]').forEach(cb => { cb.checked = on; });
+      syncUserMenusAllBox();
+    }
+    function syncUserMenusAllBox() {
+      const boxes = Array.from(document.querySelectorAll('#editMenusList input[type=checkbox]'));
+      const allBox = document.getElementById('editMenusAll');
+      if (!allBox) return;
+      const n = boxes.filter(b => b.checked).length;
+      allBox.checked = n === boxes.length;
+      allBox.indeterminate = n > 0 && n < boxes.length;
+    }
+    function syncUserMenuAccessState() {
+      const role = String((document.getElementById('editRole') || {}).value || '').toUpperCase();
+      const box = document.getElementById('editMenuAccess');
+      const hint = document.getElementById('editMenuAccessHint');
+      const locked = role === 'ADMIN' || role === 'BOT';
+      if (box) box.classList.toggle('is-locked', locked);
+      document.querySelectorAll('#editMenuAccess input[type=checkbox]').forEach(cb => { cb.disabled = locked; });
+      if (hint) hint.textContent = role === 'ADMIN' ? 'ADMIN selalu bisa membuka semua menu.'
+        : role === 'BOT' ? 'Akun BOT hanya bisa membuka menu BOT.'
+        : 'Centang menu yang boleh dibuka user ini. Dashboard selalu tersedia.';
+    }
+    function collectUserMenus() {
+      const boxes = Array.from(document.querySelectorAll('#editMenusList input[type=checkbox]'));
+      const keys = boxes.filter(b => b.checked).map(b => b.value);
+      return keys.length === boxes.length ? 'all' : keys;
+    }
+    function userMenuSummary(u) {
+      if (u.role === 'ADMIN') return 'Semua';
+      if (!Array.isArray(u.menus)) return 'Semua';
+      return u.menus.length + '/' + MENU_ACCESS_ITEMS.length;
+    }
+
     function closeUserModal(){document.getElementById('userEditModal').style.display='none';document.body.classList.remove('modal-open');}
     function saveUserFromModal(){
       const btn=document.getElementById('saveUserBtn'),err=document.getElementById('userModalError');err.classList.add('hidden');
-      const payload={originalUsername:document.getElementById('userOriginalUsername').value,username:document.getElementById('editUsername').value.trim(),password:document.getElementById('editPassword').value,websites:document.getElementById('editWebsite').value.trim(),displayName:document.getElementById('editDisplayName').value.trim(),role:document.getElementById('editRole').value,status:document.getElementById('editStatus').value,timeout:Number(document.getElementById('editTimeout').value||60),note:document.getElementById('editNote').value.trim(),telegram:document.getElementById('editTelegram').checked,linktree:document.getElementById('editLinktree').checked,panelz:document.getElementById('editPanelz').checked};
+      const payload={originalUsername:document.getElementById('userOriginalUsername').value,username:document.getElementById('editUsername').value.trim(),password:document.getElementById('editPassword').value,websites:document.getElementById('editWebsite').value.trim(),displayName:document.getElementById('editDisplayName').value.trim(),role:document.getElementById('editRole').value,status:document.getElementById('editStatus').value,menus:collectUserMenus(),note:document.getElementById('editNote').value.trim(),telegram:document.getElementById('editTelegram').checked,linktree:document.getElementById('editLinktree').checked,panelz:document.getElementById('editPanelz').checked};
       if(!payload.username||(!payload.originalUsername&&!payload.password)){err.textContent='Username dan password wajib diisi untuk akun baru.';err.classList.remove('hidden');return;}
       btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin mr-2"></i>MENYIMPAN...';
-      google.script.run.withSuccessHandler(res=>{btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN USER';closeUserModal();toast(res.message||'User berhasil disimpan');loadUsers(true);loadDashboard(true,'admin');}).withFailureHandler(e=>{btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN USER';err.textContent=(e&&e.message)||'Gagal menyimpan user';err.classList.remove('hidden');}).adminSaveUser(currentSessionToken,payload);
+      google.script.run.withSuccessHandler(res=>{btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN USER';if(apiFailed(res)){err.textContent=apiMessage(res,'Gagal menyimpan user');err.classList.remove('hidden');return;}closeUserModal();toast(res.message||'User berhasil disimpan');loadUsers(true);pageFetchedAt.activity=0;}).withFailureHandler(e=>{btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN USER';err.textContent=(e&&e.message)||'Gagal menyimpan user';err.classList.remove('hidden');}).adminSaveUser(currentSessionToken,payload);
     }
 
     let centerNoticeResolver = null;
@@ -4577,9 +4859,11 @@ Tindakan ini tidak dapat dibatalkan.`,
       google.script.run
         .withSuccessHandler(result => {
           closeActionPopup();
+          // Shim /api mengirim error server ke success handler -> cek dulu.
+          if (apiFailed(result)) { notifyCenter(apiMessage(result, 'Gagal menghapus user.'), 'danger', 'Gagal Menghapus'); return; }
           notifyCenter(result.message || 'User berhasil dihapus.', 'success', 'User Dihapus');
           loadUsers(true);
-          loadDashboard(true,'admin');
+          pageFetchedAt.activity = 0;
         })
         .withFailureHandler(error => {
           closeActionPopup();
@@ -4603,6 +4887,7 @@ Tindakan ini tidak dapat dibatalkan.`,
       google.script.run
         .withSuccessHandler(result => {
           closeActionPopup();
+          if (apiFailed(result)) { notifyCenter(apiMessage(result, 'Gagal mereset akun.'), 'danger', 'Reset Gagal'); return; }
           notifyCenter(result.message || 'Akun berhasil direset.', 'success', 'Akun Dibuka');
           loadUsers(true);
         })
@@ -4639,8 +4924,66 @@ Tindakan ini tidak dapat dibatalkan.`,
       if (el) el.addEventListener('mousedown', e => { if (e.target === el) closeTopModal(); });
     });
 
-    function toggleMaintenance(){maintenanceState=!maintenanceState;document.getElementById('maintenanceSwitch').classList.toggle('on',maintenanceState);}
-    function saveMaintenance(){google.script.run.withSuccessHandler(x=>{if(apiFailed(x)){toast(apiMessage(x,'Gagal menyimpan maintenance'));return;}maintenanceState=!!x.enabled;document.getElementById('maintenanceSwitch').classList.toggle('on',maintenanceState);toast('Pengaturan maintenance disimpan');}).withFailureHandler(e=>toast(e.message)).setMaintenance(currentSessionToken,maintenanceState,document.getElementById('maintenanceMessage').value);}
+    /* ===== Maintenance (Admin -> Maintenance & Log) =====
+       Switch & pesan dimuat dari server SETIAP panel dibuka. Dulu cuma terisi
+       dari tab "Dashboard" admin, jadi admin yang langsung membuka Maintenance
+       sesudah reload melihat switch OFF walau maintenance sedang AKTIF -- dan
+       menekan SIMPAN mematikannya tanpa sengaja. */
+    let maintenanceLoaded = false;
+    function paintMaintenanceSwitch() {
+      const switchEl = document.getElementById('maintenanceSwitch');
+      if (!switchEl) return;
+      switchEl.classList.toggle('on', maintenanceState);
+      switchEl.setAttribute('aria-checked', maintenanceState ? 'true' : 'false');
+    }
+    function applyMaintenanceForm(maintenance) {
+      const m = maintenance || { enabled:false, message:'' };
+      maintenanceState = !!m.enabled;
+      maintenanceLoaded = true;
+      paintMaintenanceSwitch();
+      const messageEl = document.getElementById('maintenanceMessage');
+      if (messageEl && document.activeElement !== messageEl) messageEl.value = m.message || '';
+      const meta = document.getElementById('maintenanceMeta');
+      if (meta) {
+        meta.textContent = maintenanceState ? 'Status: AKTIF — operator sedang terkunci.' : 'Status: NONAKTIF — panel berjalan normal.';
+        meta.className = 'text-[10px] font-bold ' + (maintenanceState ? 'text-amber-300' : 'text-emerald-400');
+      }
+    }
+    function loadMaintenanceState() {
+      const meta = document.getElementById('maintenanceMeta');
+      // Kunci switch & tombol SIMPAN sampai status TERBARU dari server tiba --
+      // jangan sampai admin menyimpan status lama tanpa sadar.
+      maintenanceLoaded = false;
+      if (meta) { meta.className = 'text-[10px] text-slate-500'; meta.textContent = 'Memuat status maintenance…'; }
+      const fail = msg => { if (meta) { meta.className = 'text-[10px] text-rose-300'; meta.textContent = msg + ' Buka ulang tab ini untuk mencoba lagi.'; } };
+      google.script.run
+        .withSuccessHandler(p => {
+          if (apiFailed(p) || !p.maintenance) { fail(apiMessage(p, 'Gagal memuat status maintenance.')); return; }
+          applyMaintenanceForm(p.maintenance);
+        })
+        .withFailureHandler(e => fail((e && e.message) || 'Gagal memuat status maintenance.'))
+        .getCurrentUserProfile(currentSessionToken);
+    }
+    function toggleMaintenance(){
+      if (!maintenanceLoaded) { toast('Tunggu status maintenance selesai dimuat'); return; }
+      maintenanceState = !maintenanceState;
+      paintMaintenanceSwitch();
+    }
+    function saveMaintenance(){
+      if (!maintenanceLoaded) { toast('Tunggu status maintenance selesai dimuat'); return; }
+      const btn = document.getElementById('maintenanceSaveBtn');
+      if (btn) { btn.disabled = true; btn.textContent = 'MENYIMPAN...'; }
+      const done = () => { if (btn) { btn.disabled = false; btn.textContent = 'SIMPAN PENGATURAN'; } };
+      google.script.run
+        .withSuccessHandler(x => {
+          done();
+          if (apiFailed(x)) { toast(apiMessage(x, 'Gagal menyimpan maintenance')); return; }
+          applyMaintenanceForm({ enabled: !!x.enabled, message: x.message });
+          toast('Pengaturan maintenance disimpan');
+        })
+        .withFailureHandler(e => { done(); toast((e && e.message) || 'Gagal menyimpan maintenance'); })
+        .setMaintenance(currentSessionToken, maintenanceState, document.getElementById('maintenanceMessage').value);
+    }
 
     /* =========================================================
        MENU INVEST — AutoCheck batas line invest per user.
@@ -4661,6 +5004,7 @@ Tindakan ini tidak dapat dibatalkan.`,
       google.script.run
         .withSuccessHandler(res => {
           if (!res || !res.success) { if (box) box.textContent = (res && res.message) || 'Gagal memuat setting.'; return; }
+          pageFetchedAt.invest = Date.now();
           const c = res.config || {};
           investSetVal('investBaseUrl', c.BASE_URL);
           investSetVal('investPhpsessid', c.PHPSESSID);
@@ -5085,7 +5429,9 @@ Tindakan ini tidak dapat dibatalkan.`,
         const el = document.getElementById('bot-sec-' + p.replace('bot-', ''));
         if (el) el.style.display = (p === page) ? 'flex' : 'none';
       });
-      loadBotNews();
+      // Semua sub-halaman BOT memakai snapshot yang sama: pindah tab tidak perlu
+      // menarik ulang 6 query Turso kalau datanya baru dimuat (<20 dtk).
+      if (Date.now() - pageFetchedAt.bot > 20000) loadBotNews();
     }
     function renderBotAutoBar(on){
       const bar = document.getElementById('botAutoChip');
@@ -5182,6 +5528,7 @@ Tindakan ini tidak dapat dibatalkan.`,
     }
     function applyBotNews(snap){
       if (!snap || !snap.success) return;
+      pageFetchedAt.bot = Date.now();
       const c = snap.config || {};
       botHistoryCache = snap.history || [];
       renderBotHistory();
@@ -5203,6 +5550,7 @@ Tindakan ini tidak dapat dibatalkan.`,
       if (hint) hint.textContent = (c.has_gemini_key?'Gemini key OK':'Gemini key BELUM ada') + ' · ' + (c.has_groq_key?'Groq cadangan OK':'Groq cadangan belum diisi') + ' · ' + (c.has_blogger?'Blogger OK':'Blogger BELUM tersambung');
       const fbHint = document.getElementById('botFbHint');
       if (fbHint) fbHint.textContent = c.has_facebook ? 'Facebook Page OK' : 'Facebook belum tersambung';
+      renderBloggerStatus(c);
 
       // Template FB (siapkan gambar+caption utk posting manual)
       const tplQueue = document.getElementById('botFbTplQueue'); if (tplQueue) tplQueue.textContent = snap.fbDirectQueue||0;
@@ -5266,13 +5614,95 @@ Tindakan ini tidak dapat dibatalkan.`,
       // in_progress/queued, otomatis lanjut poll sampai selesai.
       if (typeof botGithubPollStatus === 'function') botGithubPollStatus();
     }
+    // ===== Koneksi Blogger (OAuth) =====
+    function renderBloggerStatus(c, verified) {
+      const pill = document.getElementById('botBloggerPill');
+      const detail = document.getElementById('botBloggerDetail');
+      const alertBox = document.getElementById('botBloggerAlert');
+      const alertMsg = document.getElementById('botBloggerAlertMsg');
+      const err = String(c.blogger_auth_error || '');
+      let tone = 'ok', label = 'Terhubung';
+      if (!c.has_blogger_client) { tone = 'bad'; label = 'Client OAuth belum diisi'; }
+      else if (!c.has_blogger) { tone = 'bad'; label = 'Belum terhubung'; }
+      else if (err) { tone = 'bad'; label = 'Terputus'; }
+      if (pill) {
+        pill.className = 'blogger-pill is-' + tone;
+        pill.innerHTML = '<i class="fa-solid ' + (tone === 'ok' ? 'fa-circle-check' : 'fa-circle-xmark') + '"></i><span>' + escapeHtml(label) + '</span>';
+      }
+      const lines = [];
+      if (verified && verified.name) lines.push('Blog: <b>' + escapeHtml(verified.name) + '</b>' + (verified.url ? ' &middot; ' + escapeHtml(verified.url) : ''));
+      if (err) lines.push('<span class="text-rose-300">' + escapeHtml(err) + '</span>' + (c.blogger_auth_error_at ? ' <span class="text-slate-500">(' + escapeHtml(c.blogger_auth_error_at) + ')</span>' : ''));
+      if (c.blogger_connected_at) lines.push('Terakhir dihubungkan: ' + escapeHtml(c.blogger_connected_at));
+      if (c.blogger_refresh_expires_at) lines.push('<span class="text-amber-300"><i class="fa-solid fa-hourglass-half mr-1"></i>Izin ini kedaluwarsa ' + escapeHtml(c.blogger_refresh_expires_at) + ' WIB karena app Google masih <b>Testing</b>. Ubah ke In production supaya permanen.</span>');
+      if (detail) detail.innerHTML = lines.join('<br>');
+      const cid = document.getElementById('botBloggerClientId');
+      if (cid && !cid.value) cid.placeholder = c.blogger_client_id ? c.blogger_client_id : 'xxxx.apps.googleusercontent.com';
+      if (alertBox) {
+        const show = tone === 'bad';
+        alertBox.hidden = !show;
+        if (show && alertMsg) alertMsg.textContent = err || (label + ' -- artikel hanya tayang di situs sendiri sampai Blogger dihubungkan.');
+      }
+      if (tone === 'bad' && err) botBloggerToggleConnect(true);
+    }
+    function botBloggerToggleConnect(open) {
+      const box = document.getElementById('botBloggerConnect');
+      if (box) box.hidden = !open;
+    }
+    function botBloggerGoConnect() {
+      switchPage('bot-config');
+      botBloggerToggleConnect(true);
+      setTimeout(() => { const g = document.getElementById('botBloggerGroup'); if (g) g.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 120);
+    }
+    function botBloggerOpenAuth() {
+      // Buka jendela dulu (sinkron dgn klik) supaya tidak diblokir popup blocker,
+      // baru isi alamatnya sesudah server membalas.
+      const win = window.open('about:blank', '_blank');
+      google.script.run.withSuccessHandler(r => {
+        if (apiFailed(r) || !r.url) { if (win) win.close(); toast(apiMessage(r, 'Gagal membuat link izin Google')); return; }
+        if (win) win.location.href = r.url; else window.location.href = r.url;
+        const code = document.getElementById('botBloggerCode');
+        if (code) setTimeout(() => code.focus(), 400);
+      }).withFailureHandler(e => { if (win) win.close(); toast((e && e.message) || String(e)); }).botBloggerAuthUrl(currentSessionToken);
+    }
+    function botBloggerSubmitCode() {
+      const input = document.getElementById('botBloggerCode');
+      const btn = document.getElementById('botBloggerSaveBtn');
+      const val = String((input && input.value) || '').trim();
+      if (!val) { toast('Tempel dulu alamat dari address bar'); if (input) input.focus(); return; }
+      if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i>Menyimpan...'; }
+      const done = () => { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-floppy-disk mr-1.5"></i>Simpan &amp; Tes'; } };
+      google.script.run.withSuccessHandler(r => {
+        done();
+        if (r && r.snapshot) applyBotNews(r.snapshot);
+        if (!r || r.success === false) { toast(apiMessage(r, 'Gagal menghubungkan Blogger')); return; }
+        if (input) input.value = '';
+        botBloggerToggleConnect(false);
+        renderBloggerStatus((r.snapshot && r.snapshot.config) || {}, r.blog);
+        toast('Blogger terhubung' + (r.blog && r.blog.name ? ' ke ' + r.blog.name : '') + (r.requeued ? ' · ' + r.requeued + ' artikel kembali ke antrean' : ''));
+      }).withFailureHandler(e => { done(); toast((e && e.message) || String(e)); }).botBloggerConnect(currentSessionToken, { code: val });
+    }
+    function botBloggerTestConn() {
+      const btn = document.getElementById('botBloggerTestBtn');
+      if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i>Mengetes...'; }
+      const done = () => { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-stethoscope mr-1.5"></i>Tes Koneksi'; } };
+      google.script.run.withSuccessHandler(r => {
+        done();
+        if (apiFailed(r)) { toast(apiMessage(r)); return; }
+        if (r.snapshot) applyBotNews(r.snapshot);
+        renderBloggerStatus((r.snapshot && r.snapshot.config) || {}, r.ok ? r.blog : null);
+        toast(r.ok ? 'Blogger OK' + (r.blog && r.blog.name ? ': ' + r.blog.name : '') : 'Blogger bermasalah: ' + (r.message || '?'));
+      }).withFailureHandler(e => { done(); toast((e && e.message) || String(e)); }).botBloggerTest(currentSessionToken);
+    }
+
     function saveBotNewsConfig(){
       const g=id=>{const el=document.getElementById(id);return !el?'':(el.type==='checkbox'?(el.checked?'1':'0'):String(el.value||'').trim());};
       const data={enabled:g('botEnabled'),attribution:g('botAttribution'),per_run:g('botPerRun'),daily_cap:g('botDailyCap'),site_per_run:g('botSitePerRun'),auto_interval_minutes:g('botAutoInterval'),para_min:g('botParaMin'),para_max:g('botParaMax'),post_labels:g('botLabels'),promo_url:g('botPromoUrl'),promo_text:g('botPromoText'),gemini_model:g('botModel'),rewrite_style:g('botStyle'),blogger_blog_id:g('botBlogId'),fb_enabled:g('botFbEnabled'),fb_page_id:g('botFbPageId'),fb_page_url:g('botFbPageUrl'),wa_channel_url:g('botWaChannelUrl'),blogger_site_url:g('botBloggerSiteUrl'),news_banner_enabled:g('botNewsBannerEnabled'),news_banner_image:g('botNewsBannerImage'),news_banner_url:g('botNewsBannerUrl'),news_banner_text:g('botNewsBannerText')};
       const key=g('botGeminiKey'); if(key) data.gemini_key=key;
       const groqKey=g('botGroqKey'); if(groqKey) data.groq_key=groqKey;
       const fbTok=g('botFbToken'); if(fbTok) data.fb_page_token=fbTok;
-      google.script.run.withSuccessHandler(s=>{if(apiFailed(s)){toast('Gagal: '+apiMessage(s));return;}toast('Konfigurasi BOT tersimpan');['botGeminiKey','botGroqKey','botFbToken'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});applyBotNews(s);}).withFailureHandler(e=>toast('Gagal: '+((e&&e.message)||e))).botNewsSaveConfig(currentSessionToken,data);
+      const bcId=g('botBloggerClientId'); if(bcId) data.blogger_client_id=bcId;
+      const bcSecret=g('botBloggerClientSecret'); if(bcSecret) data.blogger_client_secret=bcSecret;
+      google.script.run.withSuccessHandler(s=>{if(apiFailed(s)){toast('Gagal: '+apiMessage(s));return;}toast('Konfigurasi BOT tersimpan');['botGeminiKey','botGroqKey','botFbToken','botBloggerClientSecret'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});applyBotNews(s);}).withFailureHandler(e=>toast('Gagal: '+((e&&e.message)||e))).botNewsSaveConfig(currentSessionToken,data);
     }
     function addBotSource(){
       const data={name:document.getElementById('botSrcName').value.trim(),kind:document.getElementById('botSrcKind').value,category:document.getElementById('botSrcCategory').value,url:document.getElementById('botSrcUrl').value.trim()};

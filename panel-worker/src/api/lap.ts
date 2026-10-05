@@ -1,17 +1,20 @@
-// Menu "Laporan Harian" â€” endpoint Worker.
+// Menu "Laporan Harian" — endpoint Worker.
 // Fase A: kredensial (Setting) + Lap Motion + Lap Mozart (API JSON, jalan langsung
 // di Worker). Lap Admin (scraper berat) menyusul lewat GitHub Actions.
 import { requireSession } from "./auth";
+import { hasMenu, LAP_MENU_KEYS, type MenuKey } from "../lib/menus";
 import { constEq } from "../lib/crypto";
 import { logActivity } from "../lib/activity";
-import { tsNow } from "../lib/time";
+import { tsNow, tsPlusMinutes } from "../lib/time";
 import { getTurso } from "../lib/turso"; // tabel lap_* ada di Turso, bukan D1
+import { rawJson } from "../lib/respond";
 import {
 	LapCreds,
 	extractPureUsername,
 	lapLoadCreds,
 	lapLoadResults,
-	lapLoadResultsModules,
+	lapLoadResultsModulesRaw,
+	LAP_RESULT_MODULES,
 	lapSaveCreds,
 	lapSaveResults,
 	num,
@@ -26,14 +29,24 @@ function credsForClient(c: LapCreds) {
 		linkMotion: c.linkMotion,
 		tokenMotion: c.tokenMotion,
 		vendorIdMotion: c.vendorIdMotion,
-		linkMozart: c.linkMozart,
-		tokenMozart: c.cookieMozart,
+		// Link/Cookie Mozart tidak dikirim ke browser lagi: UI tidak memakainya
+		// (data Mozart masuk lewat skrip Console), jadi cookie itu tidak perlu
+		// ikut beredar di halaman.
 		mozartAccounts: c.mozartAccounts,
 	};
 }
 
+// Modul hasil laporan -> menu pemiliknya (dipakai menyaring lapGetResults
+// supaya user yang cuma boleh Lap Motion tidak ikut menarik data Lap Admin).
+function lapModuleMenu(module: string): MenuKey {
+	const m = module.replace(/^_/, "").toLowerCase();
+	if (m.startsWith("motion")) return "lap-motion";
+	if (m.startsWith("mozart")) return "lap-mozart";
+	return "lap-admin";
+}
+
 export async function lapGetConfig(env: Env, token: string) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: LAP_MENU_KEYS });
 	// Konfigurasi dipisah dari hasil. Snapshot laporan bisa besar; jangan ikut
 	// ditarik setiap kali operator membuka/pindah menu.
 	const creds = await lapLoadCreds(env, s.username);
@@ -41,13 +54,13 @@ export async function lapGetConfig(env: Env, token: string) {
 }
 
 export async function lapGetResults(env: Env, token: string, modules: unknown) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
-	const wanted = Array.isArray(modules) ? modules.map(String) : [];
-	return { success: true, results: await lapLoadResultsModules(env, s.username, wanted) };
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: LAP_MENU_KEYS });
+	const wanted = (Array.isArray(modules) ? modules.map(String) : []).filter((m) => hasMenu(s.profile, lapModuleMenu(m)));
+	return rawJson('{"success":true,"results":' + (await lapLoadResultsModulesRaw(env, s.username, wanted)) + "}");
 }
 
 export async function lapSaveConfig(env: Env, token: string, data: Record<string, unknown>) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: LAP_MENU_KEYS });
 	const c = await lapSaveCreds(env, s.username, {
 		linkAdmin: str(data.linkAdmin),
 		cookieAdmin: str(data.cookiesAdmin ?? data.cookieAdmin),
@@ -84,7 +97,7 @@ export async function lapMotionImport(
 	depoCreateRows: unknown,
 	wdRows: unknown,
 ) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: "lap-motion" });
 	const listPaid = (Array.isArray(depoPaidRows) ? depoPaidRows : []) as Rec[];
 	const listCreate = (Array.isArray(depoCreateRows) ? depoCreateRows : []) as Rec[];
 	const listWd = (Array.isArray(wdRows) ? wdRows : []) as Rec[];
@@ -264,75 +277,14 @@ export async function lapMotionImport(
 		"BERHASIL",
 		"",
 	);
+	await recordLapImport(env, s.username, "motion", startDate, endDate,
+		[hasDepo ? `DP ${motionDpPga.length}` : "", hasDepo ? `Pending/Error ${pgaPendingError.length}` : "", hasWd ? `WD ${motionWdPga.length}` : ""].filter(Boolean).join(" · "));
 	return { success: true, summary, dp: motionDpPga.length, pending: pgaPendingError.length, wd: motionWdPga.length, hasDepo, hasWd };
 }
 
 // =========================================================================
-// LAP MOZART — via Apps Script.
-// Cloudflare Mozart (limatogel.makintajir.com) memblokir SEMUA IP datacenter
-// (Cloudflare Workers + GitHub Actions/Azure). IP Google Apps Script lolos,
-// jadi scrape Mozart dijalankan di Apps Script kecil (daygroup-mozart), panel
-// cukup memanggilnya sinkron.
+// LAP MOZART
 // =========================================================================
-export async function lapRunMozart(
-	env: Env,
-	token: string,
-	startDate: string,
-	endDate: string,
-	_opts: { depo?: boolean; wd?: boolean; panelId?: number } = {},
-) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
-	const c = await lapLoadCreds(env, s.username);
-	if (!c.cookieMozart) return { success: false, message: "Cookie Mozart belum diisi di menu Setting!" };
-	if (!env.MOZART_GAS_URL || !env.MOZART_GAS_KEY) {
-		return { success: false, message: "Endpoint Mozart (Apps Script) belum dikonfigurasi. Hubungi admin." };
-	}
-
-	let j: {
-		success?: boolean;
-		message?: string;
-		depositData?: Rec[];
-		withdrawData?: Rec[];
-		summary?: Rec;
-	};
-	try {
-		const r = await fetch(env.MOZART_GAS_URL, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({
-				key: env.MOZART_GAS_KEY,
-				cookie: c.cookieMozart,
-				base: c.linkMozart || "https://limatogel.makintajir.com",
-				startDate,
-				endDate,
-			}),
-		});
-		const text = await r.text();
-		j = JSON.parse(text);
-	} catch (e) {
-		return { success: false, message: "Gagal menghubungi Apps Script Mozart: " + (e instanceof Error ? e.message : String(e)) };
-	}
-	if (!j.success) return { success: false, message: j.message || "Apps Script Mozart gagal." };
-
-	const depositData = j.depositData ?? [];
-	const withdrawData = j.withdrawData ?? [];
-	const summary = j.summary ?? {};
-	await lapSaveResults(env, s.username, {
-		mozartDepo: depositData,
-		mozartWd: withdrawData,
-		_mozartMeta: [{ summary }],
-	});
-	await logActivity(
-		env,
-		s.username,
-		"LAP MOZART",
-		`${startDate}..${endDate} — DP ${depositData.length}, WD ${withdrawData.length}`,
-		"BERHASIL",
-		"",
-	);
-	return { success: true, depositData, withdrawData, summary };
-}
-
 // --- Impor Mozart dari browser user (bookmarklet) ------------------------
 // Cloudflare Mozart blok SEMUA IP non-residensial (Worker/GitHub/Apps Script).
 // Jalan terakhir: user jalankan bookmarklet di tab Mozart mereka -> fetch API
@@ -473,7 +425,7 @@ export async function lapMozartImport(
 	accountsRaw?: unknown,
 	panelsRaw?: unknown,
 ) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: "lap-mozart" });
 	const dRaw = Array.isArray(depositRows) ? (depositRows as Rec[]) : [];
 	const wRaw = Array.isArray(withdrawRows) ? (withdrawRows as Rec[]) : [];
 	const accIdx = buildAccIndex(accountsRaw);
@@ -542,11 +494,12 @@ export async function lapMozartImport(
 		"BERHASIL",
 		"",
 	);
+	await recordLapImport(env, s.username, "mozart", startDate, endDate, `Deposit ${depositData.length} · Withdraw ${withdrawData.length}`);
 	return { success: true, summary, deposit: depositData.length, withdraw: withdrawData.length };
 }
 
 // =========================================================================
-// LAP ADMIN â€” via GitHub Actions (scraper berat)
+// LAP ADMIN — via GitHub Actions (scraper berat)
 // =========================================================================
 const GH_API = "https://api.github.com";
 
@@ -609,9 +562,9 @@ async function dispatchScrapeJob(
 	if (resp.status !== 204) {
 		const body = await resp.text();
 		let hint = "";
-		if (resp.status === 404) hint = " â€” workflow scrape.yml belum ada. Push repo daygroup-scraper dulu.";
-		else if (resp.status === 403) hint = " â€” token GitHub kurang izin (butuh Actions: Read and write) atau belum akses repo daygroup-scraper.";
-		else if (resp.status === 422) hint = " â€” branch 'main' belum ada di repo (repo masih kosong).";
+		if (resp.status === 404) hint = " — workflow scrape.yml belum ada. Push repo daygroup-scraper dulu.";
+		else if (resp.status === 403) hint = " — token GitHub kurang izin (butuh Actions: Read and write) atau belum akses repo daygroup-scraper.";
+		else if (resp.status === 422) hint = " — branch 'main' belum ada di repo (repo masih kosong).";
 		let detail = "";
 		try {
 			detail = " [" + (JSON.parse(body).message || "") + "]";
@@ -623,11 +576,86 @@ async function dispatchScrapeJob(
 			.run();
 		return { success: false as const, message: "Gagal memicu GitHub Actions (" + resp.status + ")" + detail + hint };
 	}
-	return { success: true as const, jobId, message: "Dijalankan di GitHub Actions â€” ~1-3 menit." };
+	return { success: true as const, jobId, message: "Dijalankan di GitHub Actions — ~1-3 menit." };
+}
+
+// -------------------------------------------------------------------------
+// Progres & riwayat "Tarik Data" -- disimpan di lap_job (server), jadi tetap
+// terlihat walau operator pindah menu, reload, atau ganti perangkat.
+// -------------------------------------------------------------------------
+const JOB_MENU: Record<string, MenuKey> = { admin: "lap-admin", motion: "lap-motion", mozart: "lap-mozart" };
+// Job yang tidak bergerak selama ini dianggap macet (GitHub Actions gagal
+// start / runner mati di tengah jalan) supaya progres tidak berputar selamanya.
+const JOB_STALE_PENDING_MIN = 15;
+const JOB_STALE_RUNNING_MIN = 25;
+
+/** Import dari skrip console (Motion/Mozart) dicatat sebagai job selesai. */
+async function recordLapImport(env: Env, username: string, kind: "motion" | "mozart", startDate: string, endDate: string, message: string) {
+	try {
+		const now = tsNow();
+		await getTurso(env)
+			.prepare(
+				`INSERT INTO lap_job (id, username, kind, status, params, message, created_at, updated_at)
+				 VALUES (?, ?, ?, 'done', ?, ?, ?, ?)`,
+			)
+			.bind(crypto.randomUUID().replace(/-/g, ""), username, kind, JSON.stringify({ kind, startDate, endDate, source: "import" }), message || "Data diterima.", now, now)
+			.run();
+	} catch (e) {
+		// Riwayat hanya pelengkap -- jangan pernah menggagalkan import datanya.
+		console.error("recordLapImport gagal", e instanceof Error ? e.message : e);
+	}
+}
+
+export async function lapJobs(env: Env, token: string) {
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: LAP_MENU_KEYS });
+	const rows =
+		(
+			await getTurso(env)
+				.prepare(
+					`SELECT id, kind, status, params, message, created_at, updated_at FROM lap_job
+					 WHERE username = ? ORDER BY created_at DESC LIMIT 15`,
+				)
+				.bind(s.username)
+				.all<Record<string, string>>()
+		).results ?? [];
+	const stalePending = tsPlusMinutes(-JOB_STALE_PENDING_MIN);
+	const staleRunning = tsPlusMinutes(-JOB_STALE_RUNNING_MIN);
+	const jobs = rows
+		.filter((r) => hasMenu(s.profile, JOB_MENU[String(r.kind)] || "lap-admin"))
+		.map((r) => {
+			let p: { startDate?: string; endDate?: string; source?: string } = {};
+			try {
+				p = JSON.parse(r.params || "{}");
+			} catch {
+				/* abaikan */
+			}
+			let status = String(r.status);
+			let message = String(r.message || "");
+			if (status === "pending" && String(r.created_at) < stalePending) {
+				status = "stale";
+				message = `Tidak mulai dalam ${JOB_STALE_PENDING_MIN} menit -- GitHub Actions kemungkinan gagal start. Coba TARIK DATA lagi.`;
+			} else if (status === "running" && String(r.updated_at) < staleRunning) {
+				status = "stale";
+				message = `Tidak ada kabar ${JOB_STALE_RUNNING_MIN} menit -- proses kemungkinan berhenti. Coba TARIK DATA lagi.`;
+			}
+			// key job TIDAK pernah dikirim ke browser.
+			return {
+				id: String(r.id),
+				kind: String(r.kind),
+				status,
+				message,
+				startDate: String(p.startDate || ""),
+				endDate: String(p.endDate || ""),
+				source: p.source === "import" ? "import" : "github",
+				createdAt: String(r.created_at),
+				updatedAt: String(r.updated_at),
+			};
+		});
+	return { success: true, now: tsNow(), jobs: jobs.slice(0, 10) };
 }
 
 export async function lapRunAdmin(env: Env, token: string, startDate: string, endDate: string) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: "lap-admin" });
 	const c = await lapLoadCreds(env, s.username);
 	if (!c.linkAdmin || !c.cookieAdmin) return { success: false, message: "Link & Cookie Admin belum diisi di menu Setting!" };
 	const r = await dispatchScrapeJob(env, s.username, "admin", startDate, endDate, c.linkAdmin);
@@ -638,7 +666,7 @@ export async function lapRunAdmin(env: Env, token: string, startDate: string, en
 }
 
 export async function lapAdminStatus(env: Env, token: string, jobId: string) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: "lap-admin" });
 	const row = await getTurso(env).prepare(`SELECT * FROM lap_job WHERE id = ? AND username = ?`)
 		.bind(jobId, s.username)
 		.first<Record<string, string>>();
@@ -649,7 +677,11 @@ export async function lapAdminStatus(env: Env, token: string, jobId: string) {
 		message: row.message,
 		updatedAt: row.updated_at,
 	};
-	if (row.status === "done") out.results = await lapLoadResults(env, s.username);
+	if (row.status === "done") {
+		const modules = LAP_RESULT_MODULES.filter((m) => hasMenu(s.profile, lapModuleMenu(m)));
+		const head = JSON.stringify(out);
+		return rawJson(head.slice(0, -1) + ',"results":' + (await lapLoadResultsModulesRaw(env, s.username, modules)) + "}");
+	}
 	return out;
 }
 

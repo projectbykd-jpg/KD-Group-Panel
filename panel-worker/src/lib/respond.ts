@@ -13,3 +13,11 @@ export function json(data: unknown, status = 200): Response {
 		headers: { "content-type": "application/json; charset=utf-8", ...CORS_HEADERS },
 	});
 }
+
+/** Respons JSON dari teks yang SUDAH berupa JSON (tanpa stringify ulang). */
+export function rawJson(text: string, status = 200): Response {
+	return new Response(text, {
+		status,
+		headers: { "content-type": "application/json; charset=utf-8", ...CORS_HEADERS },
+	});
+}

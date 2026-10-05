@@ -4,7 +4,8 @@
 import { requireSession } from "./auth";
 import { hashPassword } from "../lib/crypto";
 import { logActivity } from "../lib/activity";
-import { getUserProfiles } from "../lib/db";
+import { getUserProfiles, withUserMenusColumn } from "../lib/db";
+import { MENU_ITEMS, parseMenus, serializeMenus } from "../lib/menus";
 import { listActiveSessions, migrateKvSessionsOnce } from "../lib/session";
 import { tsNow } from "../lib/time";
 
@@ -41,11 +42,13 @@ function toWebsitesJson(input: unknown): string {
 
 export async function adminListUsers(env: Env, token: string) {
 	await requireSession(env, token, { admin: true });
-	const res = await env.DB.prepare(
-		`SELECT username, display_name, websites, role, status,
-		        perm_telegram, perm_linktree, perm_panelz, last_login_at, failed_login, note
-		 FROM users ORDER BY lower(username)`,
-	).all<Record<string, unknown>>();
+	const res = await withUserMenusColumn(env, () =>
+		env.DB.prepare(
+			`SELECT username, display_name, websites, role, status,
+			        perm_telegram, perm_linktree, perm_panelz, last_login_at, failed_login, note, menus
+			 FROM users ORDER BY lower(username)`,
+		).all<Record<string, unknown>>(),
+	);
 	return (res.results ?? []).map((r) => {
 		let sites = "";
 		try {
@@ -65,9 +68,14 @@ export async function adminListUsers(env: Env, token: string) {
 			lastLogin: String(r.last_login_at ?? ""),
 			failed: Number(r.failed_login ?? 0),
 			note: String(r.note ?? ""),
+			// null = semua menu (default)
+			menus: parseMenus(r.menus),
 		};
 	});
 }
+
+/** Daftar menu yang bisa diatur per user (dipakai form Admin -> Users). */
+export const ADMIN_MENU_ITEMS = MENU_ITEMS;
 
 export async function adminSaveUser(env: Env, token: string, data: Record<string, unknown>) {
 	const admin = await requireSession(env, token, { admin: true });
@@ -109,6 +117,9 @@ export async function adminSaveUser(env: Env, token: string, data: Record<string
 	const telegram = data.telegram ? 1 : 0;
 	const linktree = data.linktree ? 1 : 0;
 	const panelz = data.panelz ? 1 : 0;
+	// Hak akses menu: ADMIN selalu semua menu -> simpan default ''.
+	const hasMenusField = Object.prototype.hasOwnProperty.call(data, "menus");
+	const menus = role === "ADMIN" ? "" : serializeMenus(data.menus);
 
 	if (originalRow) {
 		const sets = [
@@ -139,40 +150,49 @@ export async function adminSaveUser(env: Env, token: string, data: Record<string
 			sets.push("password_hash = ?");
 			args.push(await hashPassword(password));
 		}
+		// Form lama (cache browser) belum mengirim `menus` -> jangan diubah.
+		if (hasMenusField || role === "ADMIN") {
+			sets.push("menus = ?");
+			args.push(menus);
+		}
 		args.push(originalRow.id);
-		await env.DB.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).bind(...args).run();
+		await withUserMenusColumn(env, () => env.DB.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).bind(...args).run());
 		await logActivity(
 			env,
 			admin.username,
 			"EDIT USER",
 			`Target: ${username} | Role: ${role} | Status: ${status}`,
 			"BERHASIL",
-			`Website: ${websitesJson}`,
+			`Website: ${websitesJson} | Menu: ${menus || "semua"}`,
 		);
 		return { success: true, message: "User berhasil diperbarui." };
 	}
 
 	if (!password) throw new Error("Password wajib untuk akun baru.");
-	await env.DB.prepare(
-		`INSERT INTO users
-		   (username, username_lc, password_hash, websites, perm_telegram, perm_linktree, perm_panelz,
-		    role, status, display_name, note)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-	)
-		.bind(
-			username,
-			username.toLowerCase(),
-			await hashPassword(password),
-			websitesJson,
-			telegram,
-			linktree,
-			panelz,
-			role,
-			status,
-			displayName,
-			note,
+	const passwordHash = await hashPassword(password);
+	await withUserMenusColumn(env, () =>
+		env.DB.prepare(
+			`INSERT INTO users
+			   (username, username_lc, password_hash, websites, perm_telegram, perm_linktree, perm_panelz,
+			    role, status, display_name, note, menus)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
-		.run();
+			.bind(
+				username,
+				username.toLowerCase(),
+				passwordHash,
+				websitesJson,
+				telegram,
+				linktree,
+				panelz,
+				role,
+				status,
+				displayName,
+				note,
+				menus,
+			)
+			.run(),
+	);
 	await logActivity(
 		env,
 		admin.username,
@@ -316,18 +336,6 @@ export async function adminPruneActivityLog(env: Env, token: string) {
 		removed,
 		remaining: Number(after?.n ?? 0),
 		message: `${removed} baris log lama (> ${LOG_RETENTION_DAYS} hari) dihapus. Tersisa ${after?.n ?? 0} baris.`,
-	};
-}
-
-export async function adminSetLogRetention(env: Env, token: string) {
-	const s = await requireSession(env, token, { admin: true });
-	await setSetting(env, "log_retention_enabled", "TRUE");
-	await logActivity(env, s.username, "RETENSI LOG", "Auto retensi log 7 hari diaktifkan", "BERHASIL", "");
-	return {
-		success: true,
-		message:
-			`Auto retensi AKTIF: cron harian akan menghapus log lebih tua dari ${LOG_RETENTION_DAYS} hari ` +
-			"(dijalankan lewat /__cron). Tidak ada sheet backup terpisah — semua log di database utama.",
 	};
 }
 

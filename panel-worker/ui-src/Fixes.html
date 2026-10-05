@@ -23,6 +23,8 @@
     document.querySelectorAll('.livechat-op-only').forEach(function (el) { setVisible(el, isOp); });
     var lc = document.querySelector('.nav-group[data-group="livechat"]');
     if (lc) setVisible(lc, isOp);
+    // Hak akses menu per user (Admin -> Users) menang atas aturan role di atas.
+    if (typeof window.applyMenuAccess === 'function') window.applyMenuAccess();
     if (isBot) {
       document.querySelectorAll('.nav-extra, .nav-solo, .nav-group:not([data-group="bot"])').forEach(function (el) { setVisible(el, false); });
       var bg = document.querySelector('.nav-group[data-group="bot"]');

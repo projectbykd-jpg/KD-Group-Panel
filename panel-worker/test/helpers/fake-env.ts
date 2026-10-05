@@ -36,9 +36,9 @@ class FakeStatement {
 	}
 }
 
-export function fakeD1() {
+export function fakeD1(migrations: string[] = MIGRATIONS) {
 	const db = new DatabaseSync(":memory:");
-	for (const f of MIGRATIONS) db.exec(readFileSync(MIGRATION_DIR + f, "utf8"));
+	for (const f of migrations) db.exec(readFileSync(MIGRATION_DIR + f, "utf8"));
 	const d1 = {
 		prepare: (sql: string) => new FakeStatement(db, sql),
 		batch: async (stmts: FakeStatement[]) => Promise.all(stmts.map((s) => s.run())),
@@ -66,4 +66,9 @@ export function fakeEnv() {
 	const kv = fakeKV();
 	const env = { DB: d1, SESS: kv, TZ_OFFSET_HOURS: "7" } as unknown as Env;
 	return { env, db: raw, kv };
+}
+
+/** Turso tiruan (antarmuka sama dgn getTurso(env)) dari migrasi Turso asli. */
+export function fakeTurso() {
+	return fakeD1(["turso_004_bot_news.sql", "turso_005_news_category.sql", "turso_007_news_extra_columns.sql"]);
 }

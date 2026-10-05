@@ -3,7 +3,23 @@ import { requireSession } from "./auth";
 import { logActivity } from "../lib/activity";
 import { getTurso } from "../lib/turso";
 import { tsNow } from "../lib/time";
-import { botCfgSet, botNewsRun, botNewsSnapshot, ensureNewsCategoryColumns, fbDirectProcessOne, fbTemplateGenerate, NEWS_CATEGORIES } from "../lib/bot-news";
+import {
+	BloggerAuthError,
+	bloggerAuthUrl,
+	bloggerExchangeCode,
+	bloggerSetAuthState,
+	bloggerVerify,
+	botCfg,
+	botCfgSet,
+	botNewsRun,
+	botNewsSnapshot,
+	ensureNewsCategoryColumns,
+	fbDirectProcessOne,
+	fbTemplateGenerate,
+	NEWS_CATEGORIES,
+	requeueBloggerAuthFailures,
+	resetBloggerTokenCache,
+} from "../lib/bot-news";
 
 async function gate(env: Env, token: string) {
 	// BOT & ADMIN sama-sama boleh; OPERATOR/VIEWER ditolak.
@@ -27,12 +43,14 @@ export async function botNewsSaveConfig(env: Env, token: string, data: Record<st
 		"blogger_blog_id", "para_min", "para_max", "promo_url", "promo_text", "post_labels",
 		"fb_enabled", "fb_page_id", "fb_page_token", "fb_direct_enabled", "fb_direct_daily_cap", "fb_page_url", "wa_channel_url", "blogger_site_url",
 		"news_banner_enabled", "news_banner_image", "news_banner_url", "news_banner_text", "auto_interval_minutes",
+		"blogger_client_id", "blogger_client_secret", "blogger_redirect_uri",
 	];
 	for (const k of allow) {
 		if (Object.prototype.hasOwnProperty.call(data, k)) {
 			let v = String((data as any)[k] ?? "").trim();
 			if (k === "enabled" || k === "attribution" || k === "fb_enabled" || k === "fb_direct_enabled" || k === "news_banner_enabled") v = v === "1" || v === "true" ? "1" : "0";
-			if ((k === "fb_page_token") && !v) continue; // kosongkan input token TIDAK menghapus yg tersimpan
+			// kosongkan input token/secret TIDAK menghapus yg tersimpan
+			if ((k === "fb_page_token" || k === "blogger_client_secret" || k === "blogger_client_id") && !v) continue;
 			patch[k] = v;
 		}
 	}
@@ -105,7 +123,9 @@ export async function botNewsRunSiteNow(env: Env, token: string, count?: number)
 // Repo TEMPAT workflow news-turbo.yml hidup -- SENGAJA di-hardcode terpisah
 // dari env.GH_REPO (itu punya repo scraper LAIN, daygroup-scraper, dipakai
 // fitur LAP ADMIN di lap.ts, bukan repo panel ini).
-const NEWS_TURBO_REPO = "projectbykd-jpg/Day-Group-Panel";
+// Nama repo SEKARANG (dulu "Day-Group-Panel"; GitHub masih mengalihkan nama
+// lama, tapi pengalihan itu putus kalau nama lama dipakai repo lain).
+const NEWS_TURBO_REPO = "projectbykd-jpg/KD-Group-Panel";
 
 /**
  * Tombol "PROSES BANYAK VIA GITHUB" -- alternatif dari botNewsRunNow/
@@ -254,6 +274,63 @@ export async function botNewsSkip(env: Env, token: string, data: Record<string, 
 	if (!id) throw new Error("id artikel wajib.");
 	await getTurso(env).prepare(`UPDATE news_article SET status='skipped' WHERE id = ? AND status IN ('new','error')`).bind(id).run();
 	return botNewsSnapshot(env);
+}
+
+// ---------------------------------------------------------------------------
+// Koneksi Blogger (OAuth) -- supaya pemilik bisa memperbarui izin Google
+// sendiri dari panel saat token kedaluwarsa, tanpa mengutak-atik database.
+// ---------------------------------------------------------------------------
+export async function botBloggerAuthUrl(env: Env, token: string) {
+	await gate(env, token);
+	const cfg = await botCfg(env);
+	return { success: true, url: bloggerAuthUrl(cfg) };
+}
+
+export async function botBloggerConnect(env: Env, token: string, data: Record<string, unknown>) {
+	const s = await gate(env, token);
+	const cfg = await botCfg(env);
+	const { refreshToken, refreshExpiresAt } = await bloggerExchangeCode(cfg, String(data.code ?? ""));
+	await botCfgSet(env, {
+		blogger_refresh_token: refreshToken,
+		blogger_refresh_expires_at: refreshExpiresAt,
+		blogger_connected_at: tsNow(),
+		blogger_auth_error: "",
+		blogger_auth_error_at: "",
+	});
+	resetBloggerTokenCache();
+	const fresh = await botCfg(env);
+	let blog = { name: "", url: "" };
+	let verifyError = "";
+	try {
+		blog = await bloggerVerify(env, fresh);
+	} catch (e) {
+		verifyError = e instanceof Error ? e.message : String(e);
+		if (e instanceof BloggerAuthError) await bloggerSetAuthState(env, fresh, verifyError);
+	}
+	const requeued = verifyError ? 0 : await requeueBloggerAuthFailures(env);
+	await logActivity(
+		env,
+		s.username,
+		"BOT BLOGGER CONNECT",
+		verifyError ? "Token tersimpan, verifikasi gagal: " + verifyError : `Terhubung ke ${blog.name || "blog"}; ${requeued} artikel dikembalikan ke antrean`,
+		verifyError ? "SEBAGIAN" : "BERHASIL",
+		"",
+	);
+	return { success: !verifyError, message: verifyError, blog, requeued, refreshExpiresAt, snapshot: await botNewsSnapshot(env) };
+}
+
+export async function botBloggerTest(env: Env, token: string) {
+	await gate(env, token);
+	const cfg = await botCfg(env);
+	try {
+		const blog = await bloggerVerify(env, cfg);
+		await bloggerSetAuthState(env, cfg, "");
+		return { success: true, ok: true, blog, snapshot: await botNewsSnapshot(env) };
+	} catch (e) {
+		const msg = e instanceof Error ? e.message : String(e);
+		if (e instanceof BloggerAuthError) await bloggerSetAuthState(env, cfg, msg);
+		return { success: true, ok: false, message: msg, snapshot: await botNewsSnapshot(env) };
+	}
 }
 
 // dipakai cron

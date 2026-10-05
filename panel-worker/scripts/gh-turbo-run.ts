@@ -123,6 +123,12 @@ async function main() {
 	const posted = runTarget === "site" ? 0 : await runLoop("blogger");
 	const siteOnly = runTarget === "blogger" ? 0 : await runLoop("site");
 	console.log(`\n=== SELESAI: ${posted} artikel ke Blogger, ${siteOnly} artikel ke situs sendiri ===`);
+	// Izin Blogger mati -> tandai jelas di halaman run GitHub (annotation
+	// kuning), supaya tidak tersembunyi di balik status "success".
+	if (runTarget !== "site") {
+		const cfg = await botCfg(env);
+		if (cfg.blogger_auth_error) console.log(`::warning title=Blogger terputus::${cfg.blogger_auth_error}`);
+	}
 }
 
 main().catch((e) => {

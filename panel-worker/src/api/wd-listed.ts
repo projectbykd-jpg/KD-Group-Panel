@@ -16,26 +16,26 @@ function toInput(r: Record<string, unknown>): WdListedInput {
 }
 
 export async function wdListedSync(env: Env, token: string, rows: unknown) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: "pga-pending" });
 	const list = Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
 	const added = await wdListedAdd(env, s.username, list.map(toInput));
 	return { success: true, added };
 }
 
 export async function wdListedGetList(env: Env, token: string) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: "pga-pending" });
 	const rows = await wdListedList(env, s.profile.websites || []);
 	return { success: true, rows };
 }
 
 export async function wdListedCheck(env: Env, token: string, id: number) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: "pga-pending" });
 	const row = await wdListedCheckStatus(env, Number(id), s.profile.websites || []);
 	return { success: true, row };
 }
 
 export async function wdListedRemove(env: Env, token: string, id: number) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: "pga-pending" });
 	await wdListedDelete(env, Number(id), s.profile.websites || []);
 	return { success: true };
 }

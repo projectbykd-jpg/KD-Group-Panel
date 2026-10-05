@@ -106,6 +106,8 @@
     var allowed = role === 'ADMIN' || role === 'OPERATOR';
     group.hidden = !allowed;
     group.style.setProperty('display', allowed ? '' : 'none', 'important');
+    // Hak akses menu per user (Admin -> Users) menang atas aturan role di atas.
+    if (allowed && typeof window.applyMenuAccess === 'function') window.applyMenuAccess();
   }
 
   function bootUiRepairs() {

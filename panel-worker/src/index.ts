@@ -17,7 +17,6 @@ import {
 	adminResetUserLock,
 	adminSaveUser,
 	adminSetAutoPost,
-	adminSetLogRetention,
 	pruneActivityLogCron,
 } from "./api/admin";
 import { adminDeleteSite, adminListSites, adminSaveSite } from "./api/sites";
@@ -54,14 +53,17 @@ import {
 	lapGetConfig,
 	lapGetResults,
 	lapJobResult,
+	lapJobs,
 	lapJobStart,
 	lapMotionImport,
 	lapMozartImport,
 	lapRunAdmin,
-	lapRunMozart,
 	lapSaveConfig,
 } from "./api/lap";
 import {
+	botBloggerAuthUrl,
+	botBloggerConnect,
+	botBloggerTest,
 	botFbRunNow,
 	botFbTemplateGenerate,
 	botNewsAddSource,
@@ -178,9 +180,9 @@ const ROUTES: Record<string, Handler> = {
 	adminGetAutoPostWebhook: (env, b) => adminGetAutoPostWebhook(env, s(b.token), s(b.__origin)),
 	adminSetAutoPost: (env, b) => adminSetAutoPost(env, s(b.token), !!b.enabled),
 
-	// retensi activity log (nama lama frontend: "backup")
+	// retensi activity log (nama lama frontend: "backup"). Auto-retensi selalu
+	// aktif lewat cron harian -- tidak ada tombol "aktifkan" lagi.
 	adminRunActivityBackup: (env, b) => adminPruneActivityLog(env, s(b.token)),
-	setupActivityBackupTrigger: (env, b) => adminSetLogRetention(env, s(b.token)),
 
 	// invest
 	investGetConfig: (env, b) => investGetConfig(env, s(b.token)),
@@ -211,8 +213,6 @@ const ROUTES: Record<string, Handler> = {
 	// dikirim sama sekali) harus tetap `undefined` sampai ke lapMotionImport
 	// supaya bisa dibedakan dari "dikirim tapi memang kosong" (`[]`).
 	lapMotionImport: (env, b) => lapMotionImport(env, s(b.token), s(b.startDate), s(b.endDate), b.depoPaidRows, b.depoCreateRows, b.wdRows),
-	lapRunMozart: (env, b) =>
-		lapRunMozart(env, s(b.token), s(b.startDate), s(b.endDate), (b.opts ?? {}) as { depo?: boolean; wd?: boolean; panelId?: number }),
 	lapRunAdmin: (env, b) => lapRunAdmin(env, s(b.token), s(b.startDate), s(b.endDate)),
 	lapMozartImport: (env, b) =>
 		lapMozartImport(
@@ -226,6 +226,7 @@ const ROUTES: Record<string, Handler> = {
 			b.panelsRaw ?? [],
 		),
 	lapAdminStatus: (env, b) => lapAdminStatus(env, s(b.token), s(b.jobId)),
+	lapJobs: (env, b) => lapJobs(env, s(b.token)),
 	lapGetResults: (env, b) => lapGetResults(env, s(b.token), b.modules ?? []),
 
 	// role BOT — modul NEWS
@@ -241,6 +242,9 @@ const ROUTES: Record<string, Handler> = {
 	botFbRunNow: (env, b) => botFbRunNow(env, s(b.token)),
 	botFbTemplateGenerate: (env, b) => botFbTemplateGenerate(env, s(b.token)),
 	botNewsSkip: (env, b) => botNewsSkip(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
+	botBloggerAuthUrl: (env, b) => botBloggerAuthUrl(env, s(b.token)),
+	botBloggerConnect: (env, b) => botBloggerConnect(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
+	botBloggerTest: (env, b) => botBloggerTest(env, s(b.token)),
 
 	// Live Chat Auto-Reply — sisi panel (sesi login ADMIN/OPERATOR)
 	livechatListSessions: (env, b) => livechatListSessions(env, s(b.token)),
@@ -297,6 +301,8 @@ export default {
 			if (!handler) return json({ success: false, message: "Aksi tidak dikenal: " + action }, 404);
 			try {
 				const out = await handler(env, body);
+				// Handler boleh membalas Response jadi (mis. JSON mentah hasil laporan).
+				if (out instanceof Response) return out;
 				if (INVEST_PUMP_ACTIONS.has(action)) {
 					// Pump scan user INI di latar belakang (lock per-user) -> scan-nya
 					// jalan sendiri, tidak antre di belakang user lain.
