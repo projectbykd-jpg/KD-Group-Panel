@@ -2,6 +2,22 @@
 import { requireSession } from "./auth";
 import { logActivity } from "../lib/activity";
 import { getTurso } from "../lib/turso";
+import {
+	AI_DEFAULT_VALID_DAYS,
+	aiChatProvider,
+	aiKeyId,
+	aiLastErrors,
+	aiLoadProviders,
+	aiRecentUsage,
+	aiSaveProviders,
+	aiUsageByKey,
+	maskKey,
+	normalizeBaseUrl,
+	pickWriterModel,
+	providerStatus,
+	wibToday,
+	type AiProvider,
+} from "../lib/ai-provider";
 import { tsNow } from "../lib/time";
 import {
 	BloggerAuthError,
@@ -39,7 +55,8 @@ export async function botNewsSaveConfig(env: Env, token: string, data: Record<st
 	const s = await gate(env, token);
 	const patch: Record<string, string> = {};
 	const allow = [
-		"enabled", "per_run", "daily_cap", "site_per_run", "attribution", "rewrite_style", "gemini_model", "gemini_key", "groq_key", "groq_model",
+		// API key AI TIDAK lewat sini lagi -- dikelola per provider (botAiSave).
+		"enabled", "per_run", "daily_cap", "site_per_run", "attribution", "rewrite_style", "images_per_article",
 		"blogger_blog_id", "para_min", "para_max", "promo_url", "promo_text", "post_labels",
 		"fb_enabled", "fb_page_id", "fb_page_token", "fb_direct_enabled", "fb_direct_daily_cap", "fb_page_url", "wa_channel_url", "blogger_site_url",
 		"news_banner_enabled", "news_banner_image", "news_banner_url", "news_banner_text", "auto_interval_minutes",
@@ -49,6 +66,8 @@ export async function botNewsSaveConfig(env: Env, token: string, data: Record<st
 		if (Object.prototype.hasOwnProperty.call(data, k)) {
 			let v = String((data as any)[k] ?? "").trim();
 			if (k === "enabled" || k === "attribution" || k === "fb_enabled" || k === "fb_direct_enabled" || k === "news_banner_enabled") v = v === "1" || v === "true" ? "1" : "0";
+			if (k === "para_min" || k === "para_max") v = v ? String(Math.min(40, Math.max(1, Math.floor(Number(v) || 0)))) : "";
+			if (k === "images_per_article") v = v ? String(Math.min(8, Math.max(1, Math.floor(Number(v) || 1)))) : "";
 			// kosongkan input token/secret TIDAK menghapus yg tersimpan
 			if ((k === "fb_page_token" || k === "blogger_client_secret" || k === "blogger_client_id") && !v) continue;
 			patch[k] = v;
@@ -335,3 +354,187 @@ export async function botBloggerTest(env: Env, token: string) {
 
 // dipakai cron
 export { botNewsRun };
+
+// ===========================================================================
+// AI PROVIDER -- BOT -> Setting -> AI Provider. Daftar bebas (base URL + API
+// key + model), urutan = prioritas pemakaian. API key tidak pernah dikirim
+// utuh ke browser; mengosongkan field key saat edit = key lama dipertahankan.
+// ===========================================================================
+const toNum = (v: unknown) => {
+	const n = Math.floor(Number(String(v ?? "").replace(/[^\d]/g, "")));
+	return Number.isFinite(n) ? n : 0;
+};
+
+async function aiListPayload(env: Env, cfg: Record<string, string>) {
+	const list = await aiLoadProviders(env, cfg);
+	const keyIds = await Promise.all(list.map((p) => (p.key ? aiKeyId(p.key) : Promise.resolve(""))));
+	const [usage, lastErr, recent] = await Promise.all([aiUsageByKey(env, keyIds), aiLastErrors(env, keyIds), aiRecentUsage(env, 25)]);
+	const empty = { used: 0, calls: 0, estimated: 0, failed: 0, todayTokens: 0, todayCalls: 0, lastAt: "", lastErr: "", lastErrAt: "" };
+	let firstUsable = "";
+	const providers = list.map((p, i) => {
+		const u = usage.get(keyIds[i]) ?? empty;
+		const st = providerStatus(p, u);
+		if (st.usable && !firstUsable) firstUsable = p.id;
+		const err = lastErr.get(keyIds[i]) || "";
+		return {
+			id: p.id,
+			name: p.name,
+			base_url: p.base_url,
+			model: p.model,
+			enabled: p.enabled,
+			key_mask: maskKey(p.key),
+			has_key: !!p.key,
+			activated: p.activated,
+			valid_days: p.valid_days,
+			used_adjust: p.used_adjust,
+			...st,
+			today_tokens: u.todayTokens,
+			today_calls: u.todayCalls,
+			calls: u.calls,
+			failed: u.failed,
+			estimated_calls: u.estimated,
+			last_ok_at: u.lastAt,
+			// Error terakhir hanya relevan kalau sesudahnya belum ada panggilan sukses.
+			last_error: err && u.lastErrAt >= u.lastAt ? err : "",
+			last_error_at: err && u.lastErrAt >= u.lastAt ? u.lastErrAt : "",
+		};
+	});
+	const totals = providers.reduce(
+		(a, p) => ({ used: a.used + p.used, today: a.today + p.today_tokens, calls: a.calls + p.calls }),
+		{ used: 0, today: 0, calls: 0 },
+	);
+	return { success: true, providers, active_id: firstUsable, totals, recent };
+}
+
+export async function botAiList(env: Env, token: string) {
+	await gate(env, token);
+	return aiListPayload(env, await botCfg(env));
+}
+
+/** Tambah (tanpa id) atau ubah (dengan id) satu provider. */
+export async function botAiSave(env: Env, token: string, data: Record<string, unknown>) {
+	const s = await gate(env, token);
+	const cfg = await botCfg(env);
+	const list = await aiLoadProviders(env, cfg);
+	const id = String(data.id ?? "").trim();
+	const idx = id ? list.findIndex((p) => p.id === id) : -1;
+	if (id && idx < 0) throw new Error("Provider tidak ditemukan (mungkin sudah dihapus).");
+	const prev = idx >= 0 ? list[idx] : null;
+	const key = String(data.key ?? "").trim();
+	if (!prev && !key) throw new Error("API key wajib diisi untuk provider baru.");
+	if (/\s/.test(key)) throw new Error("API key tidak boleh mengandung spasi.");
+	const model = String(data.model ?? prev?.model ?? "").trim();
+	if (!model) throw new Error("Model wajib diisi (mis. deepseek-v4-flash, llama-3.3-70b-versatile).");
+	const next: AiProvider = {
+		id: prev?.id || "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+		name: String(data.name ?? prev?.name ?? "").trim() || "Provider",
+		base_url: normalizeBaseUrl(String(data.base_url ?? prev?.base_url ?? "")),
+		key: key || prev?.key || "",
+		model,
+		enabled: data.enabled === undefined ? (prev?.enabled ?? true) : String(data.enabled) === "1" || data.enabled === true,
+		quota: data.quota === undefined ? (prev?.quota ?? 0) : toNum(data.quota),
+		activated: data.activated === undefined ? (prev?.activated ?? "") : /^\d{4}-\d{2}-\d{2}$/.test(String(data.activated)) ? String(data.activated) : "",
+		valid_days: data.valid_days === undefined ? (prev?.valid_days ?? 0) : toNum(data.valid_days),
+		used_adjust: data.used_adjust === undefined ? (prev?.used_adjust ?? 0) : toNum(data.used_adjust),
+		created_at: prev?.created_at || tsNow(),
+	};
+	if (next.valid_days > 0 && !next.activated) next.activated = wibToday();
+	if (prev) list[idx] = next;
+	else list.push(next);
+	await aiSaveProviders(env, cfg, list);
+	await logActivity(env, s.username, "BOT AI PROVIDER", (prev ? "Ubah" : "Tambah") + " provider: " + next.name + " (" + next.model + ")", "BERHASIL", next.base_url);
+	return aiListPayload(env, cfg);
+}
+
+export async function botAiDelete(env: Env, token: string, data: Record<string, unknown>) {
+	const s = await gate(env, token);
+	const cfg = await botCfg(env);
+	const list = await aiLoadProviders(env, cfg);
+	const id = String(data.id ?? "");
+	const target = list.find((p) => p.id === id);
+	if (!target) throw new Error("Provider tidak ditemukan.");
+	await aiSaveProviders(env, cfg, list.filter((p) => p.id !== id));
+	await logActivity(env, s.username, "BOT AI PROVIDER", "Hapus provider: " + target.name, "BERHASIL", "");
+	return aiListPayload(env, cfg);
+}
+
+/** Urutan baru (array id). Id yang tidak disebut tetap di belakang sesuai urutan lama. */
+export async function botAiReorder(env: Env, token: string, data: Record<string, unknown>) {
+	await gate(env, token);
+	const cfg = await botCfg(env);
+	const list = await aiLoadProviders(env, cfg);
+	const ids = Array.isArray(data.ids) ? data.ids.map(String) : [];
+	const byId = new Map(list.map((p) => [p.id, p]));
+	const ordered: AiProvider[] = [];
+	for (const id of ids) {
+		const p = byId.get(id);
+		if (p) {
+			ordered.push(p);
+			byId.delete(id);
+		}
+	}
+	for (const p of list) if (byId.has(p.id)) ordered.push(p);
+	await aiSaveProviders(env, cfg, ordered);
+	return aiListPayload(env, cfg);
+}
+
+/** Top-up: tambah kuota token & mulai ulang masa aktif dari hari ini. */
+export async function botAiTopUp(env: Env, token: string, data: Record<string, unknown>) {
+	const s = await gate(env, token);
+	const cfg = await botCfg(env);
+	const list = await aiLoadProviders(env, cfg);
+	const idx = list.findIndex((p) => p.id === String(data.id ?? ""));
+	if (idx < 0) throw new Error("Provider tidak ditemukan.");
+	const add = toNum(data.add_tokens);
+	const p = list[idx];
+	list[idx] = { ...p, quota: p.quota + add, activated: wibToday(), valid_days: p.valid_days || AI_DEFAULT_VALID_DAYS };
+	await aiSaveProviders(env, cfg, list);
+	await logActivity(env, s.username, "BOT AI PROVIDER", `Top-up ${p.name}: +${add} token, masa aktif mulai ulang`, "BERHASIL", "");
+	return aiListPayload(env, cfg);
+}
+
+/** Tes koneksi: 1 panggilan kecil + daftar model yang tersedia (kalau provider mendukung /models). */
+export async function botAiTest(env: Env, token: string, data: Record<string, unknown>) {
+	await gate(env, token);
+	const cfg = await botCfg(env);
+	const list = await aiLoadProviders(env, cfg);
+	const p = list.find((x) => x.id === String(data.id ?? ""));
+	if (!p) throw new Error("Provider tidak ditemukan.");
+	let models: string[] = [];
+	try {
+		const r = await fetch(normalizeBaseUrl(p.base_url) + "/models", { headers: { Authorization: `Bearer ${p.key}` } });
+		const b: any = await r.json();
+		if (Array.isArray(b?.data)) models = b.data.map((m: any) => String(m?.id || "")).filter(Boolean).slice(0, 80);
+	} catch {
+		/* tidak semua provider punya /models */
+	}
+	try {
+		const res = await aiChatProvider(env, cfg, p, {
+			purpose: "test",
+			messages: [{ role: "user", content: "Balas persis satu kata: OK" }],
+			temperature: 0,
+			maxTokens: 20,
+		});
+		return {
+			success: true,
+			ok: true,
+			reply: res.text.trim().slice(0, 80),
+			model: res.model,
+			tokens: res.totalTokens,
+			estimated: res.estimated,
+			ms: res.ms,
+			models,
+			suggested: models.length && !models.includes(p.model) ? pickWriterModel(models, new Set()) : "",
+			list: await aiListPayload(env, cfg),
+		};
+	} catch (e) {
+		return {
+			success: true,
+			ok: false,
+			message: e instanceof Error ? e.message : String(e),
+			models,
+			suggested: models.length && !models.includes(p.model) ? pickWriterModel(models, new Set()) : "",
+			list: await aiListPayload(env, cfg),
+		};
+	}
+}

@@ -64,6 +64,12 @@ import {
 	botBloggerAuthUrl,
 	botBloggerConnect,
 	botBloggerTest,
+	botAiList,
+	botAiSave,
+	botAiDelete,
+	botAiReorder,
+	botAiTopUp,
+	botAiTest,
 	botFbRunNow,
 	botFbTemplateGenerate,
 	botNewsAddSource,
@@ -245,6 +251,13 @@ const ROUTES: Record<string, Handler> = {
 	botBloggerAuthUrl: (env, b) => botBloggerAuthUrl(env, s(b.token)),
 	botBloggerConnect: (env, b) => botBloggerConnect(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
 	botBloggerTest: (env, b) => botBloggerTest(env, s(b.token)),
+	// AI provider (daftar base URL + key + model, urutan = prioritas)
+	botAiList: (env, b) => botAiList(env, s(b.token)),
+	botAiSave: (env, b) => botAiSave(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
+	botAiDelete: (env, b) => botAiDelete(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
+	botAiReorder: (env, b) => botAiReorder(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
+	botAiTopUp: (env, b) => botAiTopUp(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
+	botAiTest: (env, b) => botAiTest(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
 
 	// Live Chat Auto-Reply — sisi panel (sesi login ADMIN/OPERATOR)
 	livechatListSessions: (env, b) => livechatListSessions(env, s(b.token)),

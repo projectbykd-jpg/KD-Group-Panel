@@ -1,6 +1,7 @@
 // Modul NEWS untuk Role BOT: tarik feed berita -> rewrite via Gemini ->
 // posting ke Blogger. Semua state di Turso (bot_kv / news_source / news_article).
 import { getTurso } from "./turso";
+import { aiGenerate, aiUsableProviders, AiUnavailableError, legacyProviders, parseProviders } from "./ai-provider";
 import { tsNow, tsNowIndonesianDate, tsPlusMinutes } from "./time";
 
 // Dipakai dropdown "Tambah Sumber" (panel) & filter kategori di endpoint publik
@@ -40,7 +41,7 @@ function newsCategoryLabel(cat: string): string {
 // biasa tetap sukses. Perlakukan sbg transient jg spy artikel ini dicoba lagi
 // (bukan macet error selamanya), bukan dianggap semua provider mati total.
 const TRANSIENT_ERROR_RE =
-	/location is not supported|rateLimitExceeded|RESOURCE_EXHAUSTED|resource has been exhausted|user-?Rate ?Limit|too many subrequests|failed to generate json|json_validate_failed|terlalu pendek|judul nyaris sama persis|"code":\s*429/i;
+	/location is not supported|rateLimitExceeded|RESOURCE_EXHAUSTED|resource has been exhausted|user-?Rate ?Limit|too many subrequests|failed to generate json|json_validate_failed|terlalu pendek|judul nyaris sama persis|"code":\s*429|HTTP 429|HTTP 5\d\d|Gagal menghubungi server/i;
 
 // Kolom category ditambahkan belakangan -- migrasi malas (lazy), sama seperti
 // fb_template_caption di bawah: dicoba sekali per cold-start isolate, aman
@@ -216,25 +217,144 @@ async function resolveGnews(link: string): Promise<string> {
 	}
 }
 
-/** Ambil <meta property="og:image"> dari halaman artikel — fallback saat feed (mis. Google News) tidak kirim gambar. */
-async function fetchOgImage(pageUrl: string): Promise<string> {
+/** Gambar utama halaman artikel (og:image / twitter:image / itemprop). */
+export function extractOgImage(html: string): string {
+	// Beberapa situs (mis. Kompas) menaruh atribut dalam urutan/variasi lain --
+	// dicoba beberapa pola sebelum menyerah, bukan cuma og:image standar.
+	const m =
+		html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) ||
+		html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i) ||
+		html.match(/<meta[^>]+name=["']twitter:image(?::src)?["'][^>]+content=["']([^"']+)["']/i) ||
+		html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image(?::src)?["']/i) ||
+		html.match(/<meta[^>]+itemprop=["']image["'][^>]+content=["']([^"']+)["']/i) ||
+		html.match(/<link[^>]+rel=["']image_src["'][^>]+href=["']([^"']+)["']/i);
+	return m ? decodeEntities(m[1]) : "";
+}
+
+/** Bagian isi artikel (tag <article> terbesar); kalau tidak ada, seluruh <body>. */
+function articleRegion(html: string): string {
+	const arts = html.match(/<article\b[\s\S]*?<\/article>/gi) || [];
+	const best = arts.sort((x, y) => y.length - x.length)[0];
+	if (best && best.length > 1500) return best;
+	const body = html.match(/<body\b[\s\S]*<\/body>/i);
+	return body ? body[0] : html;
+}
+
+const IMG_JUNK_RE =
+	/logo|icon|favicon|avatar|sprite|[\/_-]ads?[\/_.-]|advert|banner|pixel|placeholder|emoji|button|badge|author|profile|spacer|blank\.|1x1|loading|lazy\.(png|gif)|facebook|twitter|whatsapp|instagram|youtube|tiktok|share|appstore|playstore|qr[-_]?code/i;
+
+const attrOf = (tag: string, name: string) => {
+	const m = tag.match(new RegExp("\\s" + name + "\\s*=\\s*[\"']([^\"']*)[\"']", "i"));
+	return m ? decodeEntities(m[1]).trim() : "";
+};
+
+/**
+ * Foto-foto di dalam isi artikel sumber (bukan logo/ikon/iklan), urut sesuai
+ * kemunculan, tanpa duplikat. Dipakai untuk menambah gambar di artikel hasil
+ * tulis ulang (pemilik minta "jangan cuma 1 gambar").
+ */
+export function extractArticleImages(html: string, pageUrl: string, max: number, skip: string[] = []): string[] {
+	const out: string[] = [];
+	const seen = new Set(skip.filter(Boolean).map((u) => u.split("?")[0]));
+	// Thumbnail "Baca juga"/artikel terkait = gambar di dalam link ke HALAMAN lain
+	// (bukan ke file gambarnya sendiri) -> dibuang, begitu juga isi aside/nav/footer.
+	const region = articleRegion(html)
+		.replace(/<(aside|nav|footer|header)\b[\s\S]*?<\/\1>/gi, " ")
+		.replace(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi, (whole, attrs: string, inner: string) => {
+			const href = (attrs.match(/href\s*=\s*["']([^"']*)["']/i) || [])[1] || "";
+			return /\.(jpe?g|png|webp)(\?|$)/i.test(href) ? whole : inner.replace(/<img\b[^>]*>/gi, "");
+		});
+	for (const m of region.matchAll(/<img\b[^>]*>/gi)) {
+		if (out.length >= max) break;
+		const tag = m[0];
+		let src = attrOf(tag, "data-src") || attrOf(tag, "data-original") || attrOf(tag, "data-lazy-src") || "";
+		const srcset = attrOf(tag, "data-srcset") || attrOf(tag, "srcset");
+		if (!src && srcset) src = srcset.split(",").map((x) => x.trim().split(/\s+/)[0]).filter(Boolean).pop() || "";
+		if (!src) src = attrOf(tag, "src");
+		if (!src || /^data:/i.test(src)) continue;
+		let abs = "";
+		try {
+			abs = new URL(src, pageUrl).toString();
+		} catch {
+			continue;
+		}
+		if (!/^https?:\/\//i.test(abs) || /\.(svg|gif)(\?|$)/i.test(abs)) continue;
+		const meta = [abs, attrOf(tag, "class"), attrOf(tag, "id"), attrOf(tag, "alt")].join(" ");
+		if (IMG_JUNK_RE.test(meta)) continue;
+		const w = Number(attrOf(tag, "width")) || 0;
+		const h = Number(attrOf(tag, "height")) || 0;
+		if ((w && w < 300) || (h && h < 200)) continue;
+		const key = abs.split("?")[0];
+		if (seen.has(key)) continue;
+		seen.add(key);
+		out.push(abs);
+	}
+	return out;
+}
+
+/** Teks paragraf isi artikel sumber (tanpa navigasi/iklan), maks `maxChars`. */
+export function extractArticleText(html: string, maxChars = 6000): string {
+	const region = articleRegion(html).replace(/<(script|style|noscript|figure|aside|nav|footer)\b[\s\S]*?<\/\1>/gi, " ");
+	const paras: string[] = [];
+	let total = 0;
+	for (const m of region.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)) {
+		const t = decodeEntities(m[1].replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+		if (t.length < 40) continue;
+		if (/^(baca juga|lihat juga|simak juga|advertisement|scroll to continue|copyright|ikuti|follow|download|klik di sini)/i.test(t)) continue;
+		paras.push(t);
+		total += t.length + 1;
+		if (total >= maxChars) break;
+	}
+	return paras.join("\n").slice(0, maxChars);
+}
+
+/** Ambil halaman artikel sumber SEKALI: gambar utama, foto-foto isi, dan teksnya. */
+async function fetchSourcePage(pageUrl: string, maxImages: number): Promise<{ ogImage: string; images: string[]; text: string }> {
 	try {
 		const r = await fetch(pageUrl, { headers: { "User-Agent": UA } });
-		if (!r.ok) return "";
-		const html = await r.text();
-		// Beberapa situs (mis. Kompas) menaruh atribut dalam urutan/variasi lain --
-		// dicoba beberapa pola sebelum menyerah, bukan cuma og:image standar.
-		const m =
-			html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) ||
-			html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i) ||
-			html.match(/<meta[^>]+name=["']twitter:image(?::src)?["'][^>]+content=["']([^"']+)["']/i) ||
-			html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image(?::src)?["']/i) ||
-			html.match(/<meta[^>]+itemprop=["']image["'][^>]+content=["']([^"']+)["']/i) ||
-			html.match(/<link[^>]+rel=["']image_src["'][^>]+href=["']([^"']+)["']/i);
-		return m ? decodeEntities(m[1]) : "";
+		if (!r.ok) return { ogImage: "", images: [], text: "" };
+		const html = (await r.text()).slice(0, 1_500_000);
+		const ogImage = extractOgImage(html);
+		return {
+			ogImage,
+			images: maxImages > 0 ? extractArticleImages(html, pageUrl, maxImages, [ogImage]) : [],
+			text: extractArticleText(html),
+		};
 	} catch {
-		return "";
+		return { ogImage: "", images: [], text: "" };
 	}
+}
+
+/** <meta property="og:image"> dari halaman artikel — fallback saat feed (mis. Google News) tidak kirim gambar. */
+async function fetchOgImage(pageUrl: string): Promise<string> {
+	return (await fetchSourcePage(pageUrl, 0)).ogImage;
+}
+
+/**
+ * Sisipkan foto tambahan merata di antara paragraf (bukan menumpuk di atas).
+ * Batas paragraf = "</p>"; foto tidak pernah ditaruh sesudah paragraf terakhir.
+ */
+export function insertImagesBetweenParagraphs(html: string, images: string[], alt: string, credit: string): string {
+	if (!images.length) return html;
+	const parts = html.split(/(<\/p>)/i);
+	const closeIdx: number[] = [];
+	parts.forEach((p, i) => {
+		if (/^<\/p>$/i.test(p)) closeIdx.push(i);
+	});
+	const n = closeIdx.length;
+	if (n < 2) return html;
+	const slots = Math.min(images.length, n - 1);
+	const inserts = new Map<number, string>();
+	for (let k = 0; k < slots; k++) {
+		const after = Math.max(1, Math.round(((k + 1) * n) / (slots + 1))); // paragraf ke-
+		const at = closeIdx[Math.min(after, n - 1) - 1];
+		const fig =
+			`<figure style="margin:22px 0;text-align:center"><img src="${escAttr(images[k])}" alt="${escAttr(alt)} (${k + 2})" loading="lazy" style="max-width:100%;height:auto;border-radius:8px">` +
+			(credit ? `<figcaption style="font-size:12px;color:#888;margin-top:6px">Foto: ${escHtml(credit)}</figcaption>` : "") +
+			`</figure>`;
+		inserts.set(at, (inserts.get(at) || "") + "\n" + fig);
+	}
+	return parts.map((p, i) => p + (inserts.get(i) || "")).join("");
 }
 
 async function fetchFeed(kind: string, url: string): Promise<FeedItem[]> {
@@ -316,8 +436,34 @@ export async function newsPullSources(env: Env, perSource = 6): Promise<{ added:
 }
 
 // ---------------------------------------------------------------------------
-// Gemini rewrite
+// Tulis ulang artikel (provider dari BOT -> Setting -> AI Provider)
 // ---------------------------------------------------------------------------
+// Target panjang bawaan (paragraf). Dinaikkan dari 8-14 atas permintaan
+// pemilik ("artikel lebih panjang"); bisa diubah di Setting -> Konten.
+export const DEFAULT_PARA_MIN = 12;
+export const DEFAULT_PARA_MAX = 18;
+// Jumlah gambar per artikel (1 gambar utama + foto tambahan dari isi artikel sumber).
+export const DEFAULT_IMAGES_PER_ARTICLE = 4;
+/**
+ * Sekali saja sesudah update "artikel lebih panjang + lebih banyak gambar":
+ * pengaturan lama yang di bawah target baru dinaikkan. Sesudah itu pemilik
+ * bebas mengubahnya lagi di Setting -> Konten (tidak ditimpa ulang).
+ */
+export async function ensureContentDefaultsV2(env: Env, cfg: Record<string, string>): Promise<void> {
+	if (cfg.content_v2 === "1") return;
+	const patch: Record<string, string> = { content_v2: "1" };
+	if (!(Number(cfg.para_min) >= DEFAULT_PARA_MIN)) patch.para_min = String(DEFAULT_PARA_MIN);
+	if (!(Number(cfg.para_max) >= DEFAULT_PARA_MAX)) patch.para_max = String(DEFAULT_PARA_MAX);
+	if (!cfg.images_per_article) patch.images_per_article = String(DEFAULT_IMAGES_PER_ARTICLE);
+	await botCfgSet(env, patch);
+	Object.assign(cfg, patch);
+}
+
+export function imagesPerArticle(cfg: Record<string, string>): number {
+	const n = Math.floor(Number(cfg.images_per_article || DEFAULT_IMAGES_PER_ARTICLE));
+	return Math.min(8, Math.max(1, Number.isFinite(n) ? n : DEFAULT_IMAGES_PER_ARTICLE));
+}
+
 interface Rewritten {
 	title: string;
 	html: string;
@@ -327,26 +473,21 @@ interface Rewritten {
 	ctaParagraph: string;
 }
 
-export async function geminiRewrite(env: Env, cfg: Record<string, string>, art: { title: string; excerpt: string; source: string; url: string }): Promise<Rewritten> {
-	// Boleh lebih dari 1 API key (dipisah koma/baris baru) -- tiap key Gemini
-	// free-tier punya jatah kuota SENDIRI, jadi makin banyak key = makin besar
-	// kuota gabungan & makin jarang kena rate-limit/RESOURCE_EXHAUSTED. Kunci
-	// PERTAMA tetap prioritas utama (coba semua model dulu), key cadangan
-	// baru dipakai kalau key pertama benar-benar habis di semua model.
-	const keys = String(cfg.gemini_key || "").split(/[,\n]+/).map((s) => s.trim()).filter(Boolean);
-	const groqKeys = String(cfg.groq_key || "").split(/[,\n]+/).map((s) => s.trim()).filter(Boolean);
-	const model = cfg.gemini_model || "gemini-3-flash-preview";
-	// Pemilik minta Groq jadi provider UTAMA (Gemini sering geo-block) --
-	// kalau groq_key sudah diisi, Groq dicoba DULUAN & Gemini sama sekali
-	// TIDAK disentuh selama Groq berhasil (hemat subrequest, tidak kena
-	// geo-block lagi). Gemini cuma jadi jaring pengaman kalau Groq-nya
-	// sendiri lagi bermasalah DAN gemini_key masih tersimpan -- kalau mau
-	// benar-benar nol panggilan Gemini, kosongkan saja gemini_key di Settings.
-	if (!groqKeys.length && !keys.length) throw new Error("gemini_key atau groq_key belum diisi di konfigurasi BOT.");
+export async function geminiRewrite(
+	env: Env,
+	cfg: Record<string, string>,
+	art: { title: string; excerpt: string; source: string; url: string; sourceText?: string },
+): Promise<Rewritten> {
+	// Provider AI diambil dari daftar BOT -> Setting -> AI Provider (urutan =
+	// prioritas, lihat lib/ai-provider.ts). Hasil tiap provider DIVALIDASI di
+	// sini (format, panjang, judul tidak disalin); kalau jelek, provider
+	// berikutnya langsung dicoba -- artikel tidak dibakar jadi error.
 	const style = cfg.rewrite_style || "Tulis ulang jadi artikel berbahasa Indonesia yang mengalir, gaya jurnalistik ringan, tapi tetap menarik dan enak dibaca -- bukan kaku/datar seperti siaran pers.";
-	const pMin = Math.max(1, Number(cfg.para_min || "8"));
-	const pMax = Math.max(pMin, Number(cfg.para_max || "14"));
+	const pMin = Math.max(1, Number(cfg.para_min || String(DEFAULT_PARA_MIN)));
+	const pMax = Math.max(pMin, Number(cfg.para_max || String(DEFAULT_PARA_MAX)));
 	const paraTarget = pMin + Math.floor(Math.random() * (pMax - pMin + 1));
+	const minWords = paraTarget * 65;
+	const sourceText = String(art.sourceText || "").slice(0, 6000);
 	const prompt =
 		`${style}\n\n` +
 		`Berdasarkan ringkasan berikut, tulis artikel BARU yang PANJANG dan MENDALAM, sepanjang ${paraTarget} paragraf ` +
@@ -365,7 +506,9 @@ export async function geminiRewrite(env: Env, cfg: Record<string, string>, art: 
 		`penting buat pembaca. 2-3 kalimat pertama ini yang menentukan pembaca lanjut baca atau tidak, jadi jangan datar. ` +
 		`Variasikan struktur kalimat (jangan semua paragraf mulai dengan pola subjek yang sama), pakai bahasa yang hidup ` +
 		`dan konkret (bukan klise/basa-basi berita formal yang datar), tapi tetap akurat dan tidak berlebihan/clickbait. ` +
-		`Tiap paragraf idealnya 3-5 kalimat yang mengalir, bukan poin-poin pendek. ` +
+		`Tiap paragraf WAJIB 4-6 kalimat yang mengalir (kira-kira 70-110 kata), bukan poin-poin pendek. ` +
+		`Total isi artikel MINIMAL ${minWords} kata -- kalau bahannya terasa kurang, perdalam konteks, latar belakang, ` +
+		`penjelasan istilah, dan dampaknya bagi pembaca, TANPA mengarang fakta, angka, nama, atau kutipan baru. ` +
 		`Kalau artikelnya cukup panjang (kira-kira lebih dari 6 paragraf), sisipkan 2-4 sub-judul singkat pakai tag ` +
 		`<h2>...</h2> di body_html untuk memecah bagian-bagian di atas (mis. sebelum bagian latar belakang, dampak, ` +
 		`reaksi, dst) -- ini membantu SEO & pembaca yang skimming, JANGAN pakai <h1> (judul utama sudah ada terpisah). ` +
@@ -387,282 +530,142 @@ export async function geminiRewrite(env: Env, cfg: Record<string, string>, art: 
 		`Balas HANYA JSON valid tanpa markdown: {"title": "...", "meta_description": "...", "category": "...", "keywords": ["...", "..."], "cta_paragraph": "...", "body_html": "<p>...</p><p>...</p>"}.\n\n` +
 		`JUDUL ASLI (JANGAN disalin, tulis ulang beda): ${art.title}\n` +
 		`RINGKASAN: ${art.excerpt || "(tidak ada, tulis ringkas dari judul saja)"}\n` +
+		(sourceText ? `BAHAN DARI ARTIKEL SUMBER (fakta yang boleh dipakai; JANGAN salin kalimatnya, tulis ulang dgn kata-katamu sendiri):\n${sourceText}\n` : "") +
 		`SUMBER: ${art.source}`;
-	// Coba SEMUA groq_key dulu (Groq = provider UTAMA sekarang). Balik "" kalau
-	// semuanya gagal (BUKAN throw) supaya pemanggil bisa jatuh ke Gemini kalau
-	// gemini_key masih tersimpan sbg jaring pengaman.
-	// PERBAIKAN: Groq berkali-kali menghapus/membatasi akses model tanpa
-	// peringatan (llama-3.3-70b-versatile 404, gemma2-9b-it "decommissioned")
-	// -- daftar hardcoded APAPUN bisa basi kapan saja. Kalau semua kandidat
-	// statis gagal, tanya LANGSUNG ke Groq (GET /v1/models) model apa yang
-	// BENAR-BENAR bisa diakses key ini, coba salah satunya, lalu SIMPAN
-	// otomatis ke groq_model supaya run berikutnya langsung pakai model itu
-	// tanpa perlu discovery ulang tiap artikel (hemat subrequest).
-	const groqCallModel = async (gk: string, gm: string): Promise<{ ok: boolean; text: string; err: string }> => {
-		try {
-			const gr = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-				method: "POST",
-				headers: { "Content-Type": "application/json", Authorization: `Bearer ${gk}` },
-				body: JSON.stringify({
-					model: gm,
-					messages: [{ role: "user", content: prompt }],
-					temperature: 0.85,
-					response_format: { type: "json_object" },
-				}),
-			});
-			const gBody: any = await gr.json();
-			const content = gBody?.choices?.[0]?.message?.content;
-			if (gr.ok && content) return { ok: true, text: content, err: "" };
-			return { ok: false, text: "", err: "HTTP " + gr.status + " " + JSON.stringify(gBody?.error || gBody).slice(0, 200) };
-		} catch (e) {
-			return { ok: false, text: "", err: e instanceof Error ? e.message : String(e) };
-		}
-	};
-	const groqStaticCandidates = [...new Set([cfg.groq_model, "llama-3.3-70b-versatile", "llama-3.1-8b-instant"].filter(Boolean))] as string[];
-	const tryGroq = async (): Promise<{ text: string; err: string }> => {
-		let groqErr = "";
-		for (const gk of groqKeys) {
-			const tried = new Set<string>();
-			for (const gm of groqStaticCandidates) {
-				tried.add(gm);
-				const res = await groqCallModel(gk, gm);
-				if (res.ok) {
-					if (gm !== cfg.groq_model) await botCfgSet(env, { groq_model: gm }).catch(() => {});
-					return { text: res.text, err: "" };
-				}
-				groqErr = res.err;
-			}
-			// Semua kandidat statis gagal -- tanya Groq model apa yg benar-benar
-			// bisa diakses key ini. Coba SAMPAI 3 kandidat dari hasil discovery
-			// (bukan cuma 1) -- beberapa model di akun bisa "blocked at the
-			// project level" (dibatasi admin project Groq-nya), jadi kalau
-			// kandidat pertama kena blokir, masih ada 2 cadangan lain sebelum
-			// menyerah.
+	const parseRewritten = (raw: string): Rewritten => {
+		let text = raw.replace(/^﻿/, "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+
+		let title = "";
+		let html = "";
+		let metaDescription = "";
+		let category = "";
+		let keywords: string[] = [];
+		let ctaParagraph = "";
+
+		// 1) coba parse JSON apa adanya
+		const tryParse = (s: string): boolean => {
 			try {
-				const lr = await fetch("https://api.groq.com/openai/v1/models", { headers: { Authorization: `Bearer ${gk}` } });
-				const lBody: any = await lr.json();
-				const ids: string[] = Array.isArray(lBody?.data) ? lBody.data.map((m: any) => String(m?.id || "")) : [];
-				// PERBAIKAN: filter lama cuma buang model non-chat (whisper/tts/guard) --
-				// tapi "compound"/"compound-mini" (model AGENT/routing Groq, dirancang
-				// buat tool-use & web search, BUKAN penulisan artikel) ikut kepilih &
-				// hasilnya artikel jadi 1 paragraf pendek/kalimat ngaco (terbukti dari
-				// pengecekan langsung). Buang juga model beginian, dan DAHULUKAN model
-				// "llama"/"qwen"/"gpt-oss"/"kimi" (general-purpose, cocok utk nulis
-				// artikel panjang) drpd model lain yang tidak dikenal namanya.
-				const isBadForWriting = (id: string) => /whisper|tts|guard|moderation|prompt-guard|compound|safety|embed/i.test(id);
-				const isKnownGoodWriter = (id: string) => /llama|qwen|gpt-oss|kimi|mixtral|gemma/i.test(id);
-				const usable = ids.filter((id) => id && !tried.has(id) && !isBadForWriting(id));
-				const candidates = [...usable.filter(isKnownGoodWriter), ...usable.filter((id) => !isKnownGoodWriter(id))].slice(0, 3);
-				if (!ids.length) groqErr = "Tidak ada model chat yang bisa diakses key Groq ini -- cek console.groq.com/keys / limits akun.";
-				for (const candidate of candidates) {
-					const res = await groqCallModel(gk, candidate);
-					if (res.ok) {
-						await botCfgSet(env, { groq_model: candidate }).catch(() => {});
-						return { text: res.text, err: "" };
+				const p = JSON.parse(s);
+				if (p && (p.body_html || p.html)) {
+					title = String(p.title || "").trim();
+					html = String(p.body_html || p.html || "").trim();
+					metaDescription = String(p.meta_description || "").trim();
+					category = String(p.category || "").trim().toLowerCase();
+					ctaParagraph = String(p.cta_paragraph || "").trim();
+					if (Array.isArray(p.keywords)) {
+						keywords = p.keywords.map((k: unknown) => String(k || "").trim()).filter(Boolean);
 					}
-					groqErr = res.err;
+					return true;
 				}
-			} catch (e) {
-				groqErr = e instanceof Error ? e.message : String(e);
+			} catch {
+				/* noop */
+			}
+			return false;
+		};
+		const jsonM = text.match(/\{[\s\S]*\}/);
+		if (!tryParse(text) && jsonM) {
+			// 2) perbaiki masalah umum: newline mentah di dalam string JSON
+			const repaired = jsonM[0].replace(/([^\\])\n/g, "$1\\n").replace(/\r/g, "");
+			tryParse(repaired);
+		}
+		// 3) kalau JSON tetap gagal, ekstrak field pakai regex (JANGAN buang mentah JSON)
+		if (!html) {
+			const tm = text.match(/"title"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+			const bm = text.match(/"body_html"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+			const dm = text.match(/"meta_description"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+			const cm = text.match(/"category"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+			const ctam = text.match(/"cta_paragraph"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+			if (bm) {
+				const unesc = (x: string) => x.replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+				html = unesc(bm[1]).trim();
+				if (tm) title = unesc(tm[1]).trim();
+				if (dm) metaDescription = unesc(dm[1]).trim();
+				if (cm) category = unesc(cm[1]).trim().toLowerCase();
+				if (ctam) ctaParagraph = unesc(ctam[1]).trim();
 			}
 		}
-		return { text: "", err: groqErr };
-	};
-	// Model utama sering 503 (high demand) -> coba beberapa model berurutan.
-	// SATU percobaan per model (bukan 2x) -> tiap fetch Gemini adalah 1 subrequest
-	// Cloudflare; loop lama (sampai 2 attempt x 4 model = 8 fetch) ikut andil bikin
-	// invocation kena "Too many subrequests" (limit 50/invocation Free plan).
-	const tryGemini = async (): Promise<{ text: string; err: string; attempts: number }> => {
-		const models = [...new Set([model, "gemini-3-flash-preview", "gemini-flash-latest", "gemini-flash-lite-latest"])];
-		// Susun daftar percobaan (key, model): key PERTAMA coba SEMUA model (fallback
-		// demand-tinggi/503 spt sebelumnya), key CADANGAN cuma 1x percobaan tiap key
-		// pakai model utama saja (fallback KUOTA/rate-limit habis) -- supaya total
-		// fetch tetap terbatas (models.length + (keys.length-1)) walau key-nya banyak,
-		// tidak ikut membengkakkan subrequest per artikel kalau key pertama sehat.
-		const attempts: { key: string; model: string }[] = models.map((mdl) => ({ key: keys[0], model: mdl }));
-		for (let i = 1; i < keys.length; i++) attempts.push({ key: keys[i], model });
-		let j: any = null;
-		let lastErr = "";
-		for (const at of attempts) {
-			// thinkingConfig cuma didukung sebagian model (mis. gemini-3-flash-preview).
-			// gemini-flash-lite-latest & sebagian lain balas 400 INVALID_ARGUMENT kalau
-			// field ini disertakan -> kirim HANYA utk model yg namanya mengandung "3".
-			const supportsThinking = /gemini-3/i.test(at.model);
-			const generationConfig: Record<string, unknown> = {
-				temperature: 0.85,
-				maxOutputTokens: 8192,
-				responseMimeType: "application/json",
-			};
-			if (supportsThinking) generationConfig.thinkingConfig = { thinkingBudget: 0 };
-			const r = await fetch(
-				`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(at.model)}:generateContent`,
-				{
-					method: "POST",
-					headers: { "Content-Type": "application/json", "X-goog-api-key": at.key },
-					body: JSON.stringify({
-						contents: [{ parts: [{ text: prompt }] }],
-						generationConfig,
-					}),
-				},
-			);
-			const body = (await r.json()) as any;
-			const hasText = !!body?.candidates?.[0]?.content?.parts?.some((p: any) => p.text);
-			if (r.ok && hasText) {
-				j = body;
-				break;
+		// 4) benar-benar bukan JSON: anggap teks polos = body (bersihkan sisa JSON kalau ada)
+		if (!html && text && !/^[\s{[]*["{]?\s*"?title"?\s*:/.test(text)) {
+			html = text
+				.split(/\n{2,}/)
+				.map((p) => `<p>${p.replace(/<[^>]+>/g, "").trim()}</p>`)
+				.filter((p) => p !== "<p></p>")
+				.join("\n");
+		}
+
+		if (!html || /^\s*\{[\s\S]*"body_html"/.test(html)) {
+			throw new Error("AI balas format tidak bisa dibaca (bukan artikel).");
+		}
+		// PERBAIKAN: sebelum ini, artikel 1 paragraf pendek (atau kalimat ngaco dari
+		// model kualitas rendah, mis. model "agent/routing" yg salah kepilih) tetap
+		// LOLOS & terbit apa adanya -- tidak ada validasi panjang sama sekali.
+		// Prompt minta ${paraTarget} paragraf (target pMin..pMax, biasanya 8-14);
+		// kalau hasilnya jauh di bawah itu, besar kemungkinan modelnya tidak becus
+		// ikuti instruksi -- tolak & coba lagi (retryable), JANGAN diterbitkan
+		// apa adanya.
+		const plainWordCount = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().split(" ").filter(Boolean).length;
+		// Minimal ~separuh target: di bawah itu modelnya jelas tidak ikuti instruksi.
+		const MIN_WORDS = Math.max(250, Math.round(minWords / 2));
+		if (plainWordCount < MIN_WORDS) {
+			throw new Error(`AI balas artikel terlalu pendek (${plainWordCount} kata, target ${paraTarget} paragraf) -- kemungkinan model yang dipakai kualitasnya rendah/salah/tidak ikuti instruksi.`);
+		}
+		// PERBAIKAN: judul hasil AI kadang nyaris disalin mentah dari judul asli
+		// (cuma tukar 1-2 kata) walau sudah diminta ditulis ulang di prompt --
+		// AI kadang tidak patuh instruksi. Cek kemiripan kata (bukan exact match
+		// saja, biar nangkep parafrase tipis juga) -- kalau terlalu mirip, tolak &
+		// coba lagi (retryable), sama seperti validasi panjang body di atas.
+		if (title) {
+			const normWords = (s: string) =>
+				s
+					.toLowerCase()
+					.replace(/[^\p{L}\p{N}\s]/gu, " ")
+					.split(/\s+/)
+					.filter(Boolean);
+			const aiWords = new Set(normWords(title));
+			const origWords = new Set(normWords(art.title));
+			const overlap = [...aiWords].filter((w) => origWords.has(w)).length;
+			const similarity = overlap / Math.max(1, Math.min(aiWords.size, origWords.size));
+			if (aiWords.size >= 3 && similarity >= 0.85) {
+				throw new Error(`AI balas judul nyaris sama persis dgn judul asli (mirip ${Math.round(similarity * 100)}%) -- harus ditulis ulang, bukan disalin/parafrase tipis.`);
 			}
-			lastErr =
-				"HTTP " + r.status + " " +
-				(body?.candidates?.[0]?.finishReason
-					? "finishReason=" + body.candidates[0].finishReason
-					: JSON.stringify(body?.error || body).slice(0, 200));
 		}
-		const jText = j?.candidates?.[0]?.content?.parts?.map((p: any) => p.text || "").join("") || "";
-		return { text: j ? jText : "", err: lastErr, attempts: attempts.length };
+		if (!title) title = art.title;
+		if (!metaDescription) {
+			// fallback: potong dari teks polos hasil rewrite (tanpa tag HTML)
+			metaDescription = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 155);
+		}
+		// Kategori dari AI dipakai HANYA kalau cocok salah satu dari daftar resmi --
+		// kalau Gemini "mengarang" nilai di luar daftar, biarkan kosong supaya
+		// pemanggil (newsProcessOne) jatuh balik ke kategori sumbernya (aman,
+		// tidak pernah menyimpan kategori sampah/tidak dikenal ke database).
+		if (!(NEWS_CATEGORIES as readonly string[]).includes(category)) category = "";
+		// Keyword cuma pemanis SEO tambahan -- kalau AI tidak balas array yang valid
+		// (mis. lewat jalur fallback regex/teks-polos di atas), biarkan kosong saja,
+		// JANGAN sampai bikin seluruh rewrite gagal cuma gara-gara field ini.
+		keywords = keywords
+			.map((k) => k.replace(/^[#\-*\s]+/, "").trim())
+			.filter((k) => k.length > 1 && k.length <= 60)
+			.slice(0, 8);
+		// Jaring pengaman -- AI diminta TIDAK menyertakan link/tag di cta_paragraph,
+		// tapi kalau tetap ada (mis. model kurang patuh), dibersihkan di sini supaya
+		// tidak nyelip <a> ganda/rusak berdampingan dgn link resmi yang ditempel
+		// terpisah oleh newsProcessOne. Kosong = wajar, blok ini nanti dilewati saja
+		// (bukan error) -- paragraf ajakan follow ini pemanis, bukan wajib.
+		ctaParagraph = ctaParagraph
+			.replace(/<[^>]+>/g, " ")
+			.replace(/https?:\/\/\S+/gi, "")
+			.replace(/\s+/g, " ")
+			.trim()
+			.slice(0, 400);
+		return { title: title.slice(0, 180), html, metaDescription: metaDescription.slice(0, 155), category, keywords, ctaParagraph };
 	};
-
-	// Pemilik minta Gemini TIDAK dipakai lagi (sering geo-block) -- Groq jadi
-	// jalur PERTAMA & satu-satunya selama gemini_key TIDAK diisi. Gemini cuma
-	// dipanggil kalau Groq-nya sendiri lagi bermasalah DAN gemini_key masih ada
-	// tersimpan (jaring pengaman opsional, kosongkan gemini_key kalau mau nol
-	// panggilan Gemini sama sekali).
-	let text = "";
-	const errParts: string[] = [];
-	if (groqKeys.length) {
-		const g = await tryGroq();
-		text = g.text;
-		if (!text) errParts.push(`Groq gagal semua key (${groqKeys.length} percobaan): ${g.err}`);
-	}
-	if (!text && keys.length) {
-		const gem = await tryGemini();
-		text = gem.text;
-		if (!text) errParts.push(`Gemini gagal semua model/key (${gem.attempts} percobaan): ${gem.err}`);
-	}
-	if (!text) throw new Error(errParts.join(" | ") || "Tidak ada provider AI yang terkonfigurasi.");
-	text = text.replace(/^﻿/, "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
-
-	let title = "";
-	let html = "";
-	let metaDescription = "";
-	let category = "";
-	let keywords: string[] = [];
-	let ctaParagraph = "";
-
-	// 1) coba parse JSON apa adanya
-	const tryParse = (s: string): boolean => {
-		try {
-			const p = JSON.parse(s);
-			if (p && (p.body_html || p.html)) {
-				title = String(p.title || "").trim();
-				html = String(p.body_html || p.html || "").trim();
-				metaDescription = String(p.meta_description || "").trim();
-				category = String(p.category || "").trim().toLowerCase();
-				ctaParagraph = String(p.cta_paragraph || "").trim();
-				if (Array.isArray(p.keywords)) {
-					keywords = p.keywords.map((k: unknown) => String(k || "").trim()).filter(Boolean);
-				}
-				return true;
-			}
-		} catch {
-			/* noop */
-		}
-		return false;
-	};
-	const jsonM = text.match(/\{[\s\S]*\}/);
-	if (!tryParse(text) && jsonM) {
-		// 2) perbaiki masalah umum: newline mentah di dalam string JSON
-		const repaired = jsonM[0].replace(/([^\\])\n/g, "$1\\n").replace(/\r/g, "");
-		tryParse(repaired);
-	}
-	// 3) kalau JSON tetap gagal, ekstrak field pakai regex (JANGAN buang mentah JSON)
-	if (!html) {
-		const tm = text.match(/"title"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-		const bm = text.match(/"body_html"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-		const dm = text.match(/"meta_description"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-		const cm = text.match(/"category"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-		const ctam = text.match(/"cta_paragraph"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-		if (bm) {
-			const unesc = (x: string) => x.replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
-			html = unesc(bm[1]).trim();
-			if (tm) title = unesc(tm[1]).trim();
-			if (dm) metaDescription = unesc(dm[1]).trim();
-			if (cm) category = unesc(cm[1]).trim().toLowerCase();
-			if (ctam) ctaParagraph = unesc(ctam[1]).trim();
-		}
-	}
-	// 4) benar-benar bukan JSON: anggap teks polos = body (bersihkan sisa JSON kalau ada)
-	if (!html && text && !/^[\s{[]*["{]?\s*"?title"?\s*:/.test(text)) {
-		html = text
-			.split(/\n{2,}/)
-			.map((p) => `<p>${p.replace(/<[^>]+>/g, "").trim()}</p>`)
-			.filter((p) => p !== "<p></p>")
-			.join("\n");
-	}
-
-	if (!html || /^\s*\{[\s\S]*"body_html"/.test(html)) {
-		throw new Error("Gemini balas format tidak bisa dibaca (bukan artikel).");
-	}
-	// PERBAIKAN: sebelum ini, artikel 1 paragraf pendek (atau kalimat ngaco dari
-	// model kualitas rendah, mis. model "agent/routing" yg salah kepilih) tetap
-	// LOLOS & terbit apa adanya -- tidak ada validasi panjang sama sekali.
-	// Prompt minta ${paraTarget} paragraf (target pMin..pMax, biasanya 8-14);
-	// kalau hasilnya jauh di bawah itu, besar kemungkinan modelnya tidak becus
-	// ikuti instruksi -- tolak & coba lagi (retryable), JANGAN diterbitkan
-	// apa adanya.
-	const plainWordCount = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().split(" ").filter(Boolean).length;
-	const MIN_WORDS = 120; // ~1-2 paragraf pendek jauh di bawah ini -- jelas bukan artikel 8-14 paragraf
-	if (plainWordCount < MIN_WORDS) {
-		throw new Error(`AI balas artikel terlalu pendek (${plainWordCount} kata, target ${paraTarget} paragraf) -- kemungkinan model yang dipakai kualitasnya rendah/salah/tidak ikuti instruksi.`);
-	}
-	// PERBAIKAN: judul hasil AI kadang nyaris disalin mentah dari judul asli
-	// (cuma tukar 1-2 kata) walau sudah diminta ditulis ulang di prompt --
-	// AI kadang tidak patuh instruksi. Cek kemiripan kata (bukan exact match
-	// saja, biar nangkep parafrase tipis juga) -- kalau terlalu mirip, tolak &
-	// coba lagi (retryable), sama seperti validasi panjang body di atas.
-	if (title) {
-		const normWords = (s: string) =>
-			s
-				.toLowerCase()
-				.replace(/[^\p{L}\p{N}\s]/gu, " ")
-				.split(/\s+/)
-				.filter(Boolean);
-		const aiWords = new Set(normWords(title));
-		const origWords = new Set(normWords(art.title));
-		const overlap = [...aiWords].filter((w) => origWords.has(w)).length;
-		const similarity = overlap / Math.max(1, Math.min(aiWords.size, origWords.size));
-		if (aiWords.size >= 3 && similarity >= 0.85) {
-			throw new Error(`AI balas judul nyaris sama persis dgn judul asli (mirip ${Math.round(similarity * 100)}%) -- harus ditulis ulang, bukan disalin/parafrase tipis.`);
-		}
-	}
-	if (!title) title = art.title;
-	if (!metaDescription) {
-		// fallback: potong dari teks polos hasil rewrite (tanpa tag HTML)
-		metaDescription = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 155);
-	}
-	// Kategori dari AI dipakai HANYA kalau cocok salah satu dari daftar resmi --
-	// kalau Gemini "mengarang" nilai di luar daftar, biarkan kosong supaya
-	// pemanggil (newsProcessOne) jatuh balik ke kategori sumbernya (aman,
-	// tidak pernah menyimpan kategori sampah/tidak dikenal ke database).
-	if (!(NEWS_CATEGORIES as readonly string[]).includes(category)) category = "";
-	// Keyword cuma pemanis SEO tambahan -- kalau AI tidak balas array yang valid
-	// (mis. lewat jalur fallback regex/teks-polos di atas), biarkan kosong saja,
-	// JANGAN sampai bikin seluruh rewrite gagal cuma gara-gara field ini.
-	keywords = keywords
-		.map((k) => k.replace(/^[#\-*\s]+/, "").trim())
-		.filter((k) => k.length > 1 && k.length <= 60)
-		.slice(0, 8);
-	// Jaring pengaman -- AI diminta TIDAK menyertakan link/tag di cta_paragraph,
-	// tapi kalau tetap ada (mis. model kurang patuh), dibersihkan di sini supaya
-	// tidak nyelip <a> ganda/rusak berdampingan dgn link resmi yang ditempel
-	// terpisah oleh newsProcessOne. Kosong = wajar, blok ini nanti dilewati saja
-	// (bukan error) -- paragraf ajakan follow ini pemanis, bukan wajib.
-	ctaParagraph = ctaParagraph
-		.replace(/<[^>]+>/g, " ")
-		.replace(/https?:\/\/\S+/gi, "")
-		.replace(/\s+/g, " ")
-		.trim()
-		.slice(0, 400);
-	return { title: title.slice(0, 180), html, metaDescription: metaDescription.slice(0, 155), category, keywords, ctaParagraph };
+	const { value } = await aiGenerate(
+		env,
+		cfg,
+		{ purpose: "news-rewrite", messages: [{ role: "user", content: prompt }], temperature: 0.85, maxTokens: 8192, json: true },
+		parseRewritten,
+	);
+	return value;
 }
 
 // ---------------------------------------------------------------------------
@@ -974,38 +977,23 @@ export async function fbPostToPage(
 // ---------------------------------------------------------------------------
 
 /** Caption pendek & menarik ala media sosial — LEBIH RINGAN dari rewrite artikel penuh (hemat token & subrequest). */
-async function geminiFbCaption(cfg: Record<string, string>, art: { title: string; excerpt: string; source: string }): Promise<string> {
-	const key = cfg.gemini_key;
-	const model = cfg.gemini_model || "gemini-3-flash-preview";
-	if (!key) throw new Error("gemini_key belum diisi di konfigurasi BOT.");
+async function geminiFbCaption(env: Env, cfg: Record<string, string>, art: { title: string; excerpt: string; source: string }): Promise<string> {
 	const prompt =
 		`Buatkan caption Facebook yang singkat, menarik, dan mengundang rasa penasaran (gaya media sosial, ` +
 		`boleh pakai 1-2 emoji, MAKS 3 kalimat, JANGAN mengarang fakta baru di luar ringkasan). ` +
 		`Balas HANYA teks captionnya saja, tanpa tanda kutip, tanpa markdown.\n\n` +
 		`JUDUL: ${art.title}\nRINGKASAN: ${art.excerpt || "(tidak ada)"}\nSUMBER: ${art.source}`;
-	const models = [...new Set([model, "gemini-3-flash-preview", "gemini-flash-latest", "gemini-flash-lite-latest"])];
-	for (const mdl of models) {
-		const supportsThinking = /gemini-3/i.test(mdl);
-		const generationConfig: Record<string, unknown> = { temperature: 0.9, maxOutputTokens: 300 };
-		if (supportsThinking) generationConfig.thinkingConfig = { thinkingBudget: 0 };
-		try {
-			const r = await fetch(
-				`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(mdl)}:generateContent`,
-				{
-					method: "POST",
-					headers: { "Content-Type": "application/json", "X-goog-api-key": key },
-					body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig }),
-				},
-			);
-			const body = (await r.json()) as any;
-			const text = body?.candidates?.[0]?.content?.parts?.map((p: any) => p.text || "").join("").trim();
-			if (r.ok && text) return text.replace(/^["']|["']$/g, "").slice(0, 500);
-		} catch {
-			/* coba model berikutnya */
-		}
+	try {
+		const { value } = await aiGenerate(env, cfg, { purpose: "fb-caption", messages: [{ role: "user", content: prompt }], temperature: 0.9, maxTokens: 400 }, (raw) => {
+			const text = raw.trim().replace(/^["']|["']$/g, "").slice(0, 500);
+			if (!text) throw new Error("caption kosong");
+			return text;
+		});
+		return value;
+	} catch {
+		// fallback tanpa AI kalau semua provider gagal -- tetap bisa posting, cuma polos.
+		return `${art.title}`;
 	}
-	// fallback tanpa AI kalau semua model gagal -- tetap bisa posting, cuma polos.
-	return `${art.title}`;
 }
 
 export async function fbDirectProcessOne(env: Env): Promise<{ done: boolean; title?: string; error?: string }> {
@@ -1017,7 +1005,7 @@ export async function fbDirectProcessOne(env: Env): Promise<{ done: boolean; tit
 	if (!row) return { done: false };
 	const id = Number(row.id);
 	try {
-		const caption = await geminiFbCaption(cfg, { title: String(row.title), excerpt: String(row.excerpt), source: String(row.source) });
+		const caption = await geminiFbCaption(env, cfg, { title: String(row.title), excerpt: String(row.excerpt), source: String(row.source) });
 		let imageUrl = String(row.image_url || "");
 		if (!imageUrl) imageUrl = await fetchOgImage(String(row.url));
 		// Kalau artikel ini SUDAH ada versi Blogger-nya, arahkan ke situ (bangun
@@ -1059,12 +1047,10 @@ const FB_TEMPLATE_EVERGREEN_HASHTAGS = ["#LapakStore88", "#BeritaTerkini", "#Ber
 
 /** Caption + hashtag utk template manual — link ditambahkan terpisah di bawah (bukan oleh AI). */
 async function geminiFbTemplateCaption(
+	env: Env,
 	cfg: Record<string, string>,
 	art: { title: string; excerpt: string; source: string },
 ): Promise<{ text: string; hashtags: string[] }> {
-	const key = cfg.gemini_key;
-	const model = cfg.gemini_model || "gemini-3-flash-preview";
-	if (!key) throw new Error("gemini_key belum diisi di konfigurasi BOT.");
 	const prompt =
 		`Buatkan caption Facebook yang singkat, menarik, dan memancing rasa penasaran pembaca (gaya media sosial, ` +
 		`boleh pakai 1-3 emoji, MAKS 4 kalimat, JANGAN mengarang fakta baru di luar ringkasan). ` +
@@ -1076,33 +1062,18 @@ async function geminiFbTemplateCaption(
 		`beranda orang yang suka/cari berita. Balas HANYA dalam format:\n` +
 		`<caption>\n===HASHTAG===\n<hashtag1> <hashtag2> ...\n\n` +
 		`JUDUL: ${art.title}\nRINGKASAN: ${art.excerpt || "(tidak ada)"}\nSUMBER: ${art.source}`;
-	const models = [...new Set([model, "gemini-3-flash-preview", "gemini-flash-latest", "gemini-flash-lite-latest"])];
-	for (const mdl of models) {
-		const supportsThinking = /gemini-3/i.test(mdl);
-		const generationConfig: Record<string, unknown> = { temperature: 0.9, maxOutputTokens: 350 };
-		if (supportsThinking) generationConfig.thinkingConfig = { thinkingBudget: 0 };
-		try {
-			const r = await fetch(
-				`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(mdl)}:generateContent`,
-				{
-					method: "POST",
-					headers: { "Content-Type": "application/json", "X-goog-api-key": key },
-					body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig }),
-				},
-			);
-			const body = (await r.json()) as any;
-			const raw = body?.candidates?.[0]?.content?.parts?.map((p: any) => p.text || "").join("").trim();
-			if (r.ok && raw) {
-				const [captionPart, hashtagPart] = raw.split(/===HASHTAG===/i);
-				const text = (captionPart || raw).replace(/^["']|["']$/g, "").trim().slice(0, 500);
-				const aiTags = (hashtagPart || "").match(/#[\p{L}\p{N}_]+/gu) || [];
-				return { text, hashtags: aiTags.slice(0, 8) };
-			}
-		} catch {
-			/* coba model berikutnya */
-		}
+	try {
+		const { value } = await aiGenerate(env, cfg, { purpose: "fb-template", messages: [{ role: "user", content: prompt }], temperature: 0.9, maxTokens: 500 }, (raw) => {
+			const [captionPart, hashtagPart] = raw.trim().split(/===HASHTAG===/i);
+			const text = (captionPart || raw).replace(/^["']|["']$/g, "").trim().slice(0, 500);
+			if (!text) throw new Error("caption kosong");
+			const aiTags = (hashtagPart || "").match(/#[\p{L}\p{N}_]+/gu) || [];
+			return { text, hashtags: aiTags.slice(0, 8) };
+		});
+		return value;
+	} catch {
+		return { text: art.title, hashtags: [] };
 	}
-	return { text: art.title, hashtags: [] };
 }
 
 // Kolom penyimpan hasil template supaya bisa "dibuka lagi" dari Riwayat (caption
@@ -1135,7 +1106,7 @@ export async function fbTemplateGenerate(
 	if (!row) return { done: false, error: "Tidak ada artikel baru untuk dibuatkan template." };
 	const id = Number(row.id);
 	try {
-		const gen = await geminiFbTemplateCaption(cfg, {
+		const gen = await geminiFbTemplateCaption(env, cfg, {
 			title: String(row.title),
 			excerpt: String(row.excerpt),
 			source: String(row.source),
@@ -1249,13 +1220,28 @@ export async function newsProcessOne(
 	const claim = await getTurso(env).prepare(`UPDATE news_article SET status='processing', claimed_at=? WHERE id=? AND status='new'`).bind(tsNow(), id).run();
 	if (!claim.meta.changes) return { done: false };
 	try {
+		// Halaman sumber diambil SEKALI: teksnya jadi bahan AI (artikel panjang
+		// tapi tetap berisi fakta, bukan diulur-ulur dari ringkasan RSS 2
+		// kalimat), foto-fotonya jadi gambar tambahan di dalam artikel.
+		const imagesWanted = imagesPerArticle(cfg);
+		const page = await fetchSourcePage(String(row.url), Math.max(0, imagesWanted - 1));
 		const rw = await geminiRewrite(env, cfg, {
 			title: String(row.title),
 			excerpt: String(row.excerpt),
 			source: String(row.source),
 			url: String(row.url),
+			sourceText: page.text,
 		});
-		let content = insertAnchorBacklink(rw.html, cfg);
+		let imageUrl = String(row.image_url || "") || page.ogImage;
+		const extraImages = page.images.filter((u) => u.split("?")[0] !== imageUrl.split("?")[0]).slice(0, Math.max(0, imagesWanted - 1));
+		// Backlink DULU, baru foto: insertAnchorBacklink mengganti kata pertama
+		// yang cocok -- kalau foto sudah ada, kata itu bisa kena di dalam alt="".
+		let content = insertImagesBetweenParagraphs(
+			insertAnchorBacklink(rw.html, cfg),
+			extraImages,
+			rw.title,
+			String(cfg.attribution || "1") === "1" ? String(row.source) : "",
+		);
 		// Kategori otomatis dari AI (klasifikasi isi artikel yang sebenarnya) --
 		// menang atas kategori bawaan sumbernya (yang cuma tebakan kasar per-feed).
 		// Kalau Gemini tidak balas kategori valid, tetap pakai punya sumber.
@@ -1375,10 +1361,6 @@ export async function newsProcessOne(
 		// image_url kosong, coba ambil <meta og:image> dari halaman artikel asli
 		// (1 fetch tambahan, cuma dipanggil di sini per-artikel yang DIPROSES,
 		// bukan saat pull massal -> anggaran subrequest masih aman).
-		let imageUrl = String(row.image_url || "");
-		if (!imageUrl) {
-			imageUrl = await fetchOgImage(String(row.url));
-		}
 		// Byline tanggal WAJIB di awal SETIAP artikel (Blogger maupun situs sendiri --
 		// keduanya pakai `content` yang sama ini) -- pemilik minta format persis:
 		// "LokalStore88 <NamaHari>,<tanggal> <bulan> <tahun>." dengan "LokalStore88"
@@ -1422,7 +1404,7 @@ export async function newsProcessOne(
 				"@type": "NewsArticle",
 				headline: rw.title,
 				description: rw.metaDescription,
-				image: imageUrl ? [imageUrl] : undefined,
+				image: imageUrl ? [imageUrl, ...extraImages] : undefined,
 				datePublished: tsNow().replace(" ", "T") + "+07:00",
 				keywords: rw.keywords.length ? rw.keywords.join(", ") : undefined,
 				articleSection: newsCategoryLabel(category),
@@ -1498,6 +1480,12 @@ export async function newsProcessOne(
 		if (e instanceof BloggerAuthError || isBloggerAuthMessage(msg)) {
 			await getTurso(env).prepare(`UPDATE news_article SET status='new' WHERE id=? AND status='processing'`).bind(id).run();
 			await bloggerSetAuthState(env, cfg, msg).catch(() => {});
+			return { done: false, error: msg };
+		}
+		// Belum ada AI provider aktif (semua dihapus / dimatikan / kuota habis /
+		// masa aktif lewat): artikel tidak salah apa-apa -> kembalikan ke antrean.
+		if (e instanceof AiUnavailableError) {
+			await getTurso(env).prepare(`UPDATE news_article SET status='new' WHERE id=? AND status='processing'`).bind(id).run();
 			return { done: false, error: msg };
 		}
 		// "User location is not supported" = Cloudflare edge yg kebagian request ini
@@ -1653,6 +1641,12 @@ export async function botNewsRun(
 	const cfg = await botCfg(env);
 	if (!opts.force && String(cfg.enabled || "0") !== "1") {
 		return { pulled: 0, posted: 0, siteOnly: 0, capped: false, message: "BOT NEWS dimatikan (enabled=0).", bloggerBlocked: "" };
+	}
+	await ensureContentDefaultsV2(env, cfg);
+	// Tanpa AI provider aktif tidak ada yang bisa ditulis -> jangan sentuh
+	// antrean sama sekali (artikel tidak di-klaim, tidak ada yang dibakar).
+	if (!(await aiUsableProviders(env, cfg)).length) {
+		return { pulled: 0, posted: 0, siteOnly: 0, capped: false, message: "Tidak ada AI provider aktif -- tambah/aktifkan di BOT -> Setting -> AI Provider (cek kuota & masa aktif).", bloggerBlocked: "" };
 	}
 	const countOverride = opts.count ? Math.max(1, Math.min(MAX_RUN_COUNT, Math.floor(opts.count))) : 0;
 	let perRun = mode === "site" ? 0 : countOverride || Math.max(1, Number(cfg.per_run || "2"));
@@ -1847,14 +1841,15 @@ export async function botNewsSnapshot(env: Env) {
 			auto_interval_minutes: Number(cfg.auto_interval_minutes || "10"),
 			attribution: String(cfg.attribution || "1") === "1",
 			rewrite_style: cfg.rewrite_style || "",
-			para_min: Number(cfg.para_min || "8"),
-			para_max: Number(cfg.para_max || "14"),
+			para_min: Number(cfg.para_min || DEFAULT_PARA_MIN),
+			para_max: Number(cfg.para_max || DEFAULT_PARA_MAX),
+			images_per_article: imagesPerArticle(cfg),
 			promo_url: cfg.promo_url || "",
 			promo_text: cfg.promo_text || "",
 			post_labels: cfg.post_labels || "",
-			gemini_model: cfg.gemini_model || "gemini-flash-latest",
-			has_gemini_key: !!cfg.gemini_key,
-			has_groq_key: !!cfg.groq_key,
+			// Ringkasan AI provider (detail & counter token: botAiList).
+			ai_providers: (parseProviders(cfg) ?? legacyProviders(cfg)).length,
+			ai_providers_on: (parseProviders(cfg) ?? legacyProviders(cfg)).filter((p) => p.enabled && p.key && p.base_url && p.model).length,
 			has_blogger: !!(cfg.blogger_refresh_token && cfg.blogger_blog_id),
 			has_blogger_client: !!(cfg.blogger_client_id && cfg.blogger_client_secret),
 			blogger_client_id: cfg.blogger_client_id || "",
