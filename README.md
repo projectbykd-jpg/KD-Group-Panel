@@ -77,6 +77,11 @@ npx wrangler d1 execute day_database --remote --file ../migration/002_invest_raw
 `006_perf_indexes.sql` dan `007_login_throttle.sql` tidak wajib dijalankan
 manual: Worker membuatnya sendiri (`CREATE ... IF NOT EXISTS`).
 
+Opsional: `migration/manual/drop_legacy_d1_tables.sql` menghapus salinan lama
+tabel `lap_*`, `invest_*` dan `sent_registry` di D1 (datanya sudah di Turso dan
+tidak dibaca Worker lagi). Tidak bisa dibatalkan, jadi **backup dulu** —
+langkahnya ada di kepala file itu.
+
 ## Tes
 
 ```bash

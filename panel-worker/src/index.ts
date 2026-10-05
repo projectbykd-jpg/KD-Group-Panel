@@ -17,7 +17,6 @@ import {
 	adminResetUserLock,
 	adminSaveUser,
 	adminSetAutoPost,
-	adminSetLogRetention,
 	pruneActivityLogCron,
 } from "./api/admin";
 import { adminDeleteSite, adminListSites, adminSaveSite } from "./api/sites";
@@ -59,7 +58,6 @@ import {
 	lapMotionImport,
 	lapMozartImport,
 	lapRunAdmin,
-	lapRunMozart,
 	lapSaveConfig,
 } from "./api/lap";
 import {
@@ -182,9 +180,9 @@ const ROUTES: Record<string, Handler> = {
 	adminGetAutoPostWebhook: (env, b) => adminGetAutoPostWebhook(env, s(b.token), s(b.__origin)),
 	adminSetAutoPost: (env, b) => adminSetAutoPost(env, s(b.token), !!b.enabled),
 
-	// retensi activity log (nama lama frontend: "backup")
+	// retensi activity log (nama lama frontend: "backup"). Auto-retensi selalu
+	// aktif lewat cron harian -- tidak ada tombol "aktifkan" lagi.
 	adminRunActivityBackup: (env, b) => adminPruneActivityLog(env, s(b.token)),
-	setupActivityBackupTrigger: (env, b) => adminSetLogRetention(env, s(b.token)),
 
 	// invest
 	investGetConfig: (env, b) => investGetConfig(env, s(b.token)),
@@ -215,8 +213,6 @@ const ROUTES: Record<string, Handler> = {
 	// dikirim sama sekali) harus tetap `undefined` sampai ke lapMotionImport
 	// supaya bisa dibedakan dari "dikirim tapi memang kosong" (`[]`).
 	lapMotionImport: (env, b) => lapMotionImport(env, s(b.token), s(b.startDate), s(b.endDate), b.depoPaidRows, b.depoCreateRows, b.wdRows),
-	lapRunMozart: (env, b) =>
-		lapRunMozart(env, s(b.token), s(b.startDate), s(b.endDate), (b.opts ?? {}) as { depo?: boolean; wd?: boolean; panelId?: number }),
 	lapRunAdmin: (env, b) => lapRunAdmin(env, s(b.token), s(b.startDate), s(b.endDate)),
 	lapMozartImport: (env, b) =>
 		lapMozartImport(

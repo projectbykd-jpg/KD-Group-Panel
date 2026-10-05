@@ -293,7 +293,7 @@
     .table-empty-cell i{display:block;font-size:22px;margin-bottom:9px;opacity:.4}
     /* Tabel lebar di HP di-scroll horizontal: pesan kosong ditahan di area yang
        terlihat (sticky) supaya tidak ikut ter-center di tengah tabel penuh. */
-    .table-empty-inner{display:block;position:sticky;left:0;width:min(100%,calc(100vw - 64px))}
+    .table-empty-inner{display:block;position:sticky;left:0;width:min(100%,calc(100vw - 120px))}
     /* Sama seperti table-empty-cell tapi dengan ikon berputar -- dipakai
        ganti teks "Memuat..." polos supaya jelas kelihatan lagi proses. */
     .table-loading-cell{padding:28px 16px !important;text-align:center;color:#7c8aa0;font-size:11px;font-weight:600}
@@ -533,7 +533,7 @@
        ACTIVITY LOG — compact, readable, expandable
        ========================================================= */
     .log-table {
-      min-width: 1080px !important;
+      min-width: 960px !important;
       table-layout: fixed;
     }
 
@@ -552,9 +552,7 @@
     .log-table th:nth-child(2) { width: 110px; }
     .log-table th:nth-child(3) { width: 165px; }
     .log-table th:nth-child(4) { width: 115px; }
-    .log-table th:nth-child(5) { width: 300px; }
-    .log-table th:nth-child(6) { width: 300px; }
-    .log-table th:nth-child(7) { width: 105px; }
+    /* Detail & Isi/Data berbagi sisa lebar (tanpa width tetap). */
 
     .log-table td {
       padding: 10px !important;
@@ -718,11 +716,10 @@
     /* Grid statistik 2 kolom (di bawah md): kartu terakhir yang sendirian
        dibentangkan penuh supaya tidak ada lubang di kanan. */
     @media (max-width: 767px) {
-      #userStats > :last-child:nth-child(odd),
-      #adminStats > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+      #userStats > :last-child:nth-child(odd) { grid-column: 1 / -1; }
     }
 
-    /* HP: tabel 7 kolom (min 1080px) dulu harus digeser ke samping. Sekarang
+    /* HP: tabel 6 kolom (min 960px) dulu harus digeser ke samping. Sekarang
        tiap baris jadi kartu: waktu + status, user + aksi, lalu detail & data
        selebar kartu. Urutan kolom di HTML tidak berubah (pure CSS). */
     @media (max-width: 640px) {
@@ -734,7 +731,7 @@
       .log-table tr.activity-log-row {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
-        grid-template-areas: "time status" "user action" "detail detail" "data data" "source source";
+        grid-template-areas: "time status" "user action" "detail detail" "data data";
         gap: 8px 10px;
         padding: 12px;
         border-bottom: 1px solid rgba(255,255,255,.06);
@@ -746,7 +743,6 @@
       .activity-log-row > td:nth-child(4) { grid-area: status; justify-self: end; }
       .activity-log-row > td:nth-child(5) { grid-area: detail; }
       .activity-log-row > td:nth-child(6) { grid-area: data; }
-      .activity-log-row > td:nth-child(7) { grid-area: source; }
       .activity-log-row > td:nth-child(5)::before,
       .activity-log-row > td:nth-child(6)::before {
         display: block; margin-bottom: 3px;
@@ -772,16 +768,6 @@
       background: linear-gradient(145deg, rgba(15,23,42,.72), rgba(8,15,31,.58));
       border: 1px solid rgba(148,163,184,.10);
       box-shadow: 0 15px 38px rgba(0,0,0,.18);
-    }
-
-    #adminStats > div {
-      min-height: 88px;
-      border-radius: 18px;
-      background: linear-gradient(145deg, rgba(30,41,59,.56), rgba(15,23,42,.46));
-      border: 1px solid rgba(255,255,255,.06);
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
     }
 
     #userSearch,
@@ -1315,11 +1301,11 @@
     }
     .activity-filter-grid{
       display:grid;
-      grid-template-columns:minmax(190px,1.5fr) repeat(3,minmax(135px,.8fr));
+      grid-template-columns:minmax(190px,1.5fr) repeat(2,minmax(135px,.8fr));
       gap:9px;
     }
     .activity-filter-grid.activity-admin-grid{
-      grid-template-columns:minmax(190px,1.4fr) repeat(4,minmax(125px,.75fr));
+      grid-template-columns:minmax(190px,1.4fr) repeat(3,minmax(125px,.75fr));
     }
     .activity-filter-control{
       min-height:42px;
@@ -1343,6 +1329,8 @@
       align-items:end;
     }
     .activity-date-row .activity-filter-btn{ align-self:end; }
+    /* Non-admin: tanggal selalu "hari ini" (dikunci server) -> cuma tombol. */
+    .activity-date-row.is-compact{ grid-template-columns:auto auto; justify-content:end; }
     .activity-filter-btn{
       min-height:42px;
       border-radius:13px;
@@ -1375,26 +1363,6 @@
       border-radius:15px;
       background:rgba(2,6,23,.30);
       border:1px solid rgba(255,255,255,.055);
-    }
-    .activity-source-chip{
-      display:inline-flex;
-      align-items:center;
-      gap:5px;
-      padding:5px 8px;
-      border-radius:999px;
-      font-size:8px;
-      font-weight:900;
-      white-space:nowrap;
-    }
-    .activity-source-current{
-      color:#a7f3d0;
-      background:rgba(16,185,129,.10);
-      border:1px solid rgba(52,211,153,.18);
-    }
-    .activity-source-backup{
-      color:#c4b5fd;
-      background:rgba(99,102,241,.12);
-      border:1px solid rgba(129,140,248,.20);
     }
     .activity-pagination{
       display:flex;
@@ -1663,11 +1631,10 @@
     .admin-users-table td { font-size: 11px; }
     .admin-users-table th { font-size: 10px; }
     .activity-filter-control { font-size: 11px; }
-    .activity-meta-bar, #activityMeta, #adminActivityMeta { font-size: 11px; }
+    .activity-meta-bar, #activityMeta { font-size: 11px; }
     .center-notice-message { font-size: 12px; }
     .center-notice-btn { font-size: 11px; }
     .retry-mini { font-size: 9.5px !important; }
-    .activity-source-chip { font-size: 9.5px !important; }
     .activity-page-btn { font-size: 10px !important; }
     .closing-primary-badge { font-size: 9px !important; }
     .prediction-count { font-size: 10px !important; }
@@ -2635,4 +2602,73 @@ table tbody tr:hover td{
   .session-clock-label{display:none}
   .session-clock-value{font-size:14px;letter-spacing:.04em}
 }
+
+/* =========================================================
+   PAGE HEAD -- satu pola judul untuk SEMUA menu:
+   ikon bertone + eyebrow grup + judul + deskripsi + aksi kanan.
+   Dulu tiap menu beda gaya (huruf besar semua / kecil / tombol
+   "Kembali" dobel dengan sidebar).
+   ========================================================= */
+.page-head{
+  --tone:#67e8f9; --tone-bg:rgba(34,211,238,.14); --tone-bd:rgba(34,211,238,.30);
+  display:flex; align-items:center; gap:14px;
+  padding-bottom:16px; border-bottom:1px solid rgba(255,255,255,.06);
+}
+.page-head.is-standalone{ padding-bottom:0; border-bottom:0; }
+.page-head.tone-amber  { --tone:#fcd34d; --tone-bg:rgba(245,158,11,.16); --tone-bd:rgba(251,191,36,.32); }
+.page-head.tone-pink   { --tone:#f9a8d4; --tone-bg:rgba(236,72,153,.16); --tone-bd:rgba(244,114,182,.32); }
+.page-head.tone-emerald{ --tone:#6ee7b7; --tone-bg:rgba(16,185,129,.16); --tone-bd:rgba(52,211,153,.32); }
+.page-head.tone-sky    { --tone:#7dd3fc; --tone-bg:rgba(14,165,233,.16); --tone-bd:rgba(56,189,248,.32); }
+.page-head-icon{
+  width:46px; height:46px; flex:0 0 46px; border-radius:15px;
+  display:flex; align-items:center; justify-content:center; font-size:17px;
+  color:var(--tone); background:linear-gradient(145deg,var(--tone-bg),rgba(15,23,42,.25));
+  border:1px solid var(--tone-bd);
+  box-shadow:0 10px 24px rgba(2,6,23,.35), inset 0 1px 0 rgba(255,255,255,.07);
+}
+.page-head-text{ min-width:0; flex:1; }
+.page-eyebrow{ font-size:9px; font-weight:800; letter-spacing:.16em; text-transform:uppercase; color:var(--tone); opacity:.85; }
+.page-title{ margin-top:2px; font-size:19px; line-height:1.25; font-weight:800; letter-spacing:-.015em; color:#f8fafc; }
+.page-sub{ margin-top:3px; font-size:12px; line-height:1.55; color:#94a3b8; max-width:780px; }
+.page-sub b{ color:#cbd5e1; }
+.page-head-actions{ display:flex; align-items:center; gap:8px; flex-shrink:0; margin-left:auto; }
+@media (max-width:640px){
+  .page-head{ flex-wrap:wrap; gap:12px; align-items:flex-start; }
+  .page-head-icon{ width:40px; height:40px; flex-basis:40px; border-radius:13px; font-size:15px; }
+  .page-title{ font-size:17px; }
+  .page-head-actions{ width:100%; margin-left:0; }
+  .page-head-actions > *{ flex:1; justify-content:center; }
+}
+
+/* Callout info/peringatan -- pengganti banner gradien yang "teriak". */
+.callout{
+  display:flex; align-items:flex-start; gap:10px; padding:12px 14px; border-radius:14px;
+  font-size:12px; line-height:1.55; color:#cbd5e1;
+  background:rgba(15,23,42,.55); border:1px solid rgba(148,163,184,.14);
+}
+.callout[hidden]{ display:none; }
+.callout > i{ margin-top:2px; flex-shrink:0; }
+.callout code{ font-size:11px; color:#67e8f9; background:rgba(34,211,238,.08); padding:1px 5px; border-radius:6px; }
+.callout-info{ border-color:rgba(56,189,248,.20); background:linear-gradient(135deg,rgba(14,165,233,.08),rgba(15,23,42,.5)); }
+.callout-info > i{ color:#7dd3fc; }
+.callout-warn{ border-color:rgba(251,191,36,.26); background:linear-gradient(135deg,rgba(245,158,11,.10),rgba(15,23,42,.5)); color:#fde68a; }
+.callout-warn > i{ color:#fbbf24; }
+#prediction-page .closing-smart-card.is-empty{ padding:0 !important; background:none !important; border:0 !important; box-shadow:none !important; }
+
+/* Setting Laporan Harian: field berlabel + dikelompokkan per sistem. */
+.lap-setting-section{ display:flex; flex-direction:column; gap:12px; padding:16px; border-radius:18px; background:rgba(2,6,23,.32); border:1px solid rgba(148,163,184,.10); }
+.lap-setting-title{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:11px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:#e2e8f0; }
+.lap-setting-title i{ color:#7dd3fc; }
+.lap-setting-title span{ font-size:10px; font-weight:600; letter-spacing:0; text-transform:none; color:#64748b; }
+.lap-field{ display:flex; flex-direction:column; gap:6px; min-width:0; }
+.lap-field-label{ font-size:10px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:#94a3b8; }
+.lap-field-input{
+  width:100%; min-height:42px; padding:10px 12px; border-radius:12px; font-size:12px; color:#f1f5f9;
+  background:rgba(15,23,42,.62); border:1px solid rgba(148,163,184,.14); outline:none;
+  transition:border-color .15s ease, box-shadow .15s ease;
+}
+.lap-field-input:focus{ border-color:rgba(56,189,248,.45); box-shadow:0 0 0 3px rgba(56,189,248,.10); }
+.lap-field-input::placeholder{ color:#475569; }
+.lap-field-hint{ font-size:10.5px; line-height:1.5; color:#64748b; }
+.lap-field-hint code{ font-size:10px; color:#94a3b8; }
 </style>

@@ -6,10 +6,6 @@ interface Env {
 	CRON_KEY?: string;
 	/** Fine-grained GitHub PAT, akses repo daygroup-scraper, Actions: read/write. */
 	GH_TOKEN?: string;
-	/** URL /exec Apps Script daygroup-mozart (scrape Mozart). */
-	MOZART_GAS_URL?: string;
-	/** SHARED_KEY yang sama dengan di Apps Script daygroup-mozart. */
-	MOZART_GAS_KEY?: string;
 	/** URL database Turso (libSQL) — tabel berat Laporan Harian + Invest. */
 	TURSO_URL?: string;
 	/** Auth token Turso (read & write). */

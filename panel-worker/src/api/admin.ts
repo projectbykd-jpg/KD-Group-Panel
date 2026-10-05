@@ -339,18 +339,6 @@ export async function adminPruneActivityLog(env: Env, token: string) {
 	};
 }
 
-export async function adminSetLogRetention(env: Env, token: string) {
-	const s = await requireSession(env, token, { admin: true });
-	await setSetting(env, "log_retention_enabled", "TRUE");
-	await logActivity(env, s.username, "RETENSI LOG", "Auto retensi log 7 hari diaktifkan", "BERHASIL", "");
-	return {
-		success: true,
-		message:
-			`Auto retensi AKTIF: cron harian akan menghapus log lebih tua dari ${LOG_RETENTION_DAYS} hari ` +
-			"(dijalankan lewat /__cron). Tidak ada sheet backup terpisah — semua log di database utama.",
-	};
-}
-
 /** Dipanggil dari cron harian (index.ts) — hening, tanpa sesi. */
 export async function pruneActivityLogCron(env: Env): Promise<number> {
 	if (String(await getSetting(env, "log_retention_enabled") || "TRUE").toUpperCase() === "FALSE") return 0;

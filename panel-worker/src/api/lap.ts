@@ -29,8 +29,9 @@ function credsForClient(c: LapCreds) {
 		linkMotion: c.linkMotion,
 		tokenMotion: c.tokenMotion,
 		vendorIdMotion: c.vendorIdMotion,
-		linkMozart: c.linkMozart,
-		tokenMozart: c.cookieMozart,
+		// Link/Cookie Mozart tidak dikirim ke browser lagi: UI tidak memakainya
+		// (data Mozart masuk lewat skrip Console), jadi cookie itu tidak perlu
+		// ikut beredar di halaman.
 		mozartAccounts: c.mozartAccounts,
 	};
 }
@@ -282,71 +283,8 @@ export async function lapMotionImport(
 }
 
 // =========================================================================
-// LAP MOZART — via Apps Script.
-// Cloudflare Mozart (limatogel.makintajir.com) memblokir SEMUA IP datacenter
-// (Cloudflare Workers + GitHub Actions/Azure). IP Google Apps Script lolos,
-// jadi scrape Mozart dijalankan di Apps Script kecil (daygroup-mozart), panel
-// cukup memanggilnya sinkron.
+// LAP MOZART
 // =========================================================================
-export async function lapRunMozart(
-	env: Env,
-	token: string,
-	startDate: string,
-	endDate: string,
-	_opts: { depo?: boolean; wd?: boolean; panelId?: number } = {},
-) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: "lap-mozart" });
-	const c = await lapLoadCreds(env, s.username);
-	if (!c.cookieMozart) return { success: false, message: "Cookie Mozart belum diisi di menu Setting!" };
-	if (!env.MOZART_GAS_URL || !env.MOZART_GAS_KEY) {
-		return { success: false, message: "Endpoint Mozart (Apps Script) belum dikonfigurasi. Hubungi admin." };
-	}
-
-	let j: {
-		success?: boolean;
-		message?: string;
-		depositData?: Rec[];
-		withdrawData?: Rec[];
-		summary?: Rec;
-	};
-	try {
-		const r = await fetch(env.MOZART_GAS_URL, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({
-				key: env.MOZART_GAS_KEY,
-				cookie: c.cookieMozart,
-				base: c.linkMozart || "https://limatogel.makintajir.com",
-				startDate,
-				endDate,
-			}),
-		});
-		const text = await r.text();
-		j = JSON.parse(text);
-	} catch (e) {
-		return { success: false, message: "Gagal menghubungi Apps Script Mozart: " + (e instanceof Error ? e.message : String(e)) };
-	}
-	if (!j.success) return { success: false, message: j.message || "Apps Script Mozart gagal." };
-
-	const depositData = j.depositData ?? [];
-	const withdrawData = j.withdrawData ?? [];
-	const summary = j.summary ?? {};
-	await lapSaveResults(env, s.username, {
-		mozartDepo: depositData,
-		mozartWd: withdrawData,
-		_mozartMeta: [{ summary }],
-	});
-	await logActivity(
-		env,
-		s.username,
-		"LAP MOZART",
-		`${startDate}..${endDate} — DP ${depositData.length}, WD ${withdrawData.length}`,
-		"BERHASIL",
-		"",
-	);
-	return { success: true, depositData, withdrawData, summary };
-}
-
 // --- Impor Mozart dari browser user (bookmarklet) ------------------------
 // Cloudflare Mozart blok SEMUA IP non-residensial (Worker/GitHub/Apps Script).
 // Jalan terakhir: user jalankan bookmarklet di tab Mozart mereka -> fetch API

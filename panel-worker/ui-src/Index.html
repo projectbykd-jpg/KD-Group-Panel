@@ -491,31 +491,17 @@
       <div id="prediction-page" class="flex flex-col gap-5 fade-in">
         <div class="glass-card rounded-3xl p-6 sm:p-8 flex flex-col gap-6">
           
-          <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-white/5 pb-5">
-            <div class="flex items-center gap-4">
-              <div class="w-12 h-12 rounded-2xl bg-pink-500/25 border border-pink-500/40 flex items-center justify-center shadow-lg shadow-pink-500/10">
-                <i class="fa-solid fa-wand-magic-sparkles text-pink-400 text-sm"></i>
-              </div>
-              <div>
-                <h2 class="text-lg sm:text-xl font-extrabold text-white tracking-wide">PUSAT PREDIKSI PASARAN</h2>
-                <p class="text-[11px] text-slate-400 font-medium mt-0.5">Text Prediksi Telegram.</p>
-              </div>
+          <div class="page-head tone-pink">
+            <div class="page-head-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
+            <div class="page-head-text">
+              <div class="page-eyebrow">Utama</div>
+              <h2 class="page-title">Pusat Prediksi Pasaran</h2>
+              <p class="page-sub">Jadwal prediksi &amp; kata penutup per sesi. <b>Copy</b> menyalin teks, <b>Send Auto</b> mengirim ke semua website tanpa duplikat (per website, per sesi, per hari).</p>
             </div>
-            
-            <button onclick="switchPage('home')" class="btn-secondary font-bold text-xs px-6 py-3.5 rounded-2xl transition-all active:scale-95 cursor-pointer flex items-center gap-2">
-              <i class="fa-solid fa-arrow-left"></i> Kembali ke Beranda
-            </button>
           </div>
 
-          <!-- Banner Informasi -->
-          <div class="glass-inner rounded-2xl p-4 sm:p-5 border border-cyan-500/30 bg-gradient-to-r from-cyan-950/40 to-slate-900/60 shadow-lg flex items-center gap-4">
-            <div class="w-10 h-10 rounded-2xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center shrink-0">
-              <i class="fa-solid fa-bullhorn text-cyan-300 text-sm animate-pulse"></i>
-            </div>
-            <div id="pred-info-text" class="text-xs sm:text-sm font-bold text-cyan-200 tracking-wide">
-              Copy menyalin teks. SEND AUTO mengirim tanpa konfirmasi dan memblokir duplikat per website, per sesi, dan per hari.
-            </div>
-          </div>
+          <!-- Muncul HANYA kalau akun belum bisa mengirim (Telegram/website belum diatur). -->
+          <div id="pred-info-text" class="callout callout-warn" role="status" hidden></div>
 
           <!-- LIST UTAMA: KATA-KATA PENUTUP PREDIKSI -->
           <div id="closingPredictionCard" class="closing-smart-card" style="display:none"></div>
@@ -552,15 +538,16 @@
 
       <div id="activity-page" style="display:none" class="flex flex-col gap-5 fade-in">
         <div class="glass-card rounded-3xl p-5 sm:p-6 flex flex-col gap-4">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <div class="text-[9px] font-extrabold tracking-[.16em] text-cyan-400">ACTIVITY CENTER</div>
-              <h2 class="text-lg font-extrabold mt-1">RIWAYAT AKTIVITAS</h2>
-              <p id="activityScopeText" class="text-xs text-slate-400 mt-1">Riwayat akun hari ini.</p>
+          <div class="page-head tone-cyan">
+            <div class="page-head-icon"><i class="fa-solid fa-clock-rotate-left"></i></div>
+            <div class="page-head-text">
+              <div class="page-eyebrow">Activity Center</div>
+              <h2 class="page-title">Riwayat Aktivitas</h2>
+              <p class="page-sub" id="activityScopeText">Riwayat akun hari ini.</p>
             </div>
-            <button onclick="loadDashboard(true,'activity')" class="glass-inner px-4 py-3 rounded-2xl text-xs font-bold">
-              <i class="fa-solid fa-rotate mr-2"></i>REFRESH
-            </button>
+            <div class="page-head-actions">
+              <button onclick="loadDashboard(true)" class="glass-inner px-4 py-3 rounded-2xl text-xs font-bold"><i class="fa-solid fa-rotate mr-2"></i>REFRESH</button>
+            </div>
           </div>
 
           <div id="userStats" class="grid grid-cols-2 md:grid-cols-5 gap-3"></div>
@@ -578,44 +565,39 @@
               <select id="activityUserFilter" class="activity-filter-control activity-admin-only" style="display:none"><option value="">Semua User</option></select>
               <select id="activityActionFilter" class="activity-filter-control"><option value="">Semua Aksi</option></select>
               <select id="activityStatusFilter" class="activity-filter-control"><option value="">Semua Status</option></select>
-              <select id="activitySourceFilter" class="activity-filter-control activity-admin-only" style="display:none">
-                <option value="ALL">Hari Ini + Backup</option>
-                <option value="CURRENT">Hanya Hari Ini</option>
-                <option value="BACKUP">Hanya Backup</option>
-              </select>
             </div>
-            <div class="activity-date-row">
-              <div class="activity-date-field">
+            <div id="activityDateRow" class="activity-date-row">
+              <div class="activity-date-field activity-admin-only">
                 <label>Tanggal Dari</label>
                 <div class="date-shell" onclick="openDatePicker(this.querySelector('input'))">
                   <i class="fa-solid fa-calendar-days"></i>
                   <input id="activityDateFrom" type="date" class="date-input" title="Tanggal awal">
                 </div>
               </div>
-              <div class="activity-date-field">
+              <div class="activity-date-field activity-admin-only">
                 <label>Tanggal Sampai</label>
                 <div class="date-shell" onclick="openDatePicker(this.querySelector('input'))">
                   <i class="fa-solid fa-calendar-days"></i>
                   <input id="activityDateTo" type="date" class="date-input" title="Tanggal akhir">
                 </div>
               </div>
-              <button onclick="applyActivityFilters('activity')" class="activity-filter-btn activity-filter-apply"><i class="fa-solid fa-filter"></i>TERAPKAN</button>
-              <button onclick="resetActivityFilters('activity')" class="activity-filter-btn activity-filter-reset"><i class="fa-solid fa-rotate-left"></i>RESET</button>
+              <button onclick="applyActivityFilters()" class="activity-filter-btn activity-filter-apply"><i class="fa-solid fa-filter"></i>TERAPKAN</button>
+              <button onclick="resetActivityFilters()" class="activity-filter-btn activity-filter-reset"><i class="fa-solid fa-rotate-left"></i>RESET</button>
             </div>
           </div>
 
           <div class="activity-meta-bar">
             <div id="activityMeta" class="text-[10px] text-slate-400">Memuat aktivitas...</div>
             <div class="activity-pagination">
-              <button id="activityPrevBtn" onclick="changeActivityPage('activity',-1)" class="activity-page-btn"><i class="fa-solid fa-chevron-left mr-1"></i>Sebelumnya</button>
+              <button id="activityPrevBtn" onclick="changeActivityPage(-1)" class="activity-page-btn"><i class="fa-solid fa-chevron-left mr-1"></i>Sebelumnya</button>
               <span id="activityPageLabel" class="text-[9px] font-bold text-slate-400">Halaman 1</span>
-              <button id="activityNextBtn" onclick="changeActivityPage('activity',1)" class="activity-page-btn">Berikutnya<i class="fa-solid fa-chevron-right ml-1"></i></button>
+              <button id="activityNextBtn" onclick="changeActivityPage(1)" class="activity-page-btn">Berikutnya<i class="fa-solid fa-chevron-right ml-1"></i></button>
             </div>
           </div>
 
           <div class="overflow-x-auto glass-inner rounded-2xl">
             <table class="log-table w-full text-xs">
-              <thead><tr class="text-slate-400"><th>Waktu</th><th>Username</th><th>Aksi</th><th>Status</th><th>Detail</th><th>Isi/Data</th><th>Sumber</th></tr></thead>
+              <thead><tr class="text-slate-400"><th>Waktu</th><th>Username</th><th>Aksi</th><th>Status</th><th>Detail</th><th>Isi/Data</th></tr></thead>
               <tbody id="activityBody"></tbody>
             </table>
           </div>
@@ -623,52 +605,51 @@
       </div>
       <div id="admin-page" style="display:none" class="flex flex-col gap-5 fade-in">
         <div class="glass-card rounded-3xl p-6 flex flex-col gap-5">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3"><div><h2 class="text-lg font-extrabold text-amber-300">ADMIN CONTROL CENTER</h2><p class="text-xs text-slate-400">Statistik seluruh user dan pengaturan maintenance.</p></div><button onclick="loadDashboard(true,'admin')" class="glass-inner px-4 py-3 rounded-2xl text-xs font-bold"><i class="fa-solid fa-rotate mr-2"></i>REFRESH DATA</button></div><div id="adminLoadStatus" class="text-xs text-cyan-300 rounded-2xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3">Memuat statistik dan aktivitas...</div>
+          <div class="page-head tone-amber">
+            <div class="page-head-icon"><i class="fa-solid fa-user-shield"></i></div>
+            <div class="page-head-text">
+              <div class="page-eyebrow">Admin Control Center</div>
+              <h2 class="page-title">Pengaturan Panel</h2>
+              <p class="page-sub">Kelola user &amp; hak akses menu, website, sesi login, auto posting, dan maintenance. Riwayat aktivitas semua user ada di menu <b>Aktivitas</b>.</p>
+            </div>
+          </div>
 
           <div class="admin-tabs" id="adminTabs">
-            <button class="admin-tab active" data-admin-tab="dashboard" onclick="switchAdminPanel('dashboard')"><i class="fa-solid fa-chart-line"></i>Dashboard</button>
-            <button class="admin-tab" data-admin-tab="users" onclick="switchAdminPanel('users')"><i class="fa-solid fa-users-gear"></i>Users</button>
+            <button class="admin-tab active" data-admin-tab="users" onclick="switchAdminPanel('users')"><i class="fa-solid fa-users-gear"></i>Users</button>
             <button class="admin-tab" data-admin-tab="sites" onclick="switchAdminPanel('sites')"><i class="fa-solid fa-globe"></i>Website</button>
             <button class="admin-tab" data-admin-tab="sesi" onclick="switchAdminPanel('sesi')"><i class="fa-solid fa-users-viewfinder"></i>Sesi Aktif</button>
             <button class="admin-tab" data-admin-tab="autopost" onclick="switchAdminPanel('autopost')"><i class="fa-solid fa-robot"></i>Auto Posting</button>
-            <button class="admin-tab" data-admin-tab="backup" onclick="switchAdminPanel('backup')"><i class="fa-solid fa-box-archive"></i>Backup Log</button>
-            <button class="admin-tab" data-admin-tab="maintenance" onclick="switchAdminPanel('maintenance')"><i class="fa-solid fa-screwdriver-wrench"></i>Maintenance</button>
+            <button class="admin-tab" data-admin-tab="maintenance" onclick="switchAdminPanel('maintenance')"><i class="fa-solid fa-screwdriver-wrench"></i>Maintenance &amp; Log</button>
           </div>
-          <select class="admin-tab-select" id="adminTabSelect" onchange="switchAdminPanel(this.value)">
-            <option value="dashboard">Dashboard &amp; Aktivitas</option>
-            <option value="users">Kelola Users</option>
+          <select class="admin-tab-select" id="adminTabSelect" aria-label="Pilih panel admin" onchange="switchAdminPanel(this.value)">
+            <option value="users">Kelola Users &amp; Akses Menu</option>
             <option value="sites">Kelola Website</option>
             <option value="sesi">Sesi Login Aktif</option>
             <option value="autopost">Auto Posting Prediksi</option>
-            <option value="backup">Backup Activity Log</option>
-            <option value="maintenance">Mode Maintenance</option>
+            <option value="maintenance">Maintenance &amp; Retensi Log</option>
           </select>
 
-          <div class="admin-panel active" data-admin-panel="dashboard">
-          <div id="adminStats" class="grid grid-cols-2 md:grid-cols-6 gap-3"></div>
-
-          <div class="status-legend">
-            <span><i class="fa-solid fa-circle text-emerald-400"></i>Berhasil / Terkirim</span>
-            <span><i class="fa-solid fa-circle text-rose-400"></i>Gagal / Error</span>
-            <span><i class="fa-solid fa-circle text-amber-400"></i>Sebagian / Diblokir (duplikat)</span>
-            <span><i class="fa-solid fa-circle text-sky-400"></i>Info / Lainnya</span>
-          </div>
-          </div>
-
           <div class="admin-panel" data-admin-panel="maintenance">
-          <div class="mini-card flex flex-col gap-4"><div class="flex items-center justify-between"><div><div class="font-bold">Mode Maintenance</div><div class="text-xs text-slate-400">Operator tidak dapat login atau mengirim saat aktif.</div></div><div id="maintenanceSwitch" class="switch" onclick="toggleMaintenance()"></div></div><textarea id="maintenanceMessage" class="glass-inner rounded-2xl p-3 text-xs" rows="3" placeholder="Pesan maintenance"></textarea><button onclick="saveMaintenance()" class="bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-extrabold py-3 rounded-2xl text-xs">SIMPAN PENGATURAN</button></div>
-          </div>
-
-          <div class="admin-panel" data-admin-panel="backup">
-          <div class="mini-card backup-control-card flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <div class="font-extrabold text-indigo-200"><i class="fa-solid fa-broom mr-2"></i>Retensi Activity Log</div>
-              <div class="text-xs text-slate-400 mt-1">Semua log ada di database utama (D1). Riwayat disimpan <b>7 hari terakhir</b> — baris lebih tua dihapus otomatis oleh cron harian. Tidak ada file backup terpisah.</div>
-              <div id="backupActivityStatus" class="text-[10px] text-slate-500 mt-2">Klik BERSIHKAN SEKARANG untuk memangkas log lama saat ini juga.</div>
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div class="mini-card flex flex-col gap-4">
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <div class="font-extrabold text-amber-200"><i class="fa-solid fa-screwdriver-wrench mr-2"></i>Mode Maintenance</div>
+                  <div class="text-xs text-slate-400 mt-1">Saat aktif, operator tidak bisa login atau mengirim. Admin tetap bisa masuk.</div>
+                </div>
+                <div id="maintenanceSwitch" class="switch shrink-0" role="switch" aria-checked="false" aria-label="Mode maintenance" tabindex="0" onclick="toggleMaintenance()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleMaintenance();}"></div>
+              </div>
+              <textarea id="maintenanceMessage" class="glass-inner rounded-2xl p-3 text-xs" rows="3" placeholder="Pesan yang dilihat operator saat maintenance"></textarea>
+              <div id="maintenanceMeta" class="text-[10px] text-slate-500">Memuat status maintenance…</div>
+              <button id="maintenanceSaveBtn" onclick="saveMaintenance()" class="bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-extrabold py-3 rounded-2xl text-xs mt-auto">SIMPAN PENGATURAN</button>
             </div>
-            <div class="flex flex-col sm:flex-row gap-2 shrink-0">
-              <button onclick="runActivityBackupNow()" class="glass-inner px-4 py-3 rounded-2xl text-[10px] font-extrabold"><i class="fa-solid fa-broom mr-2"></i>BERSIHKAN SEKARANG</button>
-              <button onclick="installActivityBackupTrigger()" class="bg-gradient-to-r from-indigo-400 to-cyan-400 text-slate-950 px-4 py-3 rounded-2xl text-[10px] font-extrabold"><i class="fa-solid fa-clock mr-2"></i>AKTIFKAN AUTO RETENSI</button>
+            <div class="mini-card flex flex-col gap-4">
+              <div>
+                <div class="font-extrabold text-indigo-200"><i class="fa-solid fa-broom mr-2"></i>Retensi Activity Log</div>
+                <div class="text-xs text-slate-400 mt-1">Log aktivitas disimpan <b>7 hari terakhir</b>. Baris yang lebih tua dihapus otomatis oleh cron harian, tidak perlu diaktifkan manual.</div>
+              </div>
+              <div id="backupActivityStatus" class="text-[10px] text-slate-500">Klik BERSIHKAN SEKARANG untuk memangkas log lama saat ini juga.</div>
+              <button id="logPruneBtn" onclick="runActivityBackupNow()" class="glass-inner px-4 py-3 rounded-2xl text-[10px] font-extrabold mt-auto"><i class="fa-solid fa-broom mr-2"></i>BERSIHKAN SEKARANG</button>
             </div>
           </div>
           </div>
@@ -711,7 +692,7 @@
           </div>
           </div>
 
-          <div class="admin-panel" data-admin-panel="users">
+          <div class="admin-panel active" data-admin-panel="users">
           <div class="mini-card flex flex-col gap-4">
             <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
               <div><div class="font-extrabold text-base">Kelola Users</div><div class="text-xs text-slate-400 mt-1">Tambah, edit, nonaktifkan, atau hapus akun. Perubahan langsung tersimpan ke database panel.</div></div>
@@ -740,66 +721,6 @@
             <div id="siteCards" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3"></div>
           </div>
           </div>
-
-          <div class="admin-panel" data-admin-panel="dashboard">
-          <div class="flex flex-col gap-3">
-            <div class="flex items-center justify-between gap-3">
-              <div>
-                <div class="font-extrabold">Aktivitas Semua User</div>
-                <div class="text-[10px] text-slate-400 mt-1">Gabungan Activity Log hari ini dan BackUp Activity Log.</div>
-              </div>
-              <button onclick="loadDashboard(true,'admin')" class="glass-inner px-4 py-3 rounded-2xl text-[10px] font-bold"><i class="fa-solid fa-rotate mr-2"></i>REFRESH LOG</button>
-            </div>
-
-            <div class="activity-filter-card">
-              <div class="activity-filter-grid activity-admin-grid">
-                <input id="adminActivitySearch" class="activity-filter-control" placeholder="Cari seluruh riwayat...">
-                <select id="adminActivityUserFilter" class="activity-filter-control"><option value="">Semua User</option></select>
-                <select id="adminActivityActionFilter" class="activity-filter-control"><option value="">Semua Aksi</option></select>
-                <select id="adminActivityStatusFilter" class="activity-filter-control"><option value="">Semua Status</option></select>
-                <select id="adminActivitySourceFilter" class="activity-filter-control">
-                  <option value="ALL">Hari Ini + Backup</option>
-                  <option value="CURRENT">Hanya Hari Ini</option>
-                  <option value="BACKUP">Hanya Backup</option>
-                </select>
-              </div>
-              <div class="activity-date-row">
-                <div class="activity-date-field">
-                  <label>Tanggal Dari</label>
-                  <div class="date-shell" onclick="openDatePicker(this.querySelector('input'))">
-                    <i class="fa-solid fa-calendar-days"></i>
-                    <input id="adminActivityDateFrom" type="date" class="date-input" title="Tanggal awal">
-                  </div>
-                </div>
-                <div class="activity-date-field">
-                  <label>Tanggal Sampai</label>
-                  <div class="date-shell" onclick="openDatePicker(this.querySelector('input'))">
-                    <i class="fa-solid fa-calendar-days"></i>
-                    <input id="adminActivityDateTo" type="date" class="date-input" title="Tanggal akhir">
-                  </div>
-                </div>
-                <button onclick="applyActivityFilters('admin')" class="activity-filter-btn activity-filter-apply"><i class="fa-solid fa-filter"></i>TERAPKAN</button>
-                <button onclick="resetActivityFilters('admin')" class="activity-filter-btn activity-filter-reset"><i class="fa-solid fa-rotate-left"></i>RESET</button>
-              </div>
-            </div>
-
-            <div class="activity-meta-bar">
-              <div id="adminActivityMeta" class="text-[10px] text-slate-400">Memuat aktivitas...</div>
-              <div class="activity-pagination">
-                <button id="adminActivityPrevBtn" onclick="changeActivityPage('admin',-1)" class="activity-page-btn"><i class="fa-solid fa-chevron-left mr-1"></i>Sebelumnya</button>
-                <span id="adminActivityPageLabel" class="text-[9px] font-bold text-slate-400">Halaman 1</span>
-                <button id="adminActivityNextBtn" onclick="changeActivityPage('admin',1)" class="activity-page-btn">Berikutnya<i class="fa-solid fa-chevron-right ml-1"></i></button>
-              </div>
-            </div>
-
-            <div class="overflow-x-auto glass-inner rounded-2xl">
-              <table class="log-table w-full text-xs">
-                <thead><tr class="text-slate-400"><th>Waktu</th><th>Username</th><th>Aksi</th><th>Status</th><th>Detail</th><th>Isi/Data</th><th>Sumber</th></tr></thead>
-                <tbody id="adminActivityBody"></tbody>
-              </table>
-            </div>
-          </div>
-          </div>
         </div>
       </div>
 
@@ -807,19 +728,13 @@
       <div id="invest-page" style="display:none" class="flex flex-col gap-5 fade-in">
         <div class="glass-card rounded-3xl p-5 sm:p-6 flex flex-col gap-5">
 
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/5 pb-4">
-            <div class="flex items-center gap-4">
-              <div class="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center shadow-lg shadow-emerald-500/10">
-                <i class="fa-solid fa-magnifying-glass-dollar text-emerald-400 text-sm"></i>
-              </div>
-              <div>
-                <h2 class="text-lg sm:text-xl font-extrabold text-white tracking-wide">AUTOCHECK INVEST</h2>
-                <p class="text-[11px] text-slate-400 font-medium mt-0.5">Index semua pasaran, tandai user yang melebihi batas line (2D / 3D / 4D) hari ini + kemarin.</p>
-              </div>
+          <div class="page-head tone-emerald">
+            <div class="page-head-icon"><i class="fa-solid fa-magnifying-glass-dollar"></i></div>
+            <div class="page-head-text">
+              <div class="page-eyebrow">Utama</div>
+              <h2 class="page-title">AutoCheck Invest</h2>
+              <p class="page-sub">Index semua pasaran, tandai user yang melebihi batas line (2D / 3D / 4D) hari ini + kemarin.</p>
             </div>
-            <button onclick="switchPage('home')" class="btn-secondary font-bold text-xs px-6 py-3.5 rounded-2xl transition-all active:scale-95 cursor-pointer flex items-center gap-2">
-              <i class="fa-solid fa-arrow-left"></i> Kembali
-            </button>
           </div>
 
           <!-- SETTING (disimpan di server) — bisa disembunyikan -->
@@ -904,18 +819,21 @@
       <div id="bot-page" style="display:none" class="flex flex-col gap-5 fade-in">
 
         <!-- header dipakai bersama semua sub-halaman BOT -->
-        <div class="glass-card rounded-3xl p-6 flex items-center justify-between gap-3 flex-wrap">
-          <div class="flex items-center gap-3">
-            <div class="w-11 h-11 rounded-2xl bg-emerald-500/15 flex items-center justify-center"><i class="fa-solid fa-robot text-emerald-400"></i></div>
-            <div>
-              <div class="text-lg font-extrabold text-slate-50">BOT &middot; NEWS</div>
-              <div class="text-[11px] text-slate-400">Berita &rarr; tulis ulang AI (Gemini) &rarr; posting otomatis ke Blogger &amp; Facebook.</div>
+        <div class="glass-card rounded-3xl p-5 sm:p-6">
+          <div class="page-head tone-emerald is-standalone">
+            <div class="page-head-icon"><i class="fa-solid fa-robot"></i></div>
+            <div class="page-head-text">
+              <div class="page-eyebrow">Bot</div>
+              <h2 class="page-title">Bot News</h2>
+              <p class="page-sub">Berita &rarr; tulis ulang AI (Gemini) &rarr; posting otomatis ke Blogger &amp; Facebook.</p>
             </div>
-          </div>
-          <div id="botAutoChip" class="glass-inner rounded-2xl px-4 py-2 flex items-center gap-2.5 border-2 border-transparent transition-colors">
-            <span id="botAutoDot" class="w-2.5 h-2.5 rounded-full bg-slate-500 shrink-0"></span>
-            <span class="text-[11px] font-black tracking-wide text-slate-200">AUTO-POST <span id="botAutoState" class="text-slate-500">NONAKTIF</span></span>
-            <div id="botEnabledSwitch" class="switch ml-1" onclick="toggleBotAutoPost()" title="Nyalakan/matikan auto-post"></div>
+            <div class="page-head-actions">
+              <div id="botAutoChip" class="glass-inner rounded-2xl px-4 py-2 flex items-center gap-2.5 border-2 border-transparent transition-colors">
+                <span id="botAutoDot" class="w-2.5 h-2.5 rounded-full bg-slate-500 shrink-0"></span>
+                <span class="text-[11px] font-black tracking-wide text-slate-200">AUTO-POST <span id="botAutoState" class="text-slate-500">NONAKTIF</span></span>
+                <div id="botEnabledSwitch" class="switch ml-1" onclick="toggleBotAutoPost()" title="Nyalakan/matikan auto-post"></div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1205,15 +1123,18 @@
            userscripts/daylivechat-autobot.user.js. -->
       <div id="livechat-page" style="display:none" class="flex flex-col gap-5 fade-in">
 
-        <div class="glass-card rounded-3xl p-6 flex items-center justify-between gap-3 flex-wrap">
-          <div class="flex items-center gap-3">
-            <div class="w-11 h-11 rounded-2xl bg-cyan-500/15 flex items-center justify-center"><i class="fa-solid fa-headset text-cyan-400"></i></div>
-            <div>
-              <div class="text-lg font-extrabold text-slate-50">LIVE CHAT &middot; AUTO-REPLY</div>
-              <div class="text-[11px] text-slate-400">Bot pacify member spam/kasar khusus sesi yang kamu pilih -- sesi lain tetap dibalas manual oleh CS.</div>
+        <div class="glass-card rounded-3xl p-5 sm:p-6">
+          <div class="page-head tone-sky is-standalone">
+            <div class="page-head-icon"><i class="fa-solid fa-headset"></i></div>
+            <div class="page-head-text">
+              <div class="page-eyebrow">Live Chat</div>
+              <h2 class="page-title">Live Chat Auto-Reply</h2>
+              <p class="page-sub">Bot menenangkan member spam/kasar hanya di sesi yang kamu pilih; sesi lain tetap dibalas manual oleh CS.</p>
+            </div>
+            <div class="page-head-actions">
+              <button onclick="loadLivechatSessions()" class="btn-secondary text-xs font-bold px-4 py-2.5 rounded-xl"><i class="fa-solid fa-rotate mr-1"></i>REFRESH</button>
             </div>
           </div>
-          <button onclick="loadLivechatSessions()" class="btn-secondary text-xs font-bold px-4 py-2.5 rounded-xl"><i class="fa-solid fa-rotate mr-1"></i>REFRESH</button>
         </div>
 
         <!-- ============ SUB-HALAMAN: SESI CHAT ============ -->
