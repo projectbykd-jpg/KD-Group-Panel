@@ -166,6 +166,22 @@ function buildTailwind() {
 }
 const tailwindCss = buildTailwind();
 
+// Partial yang di-inline (Styles/Fixes/LiveResultFix/Scripts) hanya boleh berisi
+// blok <style>/<script> + komentar HTML. Teks lain di luar tag itu -- mis. CSS
+// yang tertulis sesudah </style> -- tampil mentah di halaman. Pernah terjadi
+// (header "V5") dan dulu "diperbaiki" dengan JS yang menghapus teksnya.
+for (const [name, html] of [["Styles.html", stylesHtml], ["Fixes.html", fixesHtml], ["LiveResultFix.html", liveResultFixHtml], ["Scripts.html", scriptsHtml]]) {
+	const stray = html
+		.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+		.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+		.replace(/<!--[\s\S]*?-->/g, "")
+		.trim();
+	if (stray) {
+		console.error(`ERROR: ui-src/${name} punya teks di luar <style>/<script> (akan tampil mentah di halaman):\n  ${stray.slice(0, 160)}`);
+		process.exit(1);
+	}
+}
+
 let out = indexHtml;
 // Tailwind di-inline SESUDAH Styles.html: kalau sebelum, CSS custom menang atas
 // utility Tailwind dan layout (mis. header) berantakan.

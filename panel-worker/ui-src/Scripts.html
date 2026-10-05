@@ -1196,13 +1196,13 @@
           <div class="lap-date-field"><i class="fa-regular fa-calendar"></i><input id="${prefix}Start" value="${lapToday()}" readonly placeholder="dd-mm-yyyy"></div></div>
         <div class="flex flex-col gap-1"><label class="text-[10px] font-bold text-slate-400 tracking-wide">TANGGAL SELESAI</label>
           <div class="lap-date-field"><i class="fa-regular fa-calendar"></i><input id="${prefix}End" value="${lapToday()}" readonly placeholder="dd-mm-yyyy"></div></div>
-        <div class="flex gap-1.5">
+        <div class="lap-quick-row flex gap-1.5">
           <button onclick="lapSetRange('${prefix}',0)" class="lap-quick">Hari ini</button>
           <button onclick="lapSetRange('${prefix}',1)" class="lap-quick">Kemarin</button>
           <button onclick="lapSetRange('${prefix}',7)" class="lap-quick">7 hari</button>
         </div>
-        <button id="${prefix}Btn" onclick="window['__lapRun_${prefix}']()" class="bg-gradient-to-r from-cyan-400 to-blue-600 text-slate-950 font-extrabold px-5 py-2.5 rounded-xl text-xs shrink-0"><i class="fa-solid fa-cloud-arrow-down mr-2"></i>TARIK DATA</button>
-        <span id="${prefix}Status" class="text-[11px] text-slate-400"></span>
+        <button id="${prefix}Btn" onclick="window['__lapRun_${prefix}']()" class="lap-run-btn bg-gradient-to-r from-cyan-400 to-blue-600 text-slate-950 font-extrabold px-5 py-2.5 rounded-xl text-xs shrink-0"><i class="fa-solid fa-cloud-arrow-down mr-2"></i>TARIK DATA</button>
+        <span id="${prefix}Status" class="lap-run-status text-[11px] text-slate-400"></span>
       </div>`;
     }
     function lapSetRange(prefix, daysBack) {
@@ -1336,7 +1336,7 @@
             }
             return rowHtml;
           }).join('')
-        : `<tr><td colspan="${colCount}" class="table-empty-cell"><i class="fa-solid fa-inbox"></i>Tidak ada data.</td></tr>`;
+        : `<tr><td colspan="${colCount}" class="table-empty-cell"><span class="table-empty-inner"><i class="fa-solid fa-inbox"></i>Tidak ada data.</span></td></tr>`;
       const pager = list.length > LAP_PAGE_SIZE ? `
         <div class="flex items-center justify-between px-3 py-2 text-[10px] text-slate-400 border-t border-white/5">
           <span>${from+1}-${Math.min(from+LAP_PAGE_SIZE, list.length)} dari ${list.length}</span>
@@ -3866,7 +3866,7 @@
       if (!body) return;
 
       if (!Array.isArray(rows) || !rows.length) {
-        body.innerHTML = '<tr><td colspan="7" class="table-empty-cell"><i class="fa-solid fa-clock-rotate-left"></i>Belum ada aktivitas yang cocok dengan filter.</td></tr>';
+        body.innerHTML = '<tr><td colspan="7" class="table-empty-cell"><span class="table-empty-inner"><i class="fa-solid fa-clock-rotate-left"></i>Belum ada aktivitas yang cocok dengan filter.</span></td></tr>';
         return;
       }
 
@@ -4310,7 +4310,7 @@
               </button>
             </div>
           </td>
-        </tr>`).join('')||'<tr><td colspan="10" class="table-empty-cell"><i class="fa-solid fa-users-slash"></i>Belum ada user</td></tr>';
+        </tr>`).join('')||'<tr><td colspan="10" class="table-empty-cell"><span class="table-empty-inner"><i class="fa-solid fa-users-slash"></i>Belum ada user</span></td></tr>';
     }
     function filterUserRows(){const q=(document.getElementById('userSearch').value||'').toLowerCase();const role=document.getElementById('userRoleFilter').value;const status=document.getElementById('userStatusFilter').value;document.querySelectorAll('#userTableBody tr[data-search]').forEach(tr=>{tr.style.display=(!q||tr.dataset.search.includes(q))&&(!role||tr.dataset.role===role)&&(!status||tr.dataset.status===status)?'':'none';});}
 

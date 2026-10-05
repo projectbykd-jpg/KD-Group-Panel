@@ -291,6 +291,9 @@
        sekarang 1 pola konsisten: ikon redup + teks, padding lega. ===== */
     .table-empty-cell{padding:36px 16px !important;text-align:center;color:#64748b;font-size:11px;font-style:normal;font-weight:600}
     .table-empty-cell i{display:block;font-size:22px;margin-bottom:9px;opacity:.4}
+    /* Tabel lebar di HP di-scroll horizontal: pesan kosong ditahan di area yang
+       terlihat (sticky) supaya tidak ikut ter-center di tengah tabel penuh. */
+    .table-empty-inner{display:block;position:sticky;left:0;width:min(100%,calc(100vw - 64px))}
     /* Sama seperti table-empty-cell tapi dengan ikon berputar -- dipakai
        ganti teks "Memuat..." polos supaya jelas kelihatan lagi proses. */
     .table-loading-cell{padding:28px 16px !important;text-align:center;color:#7c8aa0;font-size:11px;font-weight:600}
@@ -712,10 +715,47 @@
       user-select: text;
     }
 
+    /* Grid statistik 2 kolom (di bawah md): kartu terakhir yang sendirian
+       dibentangkan penuh supaya tidak ada lubang di kanan. */
+    @media (max-width: 767px) {
+      #userStats > :last-child:nth-child(odd),
+      #adminStats > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+    }
+
+    /* HP: tabel 7 kolom (min 1080px) dulu harus digeser ke samping. Sekarang
+       tiap baris jadi kartu: waktu + status, user + aksi, lalu detail & data
+       selebar kartu. Urutan kolom di HTML tidak berubah (pure CSS). */
     @media (max-width: 640px) {
-      .log-table {
-        min-width: 860px !important;
+      .log-table { min-width: 0 !important; table-layout: auto; }
+      .log-table thead { display: none; }
+      .log-table, .log-table tbody { display: block; width: 100%; }
+      .log-table tr { display: block; }
+      .log-table tr > td { display: block; padding: 12px !important; }
+      .log-table tr.activity-log-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas: "time status" "user action" "detail detail" "data data" "source source";
+        gap: 8px 10px;
+        padding: 12px;
+        border-bottom: 1px solid rgba(255,255,255,.06);
       }
+      .log-table tr.activity-log-row > td { padding: 0 !important; border: 0 !important; min-width: 0; }
+      .activity-log-row > td:nth-child(1) { grid-area: time; }
+      .activity-log-row > td:nth-child(2) { grid-area: user; }
+      .activity-log-row > td:nth-child(3) { grid-area: action; justify-self: end; }
+      .activity-log-row > td:nth-child(4) { grid-area: status; justify-self: end; }
+      .activity-log-row > td:nth-child(5) { grid-area: detail; }
+      .activity-log-row > td:nth-child(6) { grid-area: data; }
+      .activity-log-row > td:nth-child(7) { grid-area: source; }
+      .activity-log-row > td:nth-child(5)::before,
+      .activity-log-row > td:nth-child(6)::before {
+        display: block; margin-bottom: 3px;
+        font-size: 9px; font-weight: 800; letter-spacing: .12em; color: #64748b;
+      }
+      .activity-log-row > td:nth-child(5)::before { content: "DETAIL"; }
+      .activity-log-row > td:nth-child(6)::before { content: "ISI / DATA"; }
+      .log-time-cell { display: flex !important; gap: 8px; align-items: baseline; }
+      .log-time-cell span { margin-top: 0; }
     }
 
     /* =========================================================
@@ -1194,6 +1234,18 @@
     .lap-date-field input{ background:transparent; border:0; outline:0; color:#f1f5f9; font-size:12px; font-weight:700; width:100%; letter-spacing:.02em }
     .lap-quick{ font-size:10px; font-weight:800; padding:8px 11px; border-radius:10px; background:rgba(15,23,42,.6); border:1px solid rgba(255,255,255,.08); color:#94a3b8 }
     .lap-quick:hover{ color:#e2e8f0; border-color:rgba(34,211,238,.3) }
+    /* Tanggal, tombol cepat & TARIK DATA sama tinggi (dulu tombol cepat lebih
+       pendek sehingga barisnya tidak sejajar). Di HP: 2 tanggal berdampingan,
+       tombol cepat & TARIK DATA selebar layar (target sentuh >= 40px). */
+    .lap-date-field,.lap-datebar .lap-quick,.lap-run-btn{ min-height:40px }
+    @media (max-width:640px){
+      .lap-datebar{ display:grid !important; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px }
+      .lap-date-field{ min-width:0 }
+      .lap-quick-row,.lap-run-btn,.lap-run-status{ grid-column:1 / -1 }
+      .lap-quick-row .lap-quick{ flex:1 1 0 }
+      .lap-run-btn{ width:100% }
+      .lap-run-status:empty{ display:none }
+    }
     .lap-tbl{ border:1px solid rgba(148,163,184,.1); border-radius:14px; overflow:hidden; margin-top:10px; background:rgba(13,20,35,.5);
       content-visibility:auto; contain-intrinsic-size:auto 300px }
     .lap-tbl.open{ border-color:rgba(148,163,184,.16) }
@@ -2378,32 +2430,27 @@ table tbody tr:hover td{
   .home-stat-card,.dashboard-action{transition:none}
 }
 
-/* KD SESSION HEADER / SIDEBAR CLEANUP — live Worker UI */
-.session-header{display:flex;align-items:center;justify-content:space-between;gap:.75rem;min-height:76px;padding:.75rem 1rem!important}
-.session-header-main{min-width:0;display:flex;flex-direction:column;justify-content:center}
-.session-kicker{font-size:10px;font-weight:800;letter-spacing:.22em;color:#94a3b8;text-transform:uppercase}
-.session-admin{margin-top:2px;font-size:14px;line-height:1.1;font-weight:900;letter-spacing:.08em;color:#fff}
-.session-sites{margin-top:2px;font-size:9px;font-weight:800;letter-spacing:.14em;color:#67e8f9;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.session-logos{display:flex;align-items:center;gap:6px;margin-top:5px;height:25px}
-.session-logos img{width:32px;height:25px;object-fit:contain;border-radius:9px;background:rgba(255,255,255,.04);padding:3px;border:1px solid rgba(255,255,255,.08)}
-.session-credit{margin-top:3px;font-size:7px;font-weight:800;letter-spacing:.24em;color:#64748b}
-.session-header-actions{display:flex;align-items:center;gap:10px;flex-shrink:0}
-.session-clock-box{min-width:108px;text-align:right;padding:.4rem .65rem;border-radius:14px;background:rgba(15,23,42,.5);border:1px solid rgba(255,255,255,.06)}
-@media(max-width:1023px){.session-header{align-items:flex-start}.session-header-actions{margin-left:auto}.session-sites{max-width:48vw}}
-@media(max-width:640px){.session-header{min-height:0;padding:.85rem}.session-admin{font-size:15px}.session-sites{font-size:9px;max-width:52vw}.session-logos{height:28px}.session-logos img{width:34px;height:28px}.session-credit{font-size:7px}.session-clock-box{min-width:98px;padding:.45rem .6rem}.session-header-actions .session-clock-box #live-date{font-size:8px}.session-header-actions button{padding:.7rem .8rem}.session-header-actions button span{display:none!important}}
 /* Keep one primary page scroll; sidebar follows page instead of creating a second scroll trap. */
 .sidebar-frozen{position:sticky;top:.75rem;max-height:none!important;overflow:visible!important}
 @media(max-width:1023px){.sidebar-frozen{position:relative;top:auto;max-height:none!important;overflow:visible!important}}
 .nav-solo{margin-top:.15rem}
 .nav-groups{overflow:visible!important}
 
-/* ===== SESSION HEADER V4 ===== */
+/* ===== SESSION HEADER — satu-satunya sumber gaya header =====
+   Menggantikan lapisan V4 (di sini), V5 (dulu tertulis di LUAR tag style
+   sehingga tampil sebagai teks lalu dihapus pakai JS) dan V6 (Fixes.html).
+   Desktop/tablet : [status sesi] [website aktif + logo di kanannya] [jam + keluar]
+   HP (<=760px)   : baris 1 [status sesi] [jam + keluar]
+                    baris 2 [website aktif ............ logo] (lebar penuh)
+   Dulu di HP blok website & logo didesak ke kolom sempit di samping jam,
+   sehingga logo meluber menimpa jam. */
 .session-header{
   display:grid!important;
-  grid-template-columns:minmax(150px,1fr) minmax(240px,1.25fr) auto;
+  grid-template-columns:170px minmax(0,1fr) auto;
   align-items:center;
   gap:12px;
   min-height:78px;
+  min-width:0;
   padding:10px 12px!important;
 }
 .session-header-main{
@@ -2415,25 +2462,29 @@ table tbody tr:hover td{
   border-right:1px solid rgba(148,163,184,.08);
 }
 .session-kicker{font-size:10px;font-weight:800;letter-spacing:.18em;color:#94a3b8;text-transform:uppercase}
-.session-admin{margin-top:4px;font-size:15px;line-height:1.1;font-weight:900;letter-spacing:.07em;color:#fff}
+.session-admin{margin-top:4px;font-size:15px;line-height:1.1;font-weight:900;letter-spacing:.07em;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .session-credit{margin-top:7px;font-size:7px;font-weight:800;letter-spacing:.22em;color:#64748b}
+
 .session-sites-box{
   min-width:0;
-  display:flex;
-  flex-direction:column;
-  justify-content:center;
-  padding:4px 12px;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  grid-template-rows:auto auto;
+  align-items:center;
+  column-gap:18px;
+  padding:4px 8px;
 }
-.session-sites-title{font-size:8px;font-weight:800;letter-spacing:.16em;color:#64748b;text-transform:uppercase}
-.session-sites{display:block!important}
-.session-logos{display:flex;align-items:center;gap:10px;margin-top:6px;height:34px}
-.session-logo-item{display:flex;align-items:center;gap:7px;min-width:0}
+.session-sites-title{grid-column:1;grid-row:1;min-width:0;font-size:8px;font-weight:800;letter-spacing:.16em;color:#64748b;text-transform:uppercase}
+.session-sites{grid-column:1;grid-row:2;min-width:0;margin-top:2px;font-size:9px;font-weight:800;letter-spacing:.14em;color:#67e8f9;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.session-logos{grid-column:2;grid-row:1 / span 2;display:flex;align-items:center;gap:8px;height:44px;margin:0;min-width:0}
+.session-logo-item{display:flex;align-items:center;gap:6px;flex:0 0 auto;min-width:0}
 .session-logo-item img{
-  width:38px;height:30px;object-fit:contain;border-radius:9px;
-  background:rgba(255,255,255,.04);padding:3px;
-  border:1px solid rgba(255,255,255,.08);
+  width:46px;height:38px;object-fit:contain;padding:4px;border-radius:10px;
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
 }
 .session-logo-item span{font-size:8px;font-weight:900;letter-spacing:.08em;color:#cbd5e1;white-space:nowrap}
+.session-logo-fallback{width:20px;display:flex;justify-content:center;color:#94a3b8}
+
 .session-header-actions{display:flex;align-items:center;justify-content:flex-end;gap:9px;flex-shrink:0}
 .session-clock-box{
   min-width:132px;text-align:center;padding:7px 10px;border-radius:13px;
@@ -2448,91 +2499,28 @@ table tbody tr:hover td{
   color:#fda4af;font-size:10px;font-weight:900;cursor:pointer;transition:.18s ease;
 }
 .session-logout-btn:hover{background:rgba(244,63,94,.18);border-color:rgba(244,63,94,.35);transform:translateY(-1px)}
+
+@media(max-width:1023px){
+  .session-header{grid-template-columns:160px minmax(0,1fr) auto}
+}
 @media(max-width:760px){
-  .session-header{grid-template-columns:1fr auto;gap:8px}
-  .session-header-main{border-right:0;padding:3px 5px}
-  .session-sites-box{grid-column:1/-1;grid-row:2;padding:5px;border-top:1px solid rgba(148,163,184,.07)}
+  .session-header{grid-template-columns:minmax(0,1fr) auto;gap:8px 10px;min-height:0;padding:10px 12px!important}
+  .session-header-main{grid-column:1;grid-row:1;border-right:0;padding:2px 4px}
+  .session-admin{font-size:15px}
+  .session-credit{margin-top:4px}
   .session-header-actions{grid-column:2;grid-row:1}
-  .session-logos{margin-top:5px}
+  .session-sites-box{grid-column:1 / -1;grid-row:2;column-gap:10px;padding:8px 4px 0;border-top:1px solid rgba(148,163,184,.08)}
+  .session-logos{height:34px;gap:6px}
+  .session-logo-item img{width:38px;height:32px;padding:3px}
   .session-logo-item span{display:none}
-  .session-clock-box{min-width:105px}
+  .session-clock-box{min-width:0;padding:6px 9px}
+  .session-clock-value{font-size:15px}
   .session-clock-date{font-size:7px}
-  .session-logout-btn{width:42px;padding:0;justify-content:center}
+  .session-logout-btn{width:44px;height:44px;padding:0;justify-content:center}
   .session-logout-btn span{display:none}
 }
-
+@media(max-width:360px){
+  .session-clock-label{display:none}
+  .session-clock-value{font-size:14px;letter-spacing:.04em}
+}
 </style>
-
-/* KD HEADER LAYOUT V5 */
-/* Website aktif dipindahkan ke area kosong di tengah header.
-   Logo website berada di sisi kanan teks dan dibuat sedikit lebih besar. */
-.session-header{
-  grid-template-columns:150px minmax(360px,1fr) auto !important;
-}
-.session-sites-box{
-  display:grid !important;
-  grid-template-columns:minmax(0,1fr) auto !important;
-  grid-template-rows:auto auto !important;
-  align-items:center !important;
-  column-gap:14px !important;
-  row-gap:1px !important;
-  padding:4px 8px !important;
-}
-.session-sites-title{
-  grid-column:1 !important;
-  grid-row:1 !important;
-  margin:0 !important;
-}
-.session-sites{
-  grid-column:1 !important;
-  grid-row:2 !important;
-  margin:1px 0 0 !important;
-  max-width:none !important;
-}
-.session-logos{
-  grid-column:2 !important;
-  grid-row:1 / span 2 !important;
-  align-self:center !important;
-  margin:0 !important;
-  height:42px !important;
-  gap:9px !important;
-}
-.session-logo-item img,
-.session-logos img{
-  width:46px !important;
-  height:36px !important;
-  padding:3px !important;
-  border-radius:10px !important;
-}
-@media(max-width:1023px){
-  .session-header{
-    grid-template-columns:150px minmax(300px,1fr) auto !important;
-  }
-}
-@media(max-width:760px){
-  .session-header{
-    grid-template-columns:minmax(145px,1fr) auto !important;
-    gap:8px !important;
-  }
-  .session-header-main{
-    border-right:0 !important;
-    padding:3px 5px !important;
-  }
-  .session-sites-box{
-    grid-column:1 !important;
-    grid-row:1 !important;
-    padding:3px 4px !important;
-    border-top:0 !important;
-    display:grid !important;
-    grid-template-columns:minmax(0,1fr) auto !important;
-    grid-template-rows:auto auto !important;
-    column-gap:8px !important;
-  }
-  .session-sites-title{grid-column:1 !important;grid-row:1 !important;font-size:7px !important}
-  .session-sites{grid-column:1 !important;grid-row:2 !important;font-size:8px !important}
-  .session-logos{grid-column:2 !important;grid-row:1 / span 2 !important;height:36px !important;gap:5px !important}
-  .session-logo-item img,
-  .session-logos img{width:40px !important;height:32px !important}
-  .session-header-actions{grid-column:2 !important;grid-row:1 !important}
-}
-

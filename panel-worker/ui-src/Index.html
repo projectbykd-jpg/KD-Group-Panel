@@ -549,7 +549,7 @@
         <div class="glass-card rounded-3xl p-5 sm:p-6 flex flex-col gap-4">
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <div class="text-[9px] font-extrabold tracking-[.16em] text-cyan-400">SMART ACTIVITY CENTER V5</div>
+              <div class="text-[9px] font-extrabold tracking-[.16em] text-cyan-400">ACTIVITY CENTER</div>
               <h2 class="text-lg font-extrabold mt-1">RIWAYAT AKTIVITAS</h2>
               <p id="activityScopeText" class="text-xs text-slate-400 mt-1">Riwayat akun hari ini.</p>
             </div>
@@ -933,7 +933,7 @@
                   <input id="botRunCount" type="number" min="1" placeholder="Semua" class="glass-inner rounded-xl px-3 py-2.5 text-slate-100 text-xs font-bold w-24" title="Kosongkan = pakai 'Artikel per proses' di Setting & jalan sampai antrean habis.">
                 </label>
                 <button onclick="botNewsRunGithub()" class="bg-gradient-to-r from-purple-400 to-fuchsia-500 text-slate-950 text-xs font-bold px-4 py-2.5 rounded-xl" title="Diproses lewat GitHub Actions -- tidak kena limit 'Too many subrequests'. Hasilnya masuk 1-2 menit kemudian, bukan instan -- tinggal tunggu, progress kelihatan di bawah."><i class="fa-brands fa-github mr-1"></i>PROSES</button>
-                <button onclick="loadBotNews()" class="btn-secondary text-xs font-bold px-4 py-2.5 rounded-xl" title="Refresh angka & status"><i class="fa-solid fa-rotate"></i></button>
+                <button onclick="loadBotNews()" class="btn-secondary text-xs font-bold px-4 py-2.5 rounded-xl" title="Refresh angka & status" aria-label="Refresh angka & status"><i class="fa-solid fa-rotate"></i></button>
               </div>
             </div>
 
@@ -1228,7 +1228,7 @@
   <!-- MODAL KELOLA USER -->
   <div id="userEditModal" class="modal-shell" style="display:none" role="dialog" aria-modal="true" aria-labelledby="userModalTitle">
     <div class="glass-card popup-card w-full max-w-3xl rounded-[2rem] p-6 flex flex-col gap-5 relative max-h-[92vh] overflow-y-auto">
-      <div class="flex items-start justify-between gap-4"><div><div class="text-[10px] text-amber-400 font-bold tracking-widest">ADMIN • USER MANAGEMENT</div><h3 id="userModalTitle" class="text-lg font-extrabold mt-1">Tambah User</h3><p class="text-xs text-slate-400 mt-1">Data akan langsung diperbarui di database panel.</p></div><button onclick="closeUserModal()" class="w-10 h-10 rounded-xl glass-inner"><i class="fa-solid fa-xmark"></i></button></div>
+      <div class="flex items-start justify-between gap-4"><div><div class="text-[10px] text-amber-400 font-bold tracking-widest">ADMIN • USER MANAGEMENT</div><h3 id="userModalTitle" class="text-lg font-extrabold mt-1">Tambah User</h3><p class="text-xs text-slate-400 mt-1">Data akan langsung diperbarui di database panel.</p></div><button onclick="closeUserModal()" class="w-10 h-10 rounded-xl glass-inner" aria-label="Tutup"><i class="fa-solid fa-xmark"></i></button></div>
       <input type="hidden" id="userOriginalUsername">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
         <label class="text-xs text-slate-400">Username<input id="editUsername" class="glass-inner rounded-2xl px-4 py-3 text-white w-full mt-1" autocomplete="off"></label>
@@ -1259,7 +1259,7 @@
           <h3 id="siteModalTitle" class="text-lg font-extrabold mt-1">Tambah Website</h3>
           <p class="text-xs text-slate-400 mt-1">Kolom kosong berarti fitur itu tidak dipakai untuk website ini.</p>
         </div>
-        <button onclick="closeSiteModal()" class="w-10 h-10 rounded-xl glass-inner"><i class="fa-solid fa-xmark"></i></button>
+        <button onclick="closeSiteModal()" class="w-10 h-10 rounded-xl glass-inner" aria-label="Tutup"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <input type="hidden" id="siteOriginalWebsite">
 
@@ -1317,7 +1317,7 @@
     </div>
   </div>
 
-  <div id="sendResultModal" class="modal-shell" role="dialog" aria-modal="true"><div class="send-result-card glass-card popup-card w-full rounded-[1.7rem] flex flex-col"><div class="flex items-start justify-between gap-3"><div><div class="text-[9px] text-emerald-400 font-bold tracking-[.2em]">HASIL PENGIRIMAN</div><h3 class="text-base font-extrabold mt-1">Status setiap website & sistem</h3><div id="resultSummary" class="result-summary"></div></div><button onclick="document.getElementById('sendResultModal').classList.remove('open')" class="w-9 h-9 shrink-0 rounded-xl glass-inner"><i class="fa-solid fa-xmark"></i></button></div><div id="systemResultList" class="grid gap-2.5"></div><button onclick="document.getElementById('sendResultModal').classList.remove('open')" class="glass-inner py-2.5 rounded-xl font-bold text-[10px]">TUTUP</button></div></div>
+  <div id="sendResultModal" class="modal-shell" role="dialog" aria-modal="true"><div class="send-result-card glass-card popup-card w-full rounded-[1.7rem] flex flex-col"><div class="flex items-start justify-between gap-3"><div><div class="text-[9px] text-emerald-400 font-bold tracking-[.2em]">HASIL PENGIRIMAN</div><h3 class="text-base font-extrabold mt-1">Status setiap website & sistem</h3><div id="resultSummary" class="result-summary"></div></div><button onclick="document.getElementById('sendResultModal').classList.remove('open')" class="w-9 h-9 shrink-0 rounded-xl glass-inner" aria-label="Tutup"><i class="fa-solid fa-xmark"></i></button></div><div id="systemResultList" class="grid gap-2.5"></div><button onclick="document.getElementById('sendResultModal').classList.remove('open')" class="glass-inner py-2.5 rounded-xl font-bold text-[10px]">TUTUP</button></div></div>
 
 
   <div id="predictionSendModal" class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="predictionResultTitle">
@@ -1328,7 +1328,7 @@
           <h3 id="predictionResultTitle" class="text-base font-extrabold mt-1">Hasil pengiriman per website</h3>
           <div id="predictionResultSummary" class="result-summary"></div>
         </div>
-        <button onclick="closePredictionSendModal()" class="w-9 h-9 shrink-0 rounded-xl glass-inner"><i class="fa-solid fa-xmark"></i></button>
+        <button onclick="closePredictionSendModal()" class="w-9 h-9 shrink-0 rounded-xl glass-inner" aria-label="Tutup"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div id="predictionSendList"></div>
       <div id="predictionResultActions" class="prediction-result-actions">
