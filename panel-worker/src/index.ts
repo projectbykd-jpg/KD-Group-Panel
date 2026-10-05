@@ -54,6 +54,7 @@ import {
 	lapGetConfig,
 	lapGetResults,
 	lapJobResult,
+	lapJobs,
 	lapJobStart,
 	lapMotionImport,
 	lapMozartImport,
@@ -229,6 +230,7 @@ const ROUTES: Record<string, Handler> = {
 			b.panelsRaw ?? [],
 		),
 	lapAdminStatus: (env, b) => lapAdminStatus(env, s(b.token), s(b.jobId)),
+	lapJobs: (env, b) => lapJobs(env, s(b.token)),
 	lapGetResults: (env, b) => lapGetResults(env, s(b.token), b.modules ?? []),
 
 	// role BOT — modul NEWS
@@ -303,6 +305,8 @@ export default {
 			if (!handler) return json({ success: false, message: "Aksi tidak dikenal: " + action }, 404);
 			try {
 				const out = await handler(env, body);
+				// Handler boleh membalas Response jadi (mis. JSON mentah hasil laporan).
+				if (out instanceof Response) return out;
 				if (INVEST_PUMP_ACTIONS.has(action)) {
 					// Pump scan user INI di latar belakang (lock per-user) -> scan-nya
 					// jalan sendiri, tidak antre di belakang user lain.

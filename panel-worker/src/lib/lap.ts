@@ -135,6 +135,12 @@ export async function lapLoadResults(env: Env, username: string): Promise<Record
 	return parseLapResults(res.results ?? []);
 }
 
+export const LAP_RESULT_MODULES = [
+	"register", "registerMeta", "reportAgent", "reportAgentMeta",
+	"checkCoin", "checkCoinMeta", "idSelisih", "withdrawPgaIdf",
+	"_motionMeta", "motionDpPga", "motionPendingError", "motionWd",
+	"_mozartMeta", "mozartDepo", "mozartWd",
+];
 const LAP_MODULES = new Set([
 	"register", "registerMeta", "reportAgent", "reportAgentMeta",
 	"checkCoin", "checkCoinMeta", "idSelisih", "withdrawPgaIdf",
@@ -152,6 +158,34 @@ function parseLapResults(rows: { module: string; data: string }[]): Record<strin
 		}
 	}
 	return out;
+}
+
+/**
+ * Gabungkan blob JSON hasil laporan APA ADANYA menjadi satu objek JSON, tanpa
+ * JSON.parse + JSON.stringify ulang di Worker. Blob laporan bisa ratusan KB
+ * sampai beberapa MB; parse+stringify-nya memakan CPU Worker (paket Free
+ * cuma 10 ms/request) dan memperlambat respons. Blob ditulis oleh kode ini
+ * sendiri lewat JSON.stringify, jadi cukup dicek bentuk luarnya; yang tidak
+ * wajar diganti [] (sama seperti parseLapResults).
+ */
+export function lapResultsJsonRaw(rows: { module: string; data: string }[]): string {
+	const parts: string[] = [];
+	for (const r of rows) {
+		const raw = String(r.data ?? "").trim();
+		const ok = (raw.startsWith("[") && raw.endsWith("]")) || (raw.startsWith("{") && raw.endsWith("}"));
+		parts.push(JSON.stringify(String(r.module)) + ":" + (ok ? raw : "[]"));
+	}
+	return "{" + parts.join(",") + "}";
+}
+
+export async function lapLoadResultsModulesRaw(env: Env, username: string, modules: string[]): Promise<string> {
+	const wanted = [...new Set(modules.map((m) => String(m || "").trim()).filter((m) => LAP_MODULES.has(m)))];
+	if (!wanted.length) return "{}";
+	const res = await getTurso(env)
+		.prepare(`SELECT module, data FROM lap_result WHERE username = ? AND module IN (${wanted.map(() => "?").join(",")})`)
+		.bind(username, ...wanted)
+		.all<{ module: string; data: string }>();
+	return lapResultsJsonRaw(res.results ?? []);
 }
 
 export async function lapLoadResultsModules(env: Env, username: string, modules: string[]): Promise<Record<string, unknown>> {

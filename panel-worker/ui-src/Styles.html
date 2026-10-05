@@ -2457,6 +2457,53 @@ table tbody tr:hover td{
 .offline-banner i{margin-right:6px}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 
+/* ===== Laporan Harian: kerangka loading + progres tarik data ===== */
+.lap-skeleton{display:flex;flex-direction:column;gap:14px}
+.lap-skeleton-note{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;color:#7dd3fc}
+.lap-skeleton-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.lap-skeleton-card{display:flex;flex-direction:column;gap:10px;padding:16px;border-radius:16px;background:rgba(15,23,42,.55);border:1px solid rgba(148,163,184,.08)}
+.lap-skeleton-table{display:flex;flex-direction:column;gap:12px;padding:16px;border-radius:16px;background:rgba(15,23,42,.45);border:1px solid rgba(148,163,184,.08)}
+.lap-skeleton .skeleton-bar{display:block;height:11px}
+@media(max-width:640px){.lap-skeleton-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.lap-jobs{display:flex;flex-direction:column;gap:10px;padding:12px 14px;border-radius:16px;background:rgba(2,6,23,.38);border:1px solid rgba(148,163,184,.10)}
+.lap-jobs:empty{display:none}
+.lap-jobs-head{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:10px;font-weight:900;letter-spacing:.12em;text-transform:uppercase;color:#94a3b8}
+.lap-jobs-head i{color:#38bdf8;margin-right:7px}
+.lap-jobs-refresh{width:30px;height:30px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;color:#94a3b8;background:rgba(148,163,184,.06);border:1px solid rgba(148,163,184,.12)}
+.lap-jobs-refresh i{margin:0;color:inherit}
+.lap-jobs-refresh:hover{color:#e2e8f0}
+.lap-job-active{display:flex;flex-direction:column;gap:12px;padding:12px;border-radius:14px;background:linear-gradient(135deg,rgba(14,165,233,.10),rgba(14,165,233,.03));border:1px solid rgba(56,189,248,.22)}
+.lap-job-active-top{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:12px;color:#e0f2fe}
+.lap-job-elapsed-wrap{display:inline-flex;align-items:center;gap:6px;font-family:ui-monospace,monospace;font-size:12px;font-weight:800;color:#7dd3fc;padding:4px 9px;border-radius:999px;background:rgba(14,165,233,.12)}
+.lap-steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.lap-steps li{display:flex;align-items:center;gap:8px;min-width:0;padding:8px 10px;border-radius:12px;background:rgba(15,23,42,.55);border:1px solid rgba(148,163,184,.08)}
+.lap-step-dot{width:22px;height:22px;flex:0 0 22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:10px;background:rgba(148,163,184,.12);color:#64748b}
+.lap-step-label{font-size:11px;font-weight:700;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lap-steps li.is-done .lap-step-dot{background:rgba(16,185,129,.18);color:#34d399}
+.lap-steps li.is-done .lap-step-label{color:#cbd5e1}
+.lap-steps li.is-now{border-color:rgba(56,189,248,.35);background:rgba(14,165,233,.10)}
+.lap-steps li.is-now .lap-step-dot{background:rgba(56,189,248,.2);color:#7dd3fc}
+.lap-steps li.is-now .lap-step-label{color:#e0f2fe}
+.lap-steps li.is-fail{border-color:rgba(251,113,133,.35);background:rgba(244,63,94,.08)}
+.lap-steps li.is-fail .lap-step-dot{background:rgba(244,63,94,.2);color:#fda4af}
+@media(max-width:760px){.lap-steps{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.lap-job-note{font-size:11px;color:#cbd5e1;line-height:1.5}
+.lap-jobs-table-wrap{overflow-x:auto}
+.lap-jobs-table{width:100%;border-collapse:collapse;font-size:11px}
+.lap-jobs-table th{text-align:left;font-size:9px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:#64748b;padding:6px 8px;border-bottom:1px solid rgba(148,163,184,.10)}
+.lap-jobs-table td{padding:7px 8px;color:#cbd5e1;border-bottom:1px solid rgba(148,163,184,.06);vertical-align:top;white-space:nowrap}
+.lap-jobs-table td.lap-job-msg{white-space:normal;min-width:180px;color:#94a3b8}
+.lap-job-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;font-size:10px;font-weight:800}
+.lap-job-badge.is-ok{color:#6ee7b7;background:rgba(16,185,129,.12)}
+.lap-job-badge.is-bad{color:#fda4af;background:rgba(244,63,94,.12)}
+.lap-job-badge.is-run{color:#7dd3fc;background:rgba(14,165,233,.12)}
+.lap-jobs-empty{font-size:11px;color:#64748b;padding:2px 0}
+.nav-busy{margin-left:8px;color:#38bdf8;font-size:10px}
+.nav-busy[hidden]{display:none}
+.nav-busy-mobile{position:absolute;top:6px;right:calc(50% - 18px);margin:0;font-size:9px}
+.mobile-nav-item{position:relative}
+.pred-skeleton-row td{padding:16px!important}
+
 /* ===== Admin -> Users: Akses Menu ===== */
 .menu-access{display:flex;flex-direction:column;gap:12px;padding:14px;border-radius:18px;background:rgba(2,6,23,.38);border:1px solid rgba(148,163,184,.12)}
 .menu-access.is-locked .menu-access-grid{opacity:.45;pointer-events:none}

@@ -168,7 +168,7 @@
     let currentPage = 'home';
     let currentAdminPanel = 'dashboard';                    // tab admin yang sedang dibuka
     const pageDataCache = { activity:null, admin:null };   // hasil render terakhir per halaman
-    const pageFetchedAt = { activity:0, admin:0, prediction:0, users:0, sesi:0 };
+    const pageFetchedAt = { activity:0, admin:0, prediction:0, users:0, sesi:0, invest:0, bot:0 };
     let headerSummaryLoadedOnce = false;
     let livePollTimer = null;
     let livePollInFlight = false;
@@ -836,7 +836,7 @@
       clearLocalSession();
       stopLivePolling();
       stopInvestPolling();
-      clearTimeout(lapAdminPollTimer);
+      lapResetForLogout();
       pageDataCache.activity = null; pageDataCache.admin = null;
       pageFetchedAt.activity = 0; pageFetchedAt.admin = 0; pageFetchedAt.prediction = 0;
       headerSummaryLoadedOnce = false;
@@ -880,7 +880,7 @@
       clearLocalSession();
       stopLivePolling();
       stopInvestPolling();
-      clearTimeout(lapAdminPollTimer);
+      lapResetForLogout();
       clearTimeout(inactivityTimer);
       headerSummaryLoadedOnce = false;
       document.getElementById('pass').value = '';
@@ -1028,6 +1028,48 @@
       });
     }
 
+    // ===== Prefetch: mulai ambil data saat menu baru DISENTUH (hover/tap),
+    // ~100-300 ms sebelum menunya benar-benar dibuka. =====
+    function prefetchPage(page) {
+      if (!currentUser || !currentProfile || page === currentPage || !menuAllowed(page)) return;
+      if (LAP_PAGES.includes(page)) lapPrefetch(page);
+      else if (page === 'prediction' && Date.now() - pageFetchedAt.prediction > NAV_FRESH_MS && !window.__predPrefetching) {
+        window.__predPrefetching = true;
+        loadPredictionStatus();
+        setTimeout(() => { window.__predPrefetching = false; }, 1500);
+      }
+    }
+    (function installNavPrefetch() {
+      let hoverTimer = null;
+      const pageOf = el => {
+        const m = String((el && el.getAttribute('onclick')) || '').match(/(?:switchPage|mobileNavPage)\('([\w-]+)'\)/);
+        return m ? m[1] : '';
+      };
+      const target = e => e.target && e.target.closest ? e.target.closest('[onclick*="switchPage(\'"], [onclick*="mobileNavPage(\'"]') : null;
+      document.addEventListener('pointerover', e => {
+        const el = target(e); if (!el) return;
+        clearTimeout(hoverTimer);
+        hoverTimer = setTimeout(() => prefetchPage(pageOf(el)), 70);
+      }, { passive: true });
+      document.addEventListener('pointerdown', e => { const el = target(e); if (el) prefetchPage(pageOf(el)); }, { passive: true });
+      document.addEventListener('focusin', e => { const el = target(e); if (el) prefetchPage(pageOf(el)); });
+    })();
+    // Menu yang terakhir sering dibuka -> datanya disiapkan diam-diam sesudah
+    // login, jadi pembukaan pertama pun langsung tampil.
+    function rememberRecentPage(page) {
+      if (!LAP_PAGES.includes(page) && page !== 'prediction') return;
+      try {
+        const list = JSON.parse(localStorage.getItem('kd_recent_pages') || '[]').filter(p => p !== page);
+        list.unshift(page);
+        localStorage.setItem('kd_recent_pages', JSON.stringify(list.slice(0, 3)));
+      } catch (e) {}
+    }
+    function warmRecentPages() {
+      let list = [];
+      try { list = JSON.parse(localStorage.getItem('kd_recent_pages') || '[]'); } catch (e) {}
+      list.filter(p => p !== 'lap-setting').slice(0, 2).forEach((p, i) => setTimeout(() => prefetchPage(p), 600 * i));
+    }
+
     function switchPage(page) {
       const role = String((currentProfile && currentProfile.role) || '').trim().toUpperCase();
       const isAdmin = role === 'ADMIN';
@@ -1076,14 +1118,17 @@
       const kicker = document.getElementById('headerKicker');
       if (kicker) kicker.textContent = HEADER_KICKER[page] || 'KD-GROUP PANEL';
 
-      if (LAP_PAGES.includes(page)) renderLapPage(page);
+      if (LAP_PAGES.includes(page)) {
+        renderLapPage(page);
+        if (page !== 'lap-setting' && Date.now() - lapJobsState.fetchedAt > 10000) lapJobsFetch();
+      }
+      rememberRecentPage(page);
       if (BOT_PAGES.includes(page)) renderBotSubpage(page);
       if (LIVECHAT_PAGES.includes(page)) renderLivechatSubpage(page);
 
       if (page === 'home') loadHomeDashboard(false);
 
       if (page !== 'invest') stopInvestPolling();
-      if (page !== 'lap-admin') clearTimeout(lapAdminPollTimer);
       if (page !== 'pga-pending') { stopPgaPendingPolling(); if (wdListedTimer) { clearInterval(wdListedTimer); wdListedTimer = null; } }
       if (!LIVECHAT_PAGES.includes(page)) stopLivechatPolling();
 
@@ -1102,6 +1147,10 @@
       currentPage = page;
 
       if (page === 'prediction') {
+        if (!pageFetchedAt.prediction) {
+          const tbody = document.getElementById('prediction-table-body');
+          if (tbody && !tbody.children.length) renderSkeletonRows('prediction-table-body', 6, 4, 'pred-skeleton-row');
+        }
         if (Date.now() - pageFetchedAt.prediction > NAV_FRESH_MS) loadPredictionStatus();
       }
 
@@ -1121,7 +1170,8 @@
       }
 
       if (page === 'invest') {
-        loadInvestConfig();
+        // Form setting tetap di DOM; muat ulang dari server hanya kalau basi.
+        if (Date.now() - pageFetchedAt.invest > 30000) loadInvestConfig();
       }
 
       if (page === 'pga-pending') {
@@ -1158,36 +1208,52 @@
       'lap-setting': []
     };
 
+    let lapConfigWaiters = null;
     function lapEnsureConfig(cb) {
       if (lapConfig) { cb && cb(); return; }
+      if (lapConfigWaiters) { lapConfigWaiters.push(cb); return; }
+      lapConfigWaiters = [cb];
+      const finish = () => { const w = lapConfigWaiters || []; lapConfigWaiters = null; w.forEach(f => f && f()); };
       google.script.run.withSuccessHandler(res => {
         if (res && res.success) lapConfig = res.config || {};
-        cb && cb();
-      }).withFailureHandler(() => cb && cb()).lapGetConfig(currentSessionToken);
+        finish();
+      }).withFailureHandler(finish).lapGetConfig(currentSessionToken);
     }
 
-    function lapLoadPageResults(page, cb, force) {
-      const modules = LAP_PAGE_MODULES[page] || LAP_PAGE_MODULES['lap-admin'];
-      if (!modules.length) {
-        lapResults = {};
-        cb && cb(true);
-        return;
-      }
-      const cached = lapPageCache[page];
-      if (!force && cached && Date.now() - cached.at < LAP_CACHE_MS) {
-        lapResults = cached.results;
-        cb && cb(true);
-        return;
-      }
+    // Ambil hasil laporan untuk satu menu. Hasil disimpan di cache per menu
+    // beserta "tanda tangan" ringkas, supaya refresh di belakang layar hanya
+    // menggambar ulang tabel kalau datanya memang berubah.
+    const lapInflight = Object.create(null);
+    function lapResultsSig(results) {
+      return Object.keys(results || {}).sort().map(k => {
+        const v = results[k];
+        if (!Array.isArray(v)) return k + ':' + JSON.stringify(v).length;
+        return k + ':' + v.length + ':' + (/Meta$/.test(k) ? JSON.stringify(v) : JSON.stringify(v[0] || null) + JSON.stringify(v[v.length - 1] || null));
+      }).join('|');
+    }
+    function lapFetchResults(page, cb) {
+      const modules = LAP_PAGE_MODULES[page] || [];
+      if (!modules.length) { cb && cb(true, {}, false); return; }
+      if (lapInflight[page]) { lapInflight[page].push(cb); return; }
+      lapInflight[page] = [cb];
+      const finish = (ok, results, changed) => { const cbs = lapInflight[page] || []; delete lapInflight[page]; cbs.forEach(f => f && f(ok, results, changed)); };
       google.script.run.withSuccessHandler(res => {
         const ok = !!(res && res.success);
-        lapResults = ok && res.results ? res.results : {};
-        if (ok) lapPageCache[page] = { at: Date.now(), results: lapResults };
-        cb && cb(ok);
-      }).withFailureHandler(() => {
-        lapResults = {};
-        cb && cb(false);
-      }).lapGetResults(currentSessionToken, modules);
+        const results = ok && res.results ? res.results : {};
+        const prev = lapPageCache[page];
+        const sig = ok ? lapResultsSig(results) : '';
+        const changed = !prev || prev.sig !== sig;
+        if (ok) lapPageCache[page] = { at: Date.now(), results, sig };
+        finish(ok, results, changed);
+      }).withFailureHandler(() => finish(false, {}, false)).lapGetResults(currentSessionToken, modules);
+    }
+    // Dipanggil saat kursor/jari menyentuh menu laporan: data mulai diambil
+    // ~100-300 ms sebelum menu benar-benar terbuka.
+    function lapPrefetch(page) {
+      if (!LAP_PAGES.includes(page) || !menuAllowed(page)) return;
+      lapEnsureConfig();
+      const c = lapPageCache[page];
+      if (!c || Date.now() - c.at > LAP_CACHE_MS) lapFetchResults(page);
     }
 
     function lapRefresh(page) {
@@ -1195,27 +1261,62 @@
       toast('Memuat data terbaru...');
     }
 
+    const LAP_PAGE_META = {
+      'lap-admin': ['fa-table-list', 'Lap Admin', 'Register · Report Agent · Check Selisih Koin · Withdraw PGA-IDF'],
+      'lap-motion': ['fa-bolt-lightning', 'Lap Motion', 'Motion DP PGA · PGA Pending/Error · PGA Withdraw'],
+      'lap-mozart': ['fa-cubes-stacked', 'Lap Mozart', 'Deposit & Withdraw Mozart (m-banking)'],
+      'lap-setting': ['fa-sliders', 'Setting Laporan Harian', 'Kredensial per operator — tersimpan di database panel.']
+    };
+    function lapSkeletonHtml(page) {
+      const m = LAP_PAGE_META[page] || LAP_PAGE_META['lap-admin'];
+      const bar = w => '<span class="skeleton-bar" style="width:' + w + '"></span>';
+      return lapHeaderCard(m[0], m[1], m[2], `
+        <div class="lap-skeleton" aria-busy="true" aria-label="Memuat data laporan">
+          <div class="lap-skeleton-note"><i class="fa-solid fa-circle-notch fa-spin"></i>Memuat data laporan...</div>
+          <div class="lap-skeleton-stats">${'<div class="lap-skeleton-card">' + bar('45%') + bar('70%') + '</div>'}${'<div class="lap-skeleton-card">' + bar('55%') + bar('60%') + '</div>'}${'<div class="lap-skeleton-card">' + bar('40%') + bar('75%') + '</div>'}${'<div class="lap-skeleton-card">' + bar('50%') + bar('65%') + '</div>'}</div>
+          <div class="lap-skeleton-table">${[90, 80, 86, 72, 84].map(w => bar(w + '%')).join('')}</div>
+        </div>`);
+    }
+
     function renderLapPage(page, force) {
       const host = document.getElementById('lap-page');
       if (!host) return;
       const seq = ++lapRenderSeq;
-      lapEnsureConfig(() => {
-        lapLoadPageResults(page, ok => {
-          if (seq !== lapRenderSeq) return;
-          Object.keys(lapTblState).forEach(k => delete lapTblState[k]);
-          if (page === 'lap-setting') lapRenderSetting(host);
-          else if (page === 'lap-motion') lapRenderMotion(host);
-          else if (page === 'lap-mozart') lapRenderMozart(host);
-          else lapRenderAdmin(host);
-          lapTblMountAll();
-          const card = host.querySelector('.glass-card');
-          if (card) {
-            FX.reveal(card.querySelectorAll(':scope > .grid > .glass-inner, :scope > .grid > div'), { y: 12, step: 34 });
-            FX.reveal(card.querySelectorAll('.lap-tbl'), { y: 14, step: 40, start: 120 });
-          }
-          FX.countUp(host);
-        }, force);
-      });
+      const paint = (results) => {
+        if (seq !== lapRenderSeq) return;
+        lapResults = results || {};
+        Object.keys(lapTblState).forEach(k => delete lapTblState[k]);
+        if (page === 'lap-setting') lapRenderSetting(host);
+        else if (page === 'lap-motion') lapRenderMotion(host);
+        else if (page === 'lap-mozart') lapRenderMozart(host);
+        else lapRenderAdmin(host);
+        lapTblMountAll();
+        lapJobsPaint();
+        const card = host.querySelector('.glass-card');
+        if (card) {
+          FX.reveal(card.querySelectorAll(':scope > .grid > .glass-inner, :scope > .grid > div'), { y: 12, step: 34 });
+          FX.reveal(card.querySelectorAll('.lap-tbl'), { y: 14, step: 40, start: 120 });
+        }
+        FX.countUp(host);
+      };
+      const cached = lapPageCache[page];
+      // 1) Instan: data terakhir dari cache (umur berapa pun). Kalau sudah basi,
+      //    ambil yang baru di belakang layar & gambar ulang HANYA bila berubah.
+      if (!force && lapConfig && (cached || !(LAP_PAGE_MODULES[page] || []).length)) {
+        paint(cached ? cached.results : {});
+        if (!cached || Date.now() - cached.at < LAP_CACHE_MS) return;
+        lapFetchResults(page, (ok, results, changed) => {
+          if (ok && changed && seq === lapRenderSeq && currentPage === page) paint(results);
+        });
+        return;
+      }
+      // 2) Belum pernah dimuat: tampilkan kerangka seketika (dulu layar kosong
+      //    total selama menunggu), lalu ambil config & hasil BERSAMAAN.
+      if (!force || !host.querySelector('.glass-card')) host.innerHTML = lapSkeletonHtml(page);
+      let pending = 2, out = null;
+      const done = () => { if (--pending === 0) paint(out); };
+      lapEnsureConfig(done);
+      lapFetchResults(page, (ok, results) => { out = ok ? results : (cached ? cached.results : {}); done(); });
     }
 
     function lapHeaderCard(icon, title, sub, inner) {
@@ -2048,6 +2149,7 @@
       const codeWd = lapMotionConsoleScript('withdraw');
       const escCode = c => c.replace(/[&<>]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]));
       host.innerHTML = lapHeaderCard('fa-bolt-lightning', 'Lap Motion', 'Motion DP PGA · PGA Pending/Error · PGA Withdraw', `
+        ${lapJobsCardHtml('motion')}
         <div class="glass-inner rounded-2xl p-4 border border-amber-500/20 text-[11px] text-slate-300 leading-relaxed">
           <div class="font-bold text-amber-300 mb-1"><i class="fa-solid fa-shield-halved mr-1"></i>Motion kadang menolak trafik server</div>
           motionv2.com sesekali menantang/menolak request dari Worker (WAF) -- hasilnya data bisa muncul 0 padahal aslinya ada.
@@ -2185,6 +2287,7 @@
       const wdOkSum = wdOk.reduce((n,r) => n + Number(r.amount||0), 0);
       const code = lapMozartConsoleScript();
       host.innerHTML = lapHeaderCard('fa-cubes-stacked', 'Lap Mozart', 'Deposit & Withdraw Mozart (m-banking)', `
+        ${lapJobsCardHtml('mozart')}
         <div class="glass-inner rounded-2xl p-4 border border-amber-500/20 text-[11px] text-slate-300 leading-relaxed">
           <div class="font-bold text-amber-300 mb-1"><i class="fa-solid fa-shield-halved mr-1"></i>Mozart diproteksi Cloudflare</div>
           Server tidak bisa menarik data Mozart (semua IP server diblokir), dan bookmarklet ditolak proteksi situs Mozart (<code>about:blank#blocked</code>).
@@ -2271,7 +2374,6 @@
     }
 
     // ---------- ADMIN (via GitHub Actions) ----------
-    let lapAdminJobId = null, lapAdminPollTimer = null;
     function lapRenderAdmin(host) {
       const reg = lapResults.register || [];
       const ra = lapResults.reportAgent || [];
@@ -2290,7 +2392,7 @@
 
       host.innerHTML = lapHeaderCard('fa-table-list', 'Lap Admin', 'Register · Report Agent · Check Selisih Koin · Withdraw PGA-IDF', `
         ${lapDateBar('lapAdmin', lapRunAdmin)}
-        <div id="lapAdminProgress" class="text-[11px] text-cyan-300 mt-1"></div>
+        ${lapJobsCardHtml('admin')}
         <div class="glass-inner rounded-2xl p-3 mt-3">
           <div class="flex items-center justify-between mb-1.5"><span class="text-[10px] font-bold text-slate-400 uppercase">Laporan Register</span>
             <button onclick="window.__lapCopyLaporan()" class="glass-inner px-3 py-1 rounded-lg text-[10px] font-bold"><i class="fa-regular fa-copy mr-1"></i>COPY</button></div>
@@ -2335,7 +2437,6 @@
       if (lapTblState.register) lapTblState.register.prefilter = rows => lapAdminF.refType==='all' ? rows : rows.filter(r => r.type === lapAdminF.refType);
       if (lapTblState.report_agent) lapTblState.report_agent.prefilter = rows => rows.filter(r =>
         lapAdminF.actions.has((r.action||'').trim()) && lapAdminF.agents.has((r.operator||'').trim()));
-      if (lapAdminJobId && !reg.length) lapPollAdmin();
     }
     function raChip(label, fn) { return `<span class="lap-chip on" onclick="${fn}">${escapeHtml(label)}</span>`; }
     let lapAdminF = { refType:'all', actions:new Set(), agents:new Set() };
@@ -2363,36 +2464,139 @@
         const sd = lapDateVal('lapAdminStart'), ed = lapDateVal('lapAdminEnd');
         if (!sd || !ed) { toast('Pilih tanggal'); return; }
         lapBusy('lapAdmin', true, 'Memicu GitHub Actions...');
-        const prog = document.getElementById('lapAdminProgress');
         google.script.run.withSuccessHandler(res => {
-          if (!res || !res.success) { lapBusy('lapAdmin', false, ''); toast((res && res.message) || 'Gagal'); return; }
-          lapAdminJobId = res.jobId;
-          if (prog) prog.textContent = res.message || 'Berjalan...';
-          lapPollAdmin();
+          if (apiFailed(res)) { lapBusy('lapAdmin', false, ''); toast(apiMessage(res, 'Gagal memicu tarik data')); return; }
+          // Tampilkan progres SEKETIKA (tidak menunggu putaran polling pertama).
+          if (res.jobId && !lapJobsState.jobs.some(j => j.id === res.jobId)) {
+            lapJobsState.jobs.unshift({ id: res.jobId, kind: 'admin', status: 'pending', message: res.message || '', startDate: sd, endDate: ed, source: 'github', createdAt: lapWibNow(), updatedAt: lapWibNow() });
+          }
+          lapBusy('lapAdmin', true, res.reused ? 'Proses sebelumnya masih berjalan — progres di bawah.' : 'Berjalan — boleh pindah menu, progres tetap tersimpan.');
+          lapJobsPaint();
+          lapJobsFetch();
         }).withFailureHandler(e => { lapBusy('lapAdmin', false, ''); toast((e && e.message) || 'Gagal'); })
           .lapRunAdmin(currentSessionToken, sd, ed);
       });
     }
-    function lapPollAdmin() {
-      clearTimeout(lapAdminPollTimer);
-      if (!lapAdminJobId) return;
-      const prog = document.getElementById('lapAdminProgress');
-      google.script.run.withSuccessHandler(res => {
-        if (!res || !res.success) { lapBusy('lapAdmin', false, ''); if (prog) prog.textContent = (res && res.message) || 'Job hilang'; return; }
-        if (prog) prog.textContent = ({pending:'⏳ Antre di GitHub Actions...', running:'⚙️ Scraping berjalan...', done:'✅ Selesai', error:'❌ '+res.message}[res.status]) || res.status;
-        if (res.status === 'done') {
-          lapBusy('lapAdmin', false, '');
+
+    // ===== Progres & riwayat "Tarik Data" (disimpan di server: lap_job) =====
+    // Pemantau ini GLOBAL: tetap jalan walau operator pindah menu, dan setelah
+    // reload langsung melanjutkan job yang masih berjalan. Poll hanya selama
+    // ada job aktif (pending/running), jadi tidak membebani server saat diam.
+    let lapJobsState = { jobs: [], fetchedAt: 0, offsetMs: 0 };
+    let lapJobsTimer = null;
+    let lapJobsTicker = null;
+    const LAP_JOB_KIND_LABEL = { admin: 'Lap Admin', motion: 'Lap Motion', mozart: 'Lap Mozart' };
+    const lapJobIsActive = j => j.status === 'pending' || j.status === 'running';
+    // Waktu server = WIB tanpa zona ("yyyy-MM-dd HH:mm:ss").
+    function lapWibMs(ts) { const d = new Date(String(ts || '').replace(' ', 'T') + '+07:00'); return isNaN(d) ? 0 : d.getTime(); }
+    function lapWibNow() { return new Date(Date.now() + lapJobsState.offsetMs + 7 * 3600 * 1000).toISOString().slice(0, 19).replace('T', ' '); }
+    function lapFmtDur(ms) {
+      const s = Math.max(0, Math.round(ms / 1000));
+      return s >= 3600 ? Math.floor(s / 3600) + 'j ' + Math.floor(s % 3600 / 60) + 'm' : Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+    }
+    function lapJobsFetch(cb) {
+      if (!currentUser || !LAP_PAGES.some(menuAllowed)) { cb && cb(); return; }
+      clearTimeout(lapJobsTimer);
+      google.script.run.withSuccessHandler(r => {
+        if (apiFailed(r)) { lapJobsSchedule(); cb && cb(); return; }
+        const wasActive = new Map(lapJobsState.jobs.filter(lapJobIsActive).map(j => [j.id, j]));
+        lapJobsState = { jobs: r.jobs || [], fetchedAt: Date.now(), offsetMs: r.now ? lapWibMs(r.now) - Date.now() : 0 };
+        lapJobsState.jobs.forEach(j => { if (wasActive.has(j.id) && !lapJobIsActive(j)) lapJobFinished(j); });
+        lapJobsPaint();
+        lapJobsSchedule();
+        cb && cb();
+      }).withFailureHandler(() => { lapJobsSchedule(); cb && cb(); }).lapJobs(currentSessionToken);
+    }
+    function lapJobsSchedule() {
+      clearTimeout(lapJobsTimer);
+      const active = lapJobsState.jobs.some(lapJobIsActive);
+      if (currentUser && active) lapJobsTimer = setTimeout(() => lapJobsFetch(), 5000);
+      // Detik berjalan pada progres (murah: cuma update teks yang terlihat).
+      if (active && !lapJobsTicker) lapJobsTicker = setInterval(lapJobsTick, 1000);
+      if (!active && lapJobsTicker) { clearInterval(lapJobsTicker); lapJobsTicker = null; }
+      const busy = document.getElementById('navLapBusy');
+      if (busy) busy.hidden = !active;
+      const busyMobile = document.getElementById('navLapBusyMobile');
+      if (busyMobile) busyMobile.hidden = !active;
+    }
+    function lapJobFinished(j) {
+      const label = LAP_JOB_KIND_LABEL[j.kind] || 'Laporan';
+      if (j.status === 'done') {
+        if (j.kind === 'admin') {
           lapPageCache['lap-admin'] = null;
-          lapResults = res.results || lapResults;
-          lapAdminJobId = null;
-          renderLapPage('lap-admin', true);
-          toast('Lap Admin selesai — ' + (lapResults.register||[]).length + ' akun register');
-          return;
+          lapBusy('lapAdmin', false, '');
+          if (currentPage === 'lap-admin') renderLapPage('lap-admin', true);
         }
-        if (res.status === 'error') { lapBusy('lapAdmin', false, ''); toast(res.message || 'Gagal'); lapAdminJobId = null; return; }
-        lapAdminPollTimer = setTimeout(lapPollAdmin, 5000);
-      }).withFailureHandler(() => { lapAdminPollTimer = setTimeout(lapPollAdmin, 7000); })
-        .lapAdminStatus(currentSessionToken, lapAdminJobId);
+        toast(label + ' selesai — data terbaru sudah tersimpan.');
+      } else {
+        if (j.kind === 'admin') lapBusy('lapAdmin', false, '');
+        toast(label + ' gagal: ' + (j.message || j.status));
+      }
+    }
+    function lapJobsTick() {
+      document.querySelectorAll('[data-lap-since]').forEach(el => {
+        el.textContent = lapFmtDur(Date.now() + lapJobsState.offsetMs - lapWibMs(el.getAttribute('data-lap-since')));
+      });
+    }
+    function lapJobsCardHtml(kind) {
+      return '<div class="lap-jobs" data-lap-jobs="' + escapeHtml(kind) + '"></div>';
+    }
+    function lapJobStatusBadge(j) {
+      const map = { pending: ['is-run', 'fa-hourglass-half', 'Antre'], running: ['is-run', 'fa-gear fa-spin', 'Berjalan'], done: ['is-ok', 'fa-check', 'Selesai'], error: ['is-bad', 'fa-xmark', 'Gagal'], stale: ['is-bad', 'fa-triangle-exclamation', 'Macet'] };
+      const m = map[j.status] || ['is-run', 'fa-circle', j.status];
+      return '<span class="lap-job-badge ' + m[0] + '"><i class="fa-solid ' + m[1] + '"></i>' + escapeHtml(m[2]) + '</span>';
+    }
+    function lapJobSteps(j) {
+      // Job GitHub Actions: Dipicu -> Antre -> Mengambil data -> Tersimpan.
+      const steps = ['Dipicu', 'Antre di GitHub Actions', 'Mengambil data', 'Tersimpan di panel'];
+      const at = j.status === 'pending' ? 1 : j.status === 'running' ? 2 : j.status === 'done' ? 4 : (j.updatedAt && j.updatedAt !== j.createdAt ? 2 : 1);
+      const failed = j.status === 'error' || j.status === 'stale';
+      return '<ol class="lap-steps">' + steps.map((s, i) => {
+        const state = i < at ? 'done' : i === at ? (failed ? 'fail' : 'now') : 'todo';
+        const icon = state === 'done' ? 'fa-check' : state === 'fail' ? 'fa-xmark' : state === 'now' ? 'fa-circle-notch fa-spin' : 'fa-circle';
+        return '<li class="is-' + state + '"><span class="lap-step-dot"><i class="fa-solid ' + icon + '"></i></span><span class="lap-step-label">' + escapeHtml(s) + '</span></li>';
+      }).join('') + '</ol>';
+    }
+    function lapJobsPaint() {
+      document.querySelectorAll('[data-lap-jobs]').forEach(box => {
+        const kind = box.getAttribute('data-lap-jobs');
+        const jobs = lapJobsState.jobs.filter(j => j.kind === kind);
+        const active = jobs.find(lapJobIsActive);
+        const label = LAP_JOB_KIND_LABEL[kind] || 'Laporan';
+        let html = '<div class="lap-jobs-head"><span><i class="fa-solid fa-list-check"></i>Progres &amp; Riwayat Tarik Data</span>' +
+          '<button type="button" class="lap-jobs-refresh" onclick="lapJobsFetch()" title="Muat ulang progres" aria-label="Muat ulang progres"><i class="fa-solid fa-rotate"></i></button></div>';
+        if (active) {
+          html += '<div class="lap-job-active">' +
+            '<div class="lap-job-active-top"><b>' + escapeHtml(label) + ' · ' + escapeHtml(active.startDate || '') + (active.endDate && active.endDate !== active.startDate ? ' s/d ' + escapeHtml(active.endDate) : '') + '</b>' +
+            '<span class="lap-job-elapsed-wrap"><i class="fa-regular fa-clock"></i><span data-lap-since="' + escapeHtml(active.createdAt) + '">' + lapFmtDur(Date.now() + lapJobsState.offsetMs - lapWibMs(active.createdAt)) + '</span></span></div>' +
+            lapJobSteps(active) +
+            '<div class="lap-job-note">' + escapeHtml(active.message || '') + ' <span class="text-slate-500">— boleh ditinggal ke menu lain, progres tetap tersimpan.</span></div></div>';
+        }
+        const rows = jobs.filter(j => j !== active).slice(0, 5);
+        if (rows.length) {
+          html += '<div class="lap-jobs-table-wrap"><table class="lap-jobs-table"><thead><tr><th>Waktu</th><th>Periode</th><th>Status</th><th>Durasi</th><th>Keterangan</th></tr></thead><tbody>' +
+            rows.map(j => {
+              const dur = lapWibMs(j.updatedAt) - lapWibMs(j.createdAt);
+              return '<tr><td>' + escapeHtml(String(j.createdAt).slice(5, 16)) + '</td>' +
+                '<td>' + escapeHtml(j.startDate || '-') + (j.endDate && j.endDate !== j.startDate ? '<br><span class="text-slate-500">s/d ' + escapeHtml(j.endDate) + '</span>' : '') + '</td>' +
+                '<td>' + lapJobStatusBadge(j) + '</td>' +
+                '<td>' + (j.source === 'import' ? '<span class="text-slate-500">import</span>' : (dur > 0 ? lapFmtDur(dur) : '-')) + '</td>' +
+                '<td class="lap-job-msg">' + escapeHtml(j.message || '') + '</td></tr>';
+            }).join('') + '</tbody></table></div>';
+        } else if (!active) {
+          html += '<div class="lap-jobs-empty">' + (lapJobsState.fetchedAt ? 'Belum ada riwayat tarik data ' + escapeHtml(label) + '.' : '<i class="fa-solid fa-circle-notch fa-spin mr-1.5"></i>Memuat riwayat...') + '</div>';
+        }
+        box.innerHTML = html;
+      });
+      if (lapJobsState.jobs.some(j => j.kind === 'admin' && lapJobIsActive(j))) lapBusy('lapAdmin', true, 'Berjalan — boleh pindah menu, progres tetap tersimpan.');
+    }
+    function lapResetForLogout() {
+      clearTimeout(lapJobsTimer); lapJobsTimer = null;
+      if (lapJobsTicker) { clearInterval(lapJobsTicker); lapJobsTicker = null; }
+      lapJobsState = { jobs: [], fetchedAt: 0, offsetMs: 0 };
+      lapConfig = null;
+      Object.keys(lapPageCache).forEach(k => delete lapPageCache[k]);
+      window.__kdWarmed = false;
     }
 
     /* Menu admin: tampilkan satu panel per waktu (tidak numpuk scroll). */
@@ -2540,8 +2744,8 @@
         </div>`;
     }
 
-    function loadPredictionStatus() {
-      if (currentUser) {
+    function loadPredictionStatus(manual) {
+      if (manual === true && currentUser) {
         google.script.run.withFailureHandler(() => {}).logClientActivity(currentSessionToken, "REFRESH STATUS PREDIKSI", "Memuat ulang jadwal dan status prediksi", "INFO", "");
       }
 
@@ -3848,6 +4052,12 @@
 
       applyMenuAccess();
       restoreNavGroups();
+      if (!window.__kdWarmed) {
+        window.__kdWarmed = true;
+        // Lanjutkan pantauan tarik data yang masih berjalan (mis. sesudah reload),
+        // lalu siapkan data menu yang biasa dibuka -- saat browser sedang santai.
+        setTimeout(() => { lapJobsFetch(); warmRecentPages(); }, 1500);
+      }
       const filterGrid = document.getElementById('activityFilterGrid');
       if (filterGrid) filterGrid.classList.toggle('activity-admin-grid', isAdmin);
       const scope = document.getElementById('activityScopeText');
@@ -4015,11 +4225,12 @@
       return mode === 'admin' ? 'adminActivity' + suffix : 'activity' + suffix;
     }
 
-    function renderSkeletonRows(target, count) {
+    function renderSkeletonRows(target, count, cols, rowClass) {
       const body = document.getElementById(target);
       if (!body) return;
-      const cols = 7;
-      const row = `<tr class="activity-log-row">${Array.from({length: cols}).map(() => `<td><span class="skeleton-bar" style="width:${60 + Math.round(Math.random()*30)}%"></span></td>`).join('')}</tr>`;
+      cols = cols || 7;
+      rowClass = rowClass == null ? 'activity-log-row' : rowClass;
+      const row = `<tr class="${rowClass}">${Array.from({length: cols}).map(() => `<td><span class="skeleton-bar" style="width:${60 + Math.round(Math.random()*30)}%"></span></td>`).join('')}</tr>`;
       body.innerHTML = row.repeat(count || 6);
     }
 
@@ -4775,6 +4986,7 @@ Tindakan ini tidak dapat dibatalkan.`,
       google.script.run
         .withSuccessHandler(res => {
           if (!res || !res.success) { if (box) box.textContent = (res && res.message) || 'Gagal memuat setting.'; return; }
+          pageFetchedAt.invest = Date.now();
           const c = res.config || {};
           investSetVal('investBaseUrl', c.BASE_URL);
           investSetVal('investPhpsessid', c.PHPSESSID);
@@ -5199,7 +5411,9 @@ Tindakan ini tidak dapat dibatalkan.`,
         const el = document.getElementById('bot-sec-' + p.replace('bot-', ''));
         if (el) el.style.display = (p === page) ? 'flex' : 'none';
       });
-      loadBotNews();
+      // Semua sub-halaman BOT memakai snapshot yang sama: pindah tab tidak perlu
+      // menarik ulang 6 query Turso kalau datanya baru dimuat (<20 dtk).
+      if (Date.now() - pageFetchedAt.bot > 20000) loadBotNews();
     }
     function renderBotAutoBar(on){
       const bar = document.getElementById('botAutoChip');
@@ -5296,6 +5510,7 @@ Tindakan ini tidak dapat dibatalkan.`,
     }
     function applyBotNews(snap){
       if (!snap || !snap.success) return;
+      pageFetchedAt.bot = Date.now();
       const c = snap.config || {};
       botHistoryCache = snap.history || [];
       renderBotHistory();

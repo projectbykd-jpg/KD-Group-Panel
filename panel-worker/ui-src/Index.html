@@ -126,7 +126,7 @@
           <!-- GRUP: LAPORAN HARIAN -->
           <div class="nav-group" data-group="lapor">
             <button type="button" class="nav-group-head" onclick="toggleNavGroup('lapor')">
-              <span><i class="fa-solid fa-file-invoice-dollar mr-2 text-sky-400"></i>Laporan Harian</span>
+              <span><i class="fa-solid fa-file-invoice-dollar mr-2 text-sky-400"></i>Laporan Harian<span id="navLapBusy" class="nav-busy" title="Tarik data sedang berjalan" hidden><i class="fa-solid fa-circle-notch fa-spin"></i></span></span>
               <i class="fa-solid fa-chevron-down nav-chev"></i>
             </button>
             <div class="nav-group-body">
@@ -214,7 +214,7 @@
             <i class="fa-solid fa-bolt"></i><span>Utama</span>
           </button>
           <button type="button" class="mobile-nav-item" data-mobile-group="lapor" onclick="mobileNavGroup('lapor','Laporan Harian')">
-            <i class="fa-solid fa-file-invoice-dollar"></i><span>Laporan</span>
+            <i class="fa-solid fa-file-invoice-dollar"></i><span>Laporan</span><span id="navLapBusyMobile" class="nav-busy nav-busy-mobile" hidden><i class="fa-solid fa-circle-notch fa-spin"></i></span>
           </button>
           <button type="button" class="mobile-nav-item" data-mobile-page="activity" onclick="mobileNavPage('activity')">
             <i class="fa-solid fa-clock-rotate-left"></i><span>Aktivitas</span>
@@ -524,7 +524,7 @@
           <div class="flex flex-col gap-3.5">
             <div class="text-xs font-extrabold text-slate-300 tracking-wider flex items-center justify-between">
               <span>JADWAL POSTING PREDIKSI & KATA-KATA PENUTUP</span>
-              <button onclick="loadPredictionStatus()" class="text-[10px] text-cyan-400 hover:underline flex items-center gap-1.5"><i class="fa-solid fa-rotate"></i> Refresh Status</button>
+              <button onclick="loadPredictionStatus(true)" class="text-[10px] text-cyan-400 hover:underline flex items-center gap-1.5"><i class="fa-solid fa-rotate"></i> Refresh Status</button>
             </div>
             
             <div class="pretty-table-wrap">

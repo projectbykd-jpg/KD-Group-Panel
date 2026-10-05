@@ -11,7 +11,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p . && tsc --noEmit -p test",
     "cf-typegen": "wrangler types",
-    "check": "npm run typecheck && npm test && npm run build:ui"
+    "check": "npm run typecheck && npm test && npm run build:ui && node scripts/check-ui-names.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.5.0",
