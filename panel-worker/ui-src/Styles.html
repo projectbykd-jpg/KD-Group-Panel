@@ -89,21 +89,19 @@
     .glass-inner:focus-within { border-color: rgba(34, 211, 238, 0.5); background: rgba(15, 23, 42, 0.85); box-shadow: 0 0 22px rgba(34, 211, 238, 0.1); }
 
     .neon-cyan { text-shadow: 0 0 6px rgba(34, 211, 238, 0.18); color: #38d9f0; }
-    .neon-pink { text-shadow: 0 0 6px rgba(244, 114, 182, 0.16); color: #f472b6; }
 
     @keyframes pulse-glow-once { 0% { text-shadow: 0 0 2px #22d3ee, 0 0 6px rgba(34,211,238,0.2); transform: scale(1); } 40% { text-shadow: 0 0 10px #22d3ee, 0 0 20px rgba(34,211,238,0.4); transform: scale(1.035); } 100% { text-shadow: 0 0 6px #22d3ee, 0 0 12px rgba(34,211,238,0.22); transform: scale(1); } }
     .animate-market { animation: pulse-glow-once 1.1s ease-out 1; color: #22d3ee !important; text-shadow: 0 0 6px #22d3ee, 0 0 12px rgba(34,211,238,0.22); }
-    
+
     .fade-in { animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(10px) scale(0.99); } to { opacity: 1; transform: translateY(0) scale(1); } }
-    
+
     #main-panel, #prediction-page { display: none; }
-    
+
     ::-webkit-scrollbar { width: 5px; height: 5px; }
     ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.3); }
     ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 9999px; }
     ::-webkit-scrollbar-thumb:hover { background: rgba(34, 211, 238, 0.4); }
-
 
     /* scroll-behavior:smooth di halaman panjang bikin scroll terasa "berat"/nyendat
        di Chrome — pakai instant. */
@@ -131,8 +129,6 @@
     .btn-primary:hover { filter:brightness(1.06); box-shadow:0 12px 30px -8px rgba(56,130,246,.62), 0 1px 0 rgba(255,255,255,.2) inset; }
     .btn-secondary { background:rgba(30,41,59,.55); color:#cbd5e1; border:1px solid rgba(148,163,184,.18); font-weight:700; box-shadow:none; }
     .btn-secondary:hover { background:rgba(30,41,59,.8); border-color:rgba(148,163,184,.32); color:#f1f5f9; }
-    .btn-danger { background:linear-gradient(110deg,#fb7185,#e11d48); color:#fff1f2; font-weight:800; box-shadow:0 10px 26px -8px rgba(225,29,72,.5); }
-    .btn-danger:hover { filter:brightness(1.08); }
 
     /* ===== Send-button micro-interaction: tombol "melipat" jadi pesawat kertas lalu
        terbang keluar saat diklik. SEMUA transform/opacity di sini dijalankan lewat
@@ -158,7 +154,6 @@
     .action-btn.is-sent { background:linear-gradient(110deg,#34d399,#10b981 60%,#059669) !important; box-shadow:0 10px 30px -6px rgba(16,185,129,.5), 0 0 0 1px rgba(16,185,129,.3) inset !important; transition:background .35s ease, box-shadow .35s ease; }
 
     /* ===== Header summary strip: ringkasan status hari ini, ganti tagline statis ===== */
-    .header-stat-strip { display:flex; flex-wrap:wrap; gap:8px; }
     .header-stat { display:inline-flex; align-items:center; gap:7px; padding:var(--pill-pad-y) var(--pill-pad-x); border-radius:var(--pill-radius); background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.08); font-size:var(--pill-fs); font-weight:var(--pill-fw); color:#e2e8f0; white-space:nowrap; }
     .header-stat-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
     .header-stat-dot.ok { background:var(--success); box-shadow:0 0 4px rgba(52,211,153,.4); }
@@ -279,8 +274,7 @@
       *, *::before, *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; scroll-behavior:auto !important; transition-duration:.01ms !important; }
     }
 
-
-    .nav-extra{display:none}.admin-only{display:none}.modal-shell{position:fixed;inset:0;background:rgba(2,6,23,.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);z-index:1000000;display:none;align-items:center;justify-content:center;padding:1rem}.modal-shell.open{display:flex;animation:overlayIn .16s ease-out both}.result-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:12px;border-radius:15px;background:rgba(15,23,42,.62);border:1px solid rgba(255,255,255,.07)}.status-ok{color:#34d399}.status-bad{color:#fb7185}.status-skip{color:#94a3b8}.mini-card{background:rgba(15,23,42,.58);border:1px solid rgba(255,255,255,.07);border-radius:18px;padding:16px}.log-table{min-width:900px}.log-table td,.log-table th{padding:12px;border-bottom:1px solid rgba(255,255,255,.06);vertical-align:top}.switch{width:48px;height:26px;border-radius:999px;background:#334155;position:relative;cursor:pointer}.switch::after{content:'';position:absolute;width:20px;height:20px;left:3px;top:3px;border-radius:50%;background:white;transition:.2s}.switch.on{background:#10b981}.switch.on::after{left:25px}
+    .nav-extra{display:none}.admin-only{display:none}.modal-shell{position:fixed;inset:0;background:rgba(2,6,23,.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);z-index:1000000;display:none;align-items:center;justify-content:center;padding:1rem}.modal-shell.open{display:flex;animation:overlayIn .16s ease-out both}.status-ok{color:#34d399}.status-bad{color:#fb7185}.status-skip{color:#94a3b8}.mini-card{background:rgba(15,23,42,.58);border:1px solid rgba(255,255,255,.07);border-radius:18px;padding:16px}.log-table{min-width:900px}.log-table td,.log-table th{padding:12px;border-bottom:1px solid rgba(255,255,255,.06);vertical-align:top}.switch{width:48px;height:26px;border-radius:999px;background:#334155;position:relative;cursor:pointer}.switch::after{content:'';position:absolute;width:20px;height:20px;left:3px;top:3px;border-radius:50%;background:white;transition:.2s}.switch.on{background:#10b981}.switch.on::after{left:25px}
     /* ===== Tabel rapi terpadu — dipakai di tabel mana pun yang sebelumnya
        cuma <table class="w-full text-xs"> polos (header putih polos, tanpa
        zebra/hover, terasa beda sendiri dari admin-users-table/log-table yang
@@ -297,6 +291,9 @@
        sekarang 1 pola konsisten: ikon redup + teks, padding lega. ===== */
     .table-empty-cell{padding:36px 16px !important;text-align:center;color:#64748b;font-size:11px;font-style:normal;font-weight:600}
     .table-empty-cell i{display:block;font-size:22px;margin-bottom:9px;opacity:.4}
+    /* Tabel lebar di HP di-scroll horizontal: pesan kosong ditahan di area yang
+       terlihat (sticky) supaya tidak ikut ter-center di tengah tabel penuh. */
+    .table-empty-inner{display:block;position:sticky;left:0;width:min(100%,calc(100vw - 64px))}
     /* Sama seperti table-empty-cell tapi dengan ikon berputar -- dipakai
        ganti teks "Memuat..." polos supaya jelas kelihatan lagi proses. */
     .table-loading-cell{padding:28px 16px !important;text-align:center;color:#7c8aa0;font-size:11px;font-weight:600}
@@ -318,15 +315,13 @@
     .summary-pill{font-size:9px;font-weight:800;padding:6px 9px;border-radius:999px;border:1px solid rgba(255,255,255,.08);background:rgba(15,23,42,.7)}
     .website-result-card{border:1px solid rgba(255,255,255,.07);background:rgba(15,23,42,.55);border-radius:16px;padding:12px}
     .website-result-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}
-    .system-compact-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
     .system-compact{min-width:0;padding:10px;border-radius:13px;border:1px solid rgba(255,255,255,.07);background:rgba(2,6,23,.32)}
     .system-compact-top{display:flex;align-items:center;justify-content:space-between;gap:7px}
     .system-compact-name{font-size:11px;font-weight:800;color:#f8fafc}
     .system-compact-status{font-size:9px;font-weight:900;white-space:nowrap}
     .system-compact-reason{font-size:9px;color:#94a3b8;line-height:1.35;margin-top:5px;word-break:break-word}
-    .blocked-note{margin-top:9px;padding:9px 10px;border-radius:12px;background:rgba(244,63,94,.08);border:1px solid rgba(244,63,94,.22);font-size:9px;color:#fecdd3;line-height:1.45}
     .retry-mini{margin-top:7px;padding:6px 8px;border-radius:9px;background:rgba(244,63,94,.12);border:1px solid rgba(244,63,94,.25);font-size:8px;font-weight:800}
-    @media(max-width:639px){#sendResultModal .send-result-card{padding:17px;max-height:92vh}.system-compact-grid{grid-template-columns:1fr}.system-compact{padding:9px}#systemResultList{max-height:68vh}}
+    @media(max-width:639px){#sendResultModal .send-result-card{padding:17px;max-height:92vh}.system-compact{padding:9px}#systemResultList{max-height:68vh}}
     /* Versi ringkas: chip sistem yg berhasil + baris datar utk website OK/duplikat */
     .mini-chip-row{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px}
     .mini-chip{font-size:9px;font-weight:800;padding:3px 7px;border-radius:999px;border:1px solid rgba(255,255,255,.09);background:rgba(2,6,23,.35)}
@@ -334,18 +329,16 @@
     .result-flat-line{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 11px;border-radius:11px;background:rgba(15,23,42,.45);border:1px solid rgba(255,255,255,.05);font-size:11px;font-weight:700}
     .result-flat-line span:last-child{font-size:10px;font-weight:800;white-space:nowrap}
 
-  
     /* =========================================================
        WIDE + COMPACT SEND CONFIRMATION & RESULT POPUPS
        Website disusun melebar agar popup tidak terlalu panjang.
        ========================================================= */
-    #sendConfirmModal,
+
     #sendResultModal {
       padding: 14px;
       align-items: center;
     }
 
-    #sendConfirmModal > .glass-card,
     #sendResultModal .send-result-card {
       width: min(1180px, calc(100vw - 28px)) !important;
       max-width: 1180px !important;
@@ -354,50 +347,6 @@
       padding: 18px !important;
       gap: 12px !important;
       overflow: hidden !important;
-    }
-
-    /* Popup konfirmasi: isi tetap terlihat, daftar website saja yang scroll */
-    #sendConfirmModal > .glass-card {
-      display: grid !important;
-      grid-template-rows: auto auto minmax(0, 1fr) auto auto;
-    }
-
-    #sendPreviewData {
-      padding: 11px 14px !important;
-      border-radius: 14px !important;
-      line-height: 1.45 !important;
-      max-height: 105px;
-      overflow: auto;
-    }
-
-    #destinationPreview {
-      display: grid !important;
-      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)) !important;
-      gap: 10px !important;
-      min-height: 0;
-      max-height: 48dvh;
-      overflow-y: auto;
-      align-content: start;
-      padding-right: 3px;
-    }
-
-    #destinationPreview > .glass-inner {
-      padding: 12px !important;
-      border-radius: 15px !important;
-      height: fit-content;
-    }
-
-    #destinationPreview .py-2 {
-      padding-top: 7px !important;
-      padding-bottom: 7px !important;
-    }
-
-    #duplicateWarning {
-      padding: 11px 13px !important;
-      border-radius: 14px !important;
-      line-height: 1.45;
-      max-height: 100px;
-      overflow-y: auto;
     }
 
     /* Popup hasil: website menjadi kartu-kartu horizontal */
@@ -426,11 +375,6 @@
       margin-bottom: 8px !important;
     }
 
-    .system-compact-grid {
-      grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-      gap: 7px !important;
-    }
-
     .system-compact {
       padding: 8px !important;
       border-radius: 11px !important;
@@ -450,12 +394,6 @@
       line-height: 1.3 !important;
     }
 
-    .blocked-note {
-      margin-top: 7px !important;
-      padding: 7px 9px !important;
-      font-size: 8px !important;
-    }
-
     .result-summary {
       margin-top: 6px !important;
     }
@@ -467,32 +405,27 @@
 
     /* Tablet */
     @media (max-width: 900px) {
-      #sendConfirmModal > .glass-card,
+
       #sendResultModal .send-result-card {
         width: min(760px, calc(100vw - 22px)) !important;
         max-height: 92dvh !important;
         padding: 15px !important;
       }
 
-      #destinationPreview,
       #systemResultList {
         grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
       }
 
-      .system-compact-grid {
-        grid-template-columns: 1fr !important;
-      }
     }
 
     /* HP: tetap satu kolom, tetapi lebih padat dan tidak terpotong */
     @media (max-width: 620px) {
-      #sendConfirmModal,
+
       #sendResultModal {
         padding: 8px;
         align-items: flex-start;
       }
 
-      #sendConfirmModal > .glass-card,
       #sendResultModal .send-result-card {
         width: calc(100vw - 16px) !important;
         max-height: calc(100dvh - 16px) !important;
@@ -500,24 +433,13 @@
         border-radius: 18px !important;
       }
 
-      #destinationPreview,
       #systemResultList {
         grid-template-columns: 1fr !important;
         max-height: 60dvh !important;
       }
 
-      #sendPreviewData {
-        max-height: 90px;
-        font-size: 10px !important;
-      }
-
-      #duplicateWarning {
-        max-height: 92px;
-        font-size: 10px !important;
-      }
     }
 
-  
     /* FAST AUTO SEND RESULT — responsive, compact, readable */
     #sendResultModal {
       padding: 12px !important;
@@ -545,11 +467,6 @@
 
     .website-result-head {
       margin-bottom: 7px !important;
-    }
-
-    .system-compact-grid {
-      grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-      gap: 6px !important;
     }
 
     .system-compact {
@@ -607,16 +524,11 @@
         border-radius: 17px !important;
       }
 
-      .system-compact-grid {
-        grid-template-columns: 1fr !important;
-      }
-
       .system-compact {
         min-height: 0;
       }
     }
 
-  
     /* =========================================================
        ACTIVITY LOG — compact, readable, expandable
        ========================================================= */
@@ -803,13 +715,49 @@
       user-select: text;
     }
 
-    @media (max-width: 640px) {
-      .log-table {
-        min-width: 860px !important;
-      }
+    /* Grid statistik 2 kolom (di bawah md): kartu terakhir yang sendirian
+       dibentangkan penuh supaya tidak ada lubang di kanan. */
+    @media (max-width: 767px) {
+      #userStats > :last-child:nth-child(odd),
+      #adminStats > :last-child:nth-child(odd) { grid-column: 1 / -1; }
     }
 
-  
+    /* HP: tabel 7 kolom (min 1080px) dulu harus digeser ke samping. Sekarang
+       tiap baris jadi kartu: waktu + status, user + aksi, lalu detail & data
+       selebar kartu. Urutan kolom di HTML tidak berubah (pure CSS). */
+    @media (max-width: 640px) {
+      .log-table { min-width: 0 !important; table-layout: auto; }
+      .log-table thead { display: none; }
+      .log-table, .log-table tbody { display: block; width: 100%; }
+      .log-table tr { display: block; }
+      .log-table tr > td { display: block; padding: 12px !important; }
+      .log-table tr.activity-log-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas: "time status" "user action" "detail detail" "data data" "source source";
+        gap: 8px 10px;
+        padding: 12px;
+        border-bottom: 1px solid rgba(255,255,255,.06);
+      }
+      .log-table tr.activity-log-row > td { padding: 0 !important; border: 0 !important; min-width: 0; }
+      .activity-log-row > td:nth-child(1) { grid-area: time; }
+      .activity-log-row > td:nth-child(2) { grid-area: user; }
+      .activity-log-row > td:nth-child(3) { grid-area: action; justify-self: end; }
+      .activity-log-row > td:nth-child(4) { grid-area: status; justify-self: end; }
+      .activity-log-row > td:nth-child(5) { grid-area: detail; }
+      .activity-log-row > td:nth-child(6) { grid-area: data; }
+      .activity-log-row > td:nth-child(7) { grid-area: source; }
+      .activity-log-row > td:nth-child(5)::before,
+      .activity-log-row > td:nth-child(6)::before {
+        display: block; margin-bottom: 3px;
+        font-size: 9px; font-weight: 800; letter-spacing: .12em; color: #64748b;
+      }
+      .activity-log-row > td:nth-child(5)::before { content: "DETAIL"; }
+      .activity-log-row > td:nth-child(6)::before { content: "ISI / DATA"; }
+      .log-time-cell { display: flex !important; gap: 8px; align-items: baseline; }
+      .log-time-cell span { margin-top: 0; }
+    }
+
     /* =========================================================
        ADMIN CENTER — RAPI, RESPONSIVE, TANPA KOLOM BERTUMPUK
        ========================================================= */
@@ -1182,8 +1130,6 @@
       font-size:11px; font-weight:800; color:#fbbf24;
     }
 
-  
-
     /* =========================================================
        PREDICTION SMART SEND — table actions + compact result modal
        ========================================================= */
@@ -1241,7 +1187,6 @@
     @media(max-width:850px){.closing-card-grid{grid-template-columns:1fr}.closing-control-v3{padding:11px}}
     @media(max-width:520px){.closing-smart-card{padding:14px;border-radius:20px}.closing-title-v3{align-items:flex-start}.closing-actions-v3{grid-template-columns:1fr}.closing-preview-v3{font-size:9px}}
 
-  
     /* =========================================================
        SIDEBAR NAVIGATION — state jelas tanpa outline putih
        ========================================================= */
@@ -1289,6 +1234,18 @@
     .lap-date-field input{ background:transparent; border:0; outline:0; color:#f1f5f9; font-size:12px; font-weight:700; width:100%; letter-spacing:.02em }
     .lap-quick{ font-size:10px; font-weight:800; padding:8px 11px; border-radius:10px; background:rgba(15,23,42,.6); border:1px solid rgba(255,255,255,.08); color:#94a3b8 }
     .lap-quick:hover{ color:#e2e8f0; border-color:rgba(34,211,238,.3) }
+    /* Tanggal, tombol cepat & TARIK DATA sama tinggi (dulu tombol cepat lebih
+       pendek sehingga barisnya tidak sejajar). Di HP: 2 tanggal berdampingan,
+       tombol cepat & TARIK DATA selebar layar (target sentuh >= 40px). */
+    .lap-date-field,.lap-datebar .lap-quick,.lap-run-btn{ min-height:40px }
+    @media (max-width:640px){
+      .lap-datebar{ display:grid !important; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px }
+      .lap-date-field{ min-width:0 }
+      .lap-quick-row,.lap-run-btn,.lap-run-status{ grid-column:1 / -1 }
+      .lap-quick-row .lap-quick{ flex:1 1 0 }
+      .lap-run-btn{ width:100% }
+      .lap-run-status:empty{ display:none }
+    }
     .lap-tbl{ border:1px solid rgba(148,163,184,.1); border-radius:14px; overflow:hidden; margin-top:10px; background:rgba(13,20,35,.5);
       content-visibility:auto; contain-intrinsic-size:auto 300px }
     .lap-tbl.open{ border-color:rgba(148,163,184,.16) }
@@ -1469,8 +1426,6 @@
       .activity-pagination{justify-content:space-between}
     }
 
-
-
     /* =========================================================
        DYNAMIC WEBSITE THEME ENGINE V1
        Theme mengikuti website yang dimiliki akun pada Sheet Users.
@@ -1548,7 +1503,6 @@
     body.theme-dynamic #theme-sites {
       color: var(--theme-primary) !important;
     }
-    body.theme-dynamic .neon-pink { color: var(--theme-accent) !important; }
     body.theme-dynamic .neon-cyan,
     body.theme-dynamic .animate-market {
       text-shadow: 0 0 18px rgba(var(--theme-primary-rgb), .70), 0 0 36px rgba(var(--theme-primary-rgb), .28) !important;
@@ -1586,24 +1540,6 @@
     }
     body.theme-dynamic ::-webkit-scrollbar-thumb:hover { background: rgba(var(--theme-primary-rgb), .46); }
 
-    .theme-site-chip {
-      display:inline-flex; align-items:center; justify-content:center; gap:5px;
-      margin-top:7px; padding:5px 8px; border-radius:999px;
-      max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-      font-size:8px; font-weight:900; letter-spacing:.06em;
-      color:var(--theme-primary);
-      background:rgba(var(--theme-primary-rgb),.08);
-      border:1px solid rgba(var(--theme-primary-rgb),.18);
-      box-shadow:0 0 18px rgba(var(--theme-primary-rgb),.07);
-    }
-
-
-    .site-logo-board{
-      margin-top:12px; padding:12px 10px; border-radius:20px;
-      background:linear-gradient(145deg, rgba(var(--theme-panel-rgb), .48), rgba(var(--theme-bg-rgb), .35));
-      border:1px solid rgba(var(--theme-primary-rgb), .18);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 0 24px rgba(var(--theme-primary-rgb), .08);
-    }
     .site-logo-single, .site-logo-pair{
       display:flex; align-items:center; justify-content:center; gap:18px; min-height:82px;
     }
@@ -1655,10 +1591,6 @@
     .admin-tab.active{
       color:#1a1205; background:linear-gradient(90deg,#fcd34d,#f59e0b);
       border-color:rgba(251,191,36,.45); box-shadow:0 8px 22px rgba(245,158,11,.22);
-    }
-    .admin-tab .admin-tab-dot{
-      width:6px; height:6px; border-radius:50%; background:#34d399;
-      box-shadow:0 0 8px rgba(52,211,153,.8);
     }
     .admin-panel{ display:none; }
     .admin-panel.active{ display:flex; flex-direction:column; gap:16px; animation:overlayIn .2s ease-out both; }
@@ -1734,11 +1666,10 @@
     .activity-meta-bar, #activityMeta, #adminActivityMeta { font-size: 11px; }
     .center-notice-message { font-size: 12px; }
     .center-notice-btn { font-size: 11px; }
-    .theme-site-chip { font-size: 9px; }
     .retry-mini { font-size: 9.5px !important; }
     .activity-source-chip { font-size: 9.5px !important; }
     .activity-page-btn { font-size: 10px !important; }
-    .closing-primary-badge, .closing-feature-badge { font-size: 9px !important; }
+    .closing-primary-badge { font-size: 9px !important; }
     .prediction-count { font-size: 10px !important; }
 
     /* Ganti pemakaian abu-abu redup untuk KONTEN nyata (bukan sekadar hiasan).
@@ -1748,9 +1679,6 @@
     .text-slate-600 { color: var(--text-faint) !important; }
     .text-slate-400 { color: var(--text-muted) !important; }
     .placeholder-slate-600::placeholder, .placeholder-slate-500::placeholder { color: #8593a6 !important; }
-
-    /* Kredit dipindah ke satu tempat saja (footer sidebar). */
-    .app-credit { font-size: 9px; letter-spacing: .18em; color: var(--text-faint); font-weight: 700; }
 
     /* Tombol Salin Cepat — ramping, muat 1 baris di desktop, wrap rapi di HP. */
     .qcopy-btn {
@@ -1971,8 +1899,6 @@
     }
     @keyframes investBarStripe { to { background-position: 28px 0; } }
     #invest-page #investStateBadge .fa-spin { --fa-animation-duration: .9s; }
-  
-
 
 /* =========================================================
    KD GROUP — PROFESSIONAL AGENT CONSOLE V2
@@ -2143,9 +2069,6 @@ body{
 .btn-secondary{
   background:rgba(23,35,54,.78)!important;
   border-color:rgba(148,163,184,.15)!important;
-}
-.btn-danger{
-  background:linear-gradient(100deg,#fb7185,#e11d48)!important;
 }
 table thead th{
   background:#0f1a2b!important;
@@ -2434,9 +2357,13 @@ table tbody tr:hover td{
   }
 }
 @media(max-width:560px){
+  /* Tetap 2 kolom di HP (dulu 1 kolom: 5 kartu angka = 5 layar scroll);
+     kartu ke-5 (Error) dibentangkan penuh. */
   #botNewsStat{
-    grid-template-columns:1fr!important;
+    grid-template-columns:1fr 1fr!important;
   }
+  #botNewsStat>.mini-card:nth-child(5){grid-column:1 / -1}
+  #botNewsStat>.mini-card{min-height:78px!important}
   #bot-page>.glass-card:first-child{
     padding:14px!important;
   }
@@ -2450,9 +2377,6 @@ table tbody tr:hover td{
     transition-duration:.01ms!important;
   }
 }
-
-
-
 
 /* ===== KD GROUP — DASHBOARD OVERVIEW V3 ===== */
 .dashboard-hero{
@@ -2510,33 +2434,44 @@ table tbody tr:hover td{
   .home-stat-card,.dashboard-action{transition:none}
 }
 
-
-/* KD SESSION HEADER / SIDEBAR CLEANUP — live Worker UI */
-.session-header{display:flex;align-items:center;justify-content:space-between;gap:.75rem;min-height:76px;padding:.75rem 1rem!important}
-.session-header-main{min-width:0;display:flex;flex-direction:column;justify-content:center}
-.session-kicker{font-size:10px;font-weight:800;letter-spacing:.22em;color:#94a3b8;text-transform:uppercase}
-.session-admin{margin-top:2px;font-size:14px;line-height:1.1;font-weight:900;letter-spacing:.08em;color:#fff}
-.session-sites{margin-top:2px;font-size:9px;font-weight:800;letter-spacing:.14em;color:#67e8f9;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.session-logos{display:flex;align-items:center;gap:6px;margin-top:5px;height:25px}
-.session-logos img{width:32px;height:25px;object-fit:contain;border-radius:9px;background:rgba(255,255,255,.04);padding:3px;border:1px solid rgba(255,255,255,.08)}
-.session-credit{margin-top:3px;font-size:7px;font-weight:800;letter-spacing:.24em;color:#64748b}
-.session-header-actions{display:flex;align-items:center;gap:10px;flex-shrink:0}
-.session-clock-box{min-width:108px;text-align:right;padding:.4rem .65rem;border-radius:14px;background:rgba(15,23,42,.5);border:1px solid rgba(255,255,255,.06)}
-@media(max-width:1023px){.session-header{align-items:flex-start}.session-header-actions{margin-left:auto}.session-sites{max-width:48vw}}
-@media(max-width:640px){.session-header{min-height:0;padding:.85rem}.session-admin{font-size:15px}.session-sites{font-size:9px;max-width:52vw}.session-logos{height:28px}.session-logos img{width:34px;height:28px}.session-credit{font-size:7px}.session-clock-box{min-width:98px;padding:.45rem .6rem}.session-header-actions .session-clock-box #live-date{font-size:8px}.session-header-actions button{padding:.7rem .8rem}.session-header-actions button span{display:none!important}}
 /* Keep one primary page scroll; sidebar follows page instead of creating a second scroll trap. */
 .sidebar-frozen{position:sticky;top:.75rem;max-height:none!important;overflow:visible!important}
 @media(max-width:1023px){.sidebar-frozen{position:relative;top:auto;max-height:none!important;overflow:visible!important}}
 .nav-solo{margin-top:.15rem}
 .nav-groups{overflow:visible!important}
 
-/* ===== SESSION HEADER V4 ===== */
+/* ===== UX dasar: fokus keyboard, login, logo cadangan, banner offline ===== */
+:focus-visible{outline:2px solid #22d3ee;outline-offset:2px;border-radius:8px}
+:focus:not(:focus-visible){outline:none}
+#login-screen .glass-inner input{background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important;outline:none}
+#login-screen .glass-inner:focus-within{border-color:rgba(34,211,238,.45)!important}
+.login-eye{margin-left:8px;width:34px;height:34px;flex:0 0 34px;display:flex;align-items:center;justify-content:center;border-radius:10px;color:#64748b;transition:color .15s ease,background .15s ease}
+.login-eye:hover{color:#e2e8f0;background:rgba(255,255,255,.05)}
+.login-caps{margin:-6px 4px 0;font-size:10px;font-weight:700;color:#fbbf24}
+.login-caps i{margin-right:4px}
+.kd-logo-fallback{display:flex;align-items:center;justify-content:center;width:100%;height:100%;border-radius:22%;
+  background:linear-gradient(135deg,#22d3ee,#2563eb);color:#020617;font-weight:900;letter-spacing:.04em;font-size:clamp(14px,32%,30px)}
+#login-screen .kd-logo-fallback{font-size:30px}
+.offline-banner{position:fixed;top:0;left:0;right:0;z-index:2000000;padding:8px 16px;text-align:center;font-size:11px;font-weight:800;letter-spacing:.06em;
+  color:#fff7ed;background:linear-gradient(90deg,#b45309,#c2410c);box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.offline-banner i{margin-right:6px}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+
+/* ===== SESSION HEADER — satu-satunya sumber gaya header =====
+   Menggantikan lapisan V4 (di sini), V5 (dulu tertulis di LUAR tag style
+   sehingga tampil sebagai teks lalu dihapus pakai JS) dan V6 (Fixes.html).
+   Desktop/tablet : [status sesi] [website aktif + logo di kanannya] [jam + keluar]
+   HP (<=760px)   : baris 1 [status sesi] [jam + keluar]
+                    baris 2 [website aktif ............ logo] (lebar penuh)
+   Dulu di HP blok website & logo didesak ke kolom sempit di samping jam,
+   sehingga logo meluber menimpa jam. */
 .session-header{
   display:grid!important;
-  grid-template-columns:minmax(150px,1fr) minmax(240px,1.25fr) auto;
+  grid-template-columns:170px minmax(0,1fr) auto;
   align-items:center;
   gap:12px;
   min-height:78px;
+  min-width:0;
   padding:10px 12px!important;
 }
 .session-header-main{
@@ -2548,25 +2483,29 @@ table tbody tr:hover td{
   border-right:1px solid rgba(148,163,184,.08);
 }
 .session-kicker{font-size:10px;font-weight:800;letter-spacing:.18em;color:#94a3b8;text-transform:uppercase}
-.session-admin{margin-top:4px;font-size:15px;line-height:1.1;font-weight:900;letter-spacing:.07em;color:#fff}
+.session-admin{margin-top:4px;font-size:15px;line-height:1.1;font-weight:900;letter-spacing:.07em;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .session-credit{margin-top:7px;font-size:7px;font-weight:800;letter-spacing:.22em;color:#64748b}
+
 .session-sites-box{
   min-width:0;
-  display:flex;
-  flex-direction:column;
-  justify-content:center;
-  padding:4px 12px;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  grid-template-rows:auto auto;
+  align-items:center;
+  column-gap:18px;
+  padding:4px 8px;
 }
-.session-sites-title{font-size:8px;font-weight:800;letter-spacing:.16em;color:#64748b;text-transform:uppercase}
-.session-sites{display:block!important}
-.session-logos{display:flex;align-items:center;gap:10px;margin-top:6px;height:34px}
-.session-logo-item{display:flex;align-items:center;gap:7px;min-width:0}
+.session-sites-title{grid-column:1;grid-row:1;min-width:0;font-size:8px;font-weight:800;letter-spacing:.16em;color:#64748b;text-transform:uppercase}
+.session-sites{grid-column:1;grid-row:2;min-width:0;margin-top:2px;font-size:9px;font-weight:800;letter-spacing:.14em;color:#67e8f9;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.session-logos{grid-column:2;grid-row:1 / span 2;display:flex;align-items:center;gap:8px;height:44px;margin:0;min-width:0}
+.session-logo-item{display:flex;align-items:center;gap:6px;flex:0 0 auto;min-width:0}
 .session-logo-item img{
-  width:38px;height:30px;object-fit:contain;border-radius:9px;
-  background:rgba(255,255,255,.04);padding:3px;
-  border:1px solid rgba(255,255,255,.08);
+  width:46px;height:38px;object-fit:contain;padding:4px;border-radius:10px;
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
 }
 .session-logo-item span{font-size:8px;font-weight:900;letter-spacing:.08em;color:#cbd5e1;white-space:nowrap}
+.session-logo-fallback{width:20px;display:flex;justify-content:center;color:#94a3b8}
+
 .session-header-actions{display:flex;align-items:center;justify-content:flex-end;gap:9px;flex-shrink:0}
 .session-clock-box{
   min-width:132px;text-align:center;padding:7px 10px;border-radius:13px;
@@ -2581,92 +2520,28 @@ table tbody tr:hover td{
   color:#fda4af;font-size:10px;font-weight:900;cursor:pointer;transition:.18s ease;
 }
 .session-logout-btn:hover{background:rgba(244,63,94,.18);border-color:rgba(244,63,94,.35);transform:translateY(-1px)}
+
+@media(max-width:1023px){
+  .session-header{grid-template-columns:160px minmax(0,1fr) auto}
+}
 @media(max-width:760px){
-  .session-header{grid-template-columns:1fr auto;gap:8px}
-  .session-header-main{border-right:0;padding:3px 5px}
-  .session-sites-box{grid-column:1/-1;grid-row:2;padding:5px;border-top:1px solid rgba(148,163,184,.07)}
+  .session-header{grid-template-columns:minmax(0,1fr) auto;gap:8px 10px;min-height:0;padding:10px 12px!important}
+  .session-header-main{grid-column:1;grid-row:1;border-right:0;padding:2px 4px}
+  .session-admin{font-size:15px}
+  .session-credit{margin-top:4px}
   .session-header-actions{grid-column:2;grid-row:1}
-  .session-logos{margin-top:5px}
+  .session-sites-box{grid-column:1 / -1;grid-row:2;column-gap:10px;padding:8px 4px 0;border-top:1px solid rgba(148,163,184,.08)}
+  .session-logos{height:34px;gap:6px}
+  .session-logo-item img{width:38px;height:32px;padding:3px}
   .session-logo-item span{display:none}
-  .session-clock-box{min-width:105px}
+  .session-clock-box{min-width:0;padding:6px 9px}
+  .session-clock-value{font-size:15px}
   .session-clock-date{font-size:7px}
-  .session-logout-btn{width:42px;padding:0;justify-content:center}
+  .session-logout-btn{width:44px;height:44px;padding:0;justify-content:center}
   .session-logout-btn span{display:none}
 }
-
+@media(max-width:360px){
+  .session-clock-label{display:none}
+  .session-clock-value{font-size:14px;letter-spacing:.04em}
+}
 </style>
-
-
-/* KD HEADER LAYOUT V5 */
-/* Website aktif dipindahkan ke area kosong di tengah header.
-   Logo website berada di sisi kanan teks dan dibuat sedikit lebih besar. */
-.session-header{
-  grid-template-columns:150px minmax(360px,1fr) auto !important;
-}
-.session-sites-box{
-  display:grid !important;
-  grid-template-columns:minmax(0,1fr) auto !important;
-  grid-template-rows:auto auto !important;
-  align-items:center !important;
-  column-gap:14px !important;
-  row-gap:1px !important;
-  padding:4px 8px !important;
-}
-.session-sites-title{
-  grid-column:1 !important;
-  grid-row:1 !important;
-  margin:0 !important;
-}
-.session-sites{
-  grid-column:1 !important;
-  grid-row:2 !important;
-  margin:1px 0 0 !important;
-  max-width:none !important;
-}
-.session-logos{
-  grid-column:2 !important;
-  grid-row:1 / span 2 !important;
-  align-self:center !important;
-  margin:0 !important;
-  height:42px !important;
-  gap:9px !important;
-}
-.session-logo-item img,
-.session-logos img{
-  width:46px !important;
-  height:36px !important;
-  padding:3px !important;
-  border-radius:10px !important;
-}
-@media(max-width:1023px){
-  .session-header{
-    grid-template-columns:150px minmax(300px,1fr) auto !important;
-  }
-}
-@media(max-width:760px){
-  .session-header{
-    grid-template-columns:minmax(145px,1fr) auto !important;
-    gap:8px !important;
-  }
-  .session-header-main{
-    border-right:0 !important;
-    padding:3px 5px !important;
-  }
-  .session-sites-box{
-    grid-column:1 !important;
-    grid-row:1 !important;
-    padding:3px 4px !important;
-    border-top:0 !important;
-    display:grid !important;
-    grid-template-columns:minmax(0,1fr) auto !important;
-    grid-template-rows:auto auto !important;
-    column-gap:8px !important;
-  }
-  .session-sites-title{grid-column:1 !important;grid-row:1 !important;font-size:7px !important}
-  .session-sites{grid-column:1 !important;grid-row:2 !important;font-size:8px !important}
-  .session-logos{grid-column:2 !important;grid-row:1 / span 2 !important;height:36px !important;gap:5px !important}
-  .session-logo-item img,
-  .session-logos img{width:40px !important;height:32px !important}
-  .session-header-actions{grid-column:2 !important;grid-row:1 !important}
-}
-

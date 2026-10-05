@@ -1,0 +1,30 @@
+name: Cek panel-worker (PR)
+
+# Jalan di setiap Pull Request yang menyentuh panel-worker: typecheck, unit
+# test, dan build UI (termasuk cek sintaks semua <script> inline). Tidak
+# men-deploy apa pun dan tidak butuh secret -- murni pengaman sebelum merge.
+on:
+  pull_request:
+    paths:
+      - "panel-worker/**"
+      - "migration/**"
+      - ".github/workflows/check.yml"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: panel-worker/package-lock.json
+      - name: Install dependencies
+        working-directory: panel-worker
+        run: npm ci
+      - name: Typecheck + unit test + build UI
+        working-directory: panel-worker
+        run: npm run check

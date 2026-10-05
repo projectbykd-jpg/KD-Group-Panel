@@ -4,6 +4,7 @@
 import { CORS_HEADERS, json } from "./lib/respond";
 import { loadSession, migrateKvSessionsOnce, pruneExpiredSessions } from "./lib/session";
 import { getTurso } from "./lib/turso";
+import { constEq } from "./lib/crypto";
 import { checkLogin, logout, resumeSession } from "./api/auth";
 import { getBootstrapData, getDashboard } from "./api/dashboard";
 import { logClientActivity } from "./api/activity";
@@ -91,6 +92,21 @@ import {
 type Handler = (env: Env, body: Record<string, unknown>) => Promise<unknown>;
 const s = (v: unknown) => String(v ?? "");
 
+function readCookie(request: Request, name: string): string {
+	const raw = request.headers.get("cookie") || "";
+	for (const part of raw.split(";")) {
+		const i = part.indexOf("=");
+		if (i > 0 && part.slice(0, i).trim() === name) {
+			try {
+				return decodeURIComponent(part.slice(i + 1).trim());
+			} catch {
+				return "";
+			}
+		}
+	}
+	return "";
+}
+
 // Pangkas Activity Log sekali per hari WIB (dikunci lewat KV).
 // Pangkas Activity Log sekali per hari WIB (dikunci lewat KV).
 async function dailyPrune(env: Env): Promise<number | "skip"> {
@@ -109,7 +125,7 @@ async function dailyPrune(env: Env): Promise<number | "skip"> {
 
 const ROUTES: Record<string, Handler> = {
 	// auth
-	checkLogin: (env, b) => checkLogin(env, s(b.username), s(b.password)),
+	checkLogin: (env, b) => checkLogin(env, s(b.username), s(b.password), s(b.__ip)),
 	resumeSession: (env, b) => resumeSession(env, s(b.token)),
 	logout: (env, b) => logout(env, s(b.token)),
 	logoutSession: (env, b) => logout(env, s(b.token)),
@@ -274,6 +290,8 @@ export default {
 				return json({ success: false, message: "Body JSON tidak valid." }, 400);
 			}
 			body.__origin = url.origin;
+			// Ditimpa server (tidak bisa dipalsukan dari body) -- dipakai pembatas login per IP.
+			body.__ip = request.headers.get("cf-connecting-ip") || "";
 			const action = s(body.action);
 			const handler = ROUTES[action];
 			if (!handler) return json({ success: false, message: "Aksi tidak dikenal: " + action }, 404);
@@ -309,6 +327,14 @@ export default {
 		// di-fetch langsung dari browser untuk disalin ke clipboard. Worker ambil
 		// dulu di sisi server (bebas CORS), lalu diteruskan sebagai same-origin.
 		if (url.pathname === "/img") {
+			// Wajib login: tanpa ini /img jadi open-proxy publik (siapa pun bisa
+			// memakai Worker ini utk mengambil URL apa pun). Sesi dibaca dari cookie
+			// `kd_session` yang dipasang panel saat login (same-origin, ikut otomatis
+			// di <img src> maupun fetch), jadi token tidak perlu ditaruh di URL.
+			const sessToken = readCookie(request, "kd_session");
+			if (!sessToken || !(await loadSession(env, sessToken))) {
+				return json({ success: false, message: "Sesi tidak valid. Silakan login ulang." }, 401);
+			}
 			const target = url.searchParams.get("url") || "";
 			if (!/^https?:\/\//i.test(target)) return json({ success: false, message: "url tidak valid" }, 400);
 			// Banyak situs berita menolak User-Agent "bot" walau cuma diakses server-side
@@ -337,7 +363,7 @@ export default {
 					// tidak kena blokir yang sama seperti IP Cloudflare Worker).
 					return Response.redirect(target, 302);
 				}
-				return new Response(r.body, { headers: { "content-type": ct, "cache-control": "public, max-age=3600", ...CORS_HEADERS } });
+				return new Response(r.body, { headers: { "content-type": ct, "cache-control": "private, max-age=3600" } });
 			} catch {
 				return Response.redirect(target, 302);
 			}
@@ -391,83 +417,10 @@ export default {
 		// Panggil tiap menit dari cron-job.org / GitHub Actions / UptimeRobot:
 		//   https://panel-worker.projectbykd.workers.dev/__cron?key=<CRON_KEY>&job=all
 		if (url.pathname === "/__cron") {
-			if (!env.CRON_KEY || url.searchParams.get("key") !== env.CRON_KEY) {
+			if (!env.CRON_KEY || !constEq(url.searchParams.get("key") || "", env.CRON_KEY)) {
 				return json({ ok: false, message: "unauthorized" }, 401);
 			}
 			const job = url.searchParams.get("job") || "all";
-
-			// Cek koneksi Turso: /__cron?key=...&job=tursoping
-			if (job === "tursoping") {
-				try {
-					const t0 = Date.now();
-					const r = await getTurso(env).prepare(`SELECT COUNT(*) AS n FROM invest_config`).first<{ n: number }>();
-					const r2 = await getTurso(env).prepare(`SELECT COUNT(*) AS n FROM lap_result`).first<{ n: number }>();
-					return json({ ok: true, ms: Date.now() - t0, invest_config: r?.n ?? null, lap_result: r2?.n ?? null });
-				} catch (e) {
-					return json({ ok: false, error: e instanceof Error ? e.message : String(e), stack: e instanceof Error ? e.stack : undefined }, 500);
-				}
-			}
-
-			// Diagnosa sementara: /__cron?key=...&job=debug&user=<username>&path=<path>
-			//   atau inline: &base=<url>&cookie=<PHPSESSID=...>
-			if (job === "debug") {
-				let baseUrl = url.searchParams.get("base") || "";
-				let cookie = url.searchParams.get("cookie") || "";
-				if (!baseUrl || !cookie) {
-					const dbgUser = url.searchParams.get("user") || "Admin";
-					const cfgRow = await getTurso(env).prepare(
-						`SELECT base_url, phpsessid, koderedis, cookie_extra FROM invest_config WHERE username = ?`,
-					)
-						.bind(dbgUser)
-						.first<Record<string, string>>();
-					if (!cfgRow) return json({ ok: false, message: "no invest_config for " + dbgUser });
-					baseUrl = String(cfgRow.base_url || "");
-					cookie = cfgRow.cookie_extra
-						? cfgRow.cookie_extra
-						: "PHPSESSID=" + cfgRow.phpsessid + (cfgRow.koderedis ? "; koderedis=" + cfgRow.koderedis : "");
-				}
-				baseUrl = baseUrl.split("#")[0].split("?")[0];
-				if (!baseUrl.endsWith("/")) baseUrl += "/";
-				const paths = (url.searchParams.get("path") || "admin_invoice13.php?psr=p33190").split("|");
-				const results: unknown[] = [];
-				for (const p of paths) {
-					try {
-						const r = await fetch(baseUrl + p, {
-							headers: {
-								Cookie: cookie,
-								"User-Agent":
-									"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36",
-							},
-							redirect: "manual",
-						});
-						const body = await r.text();
-						const trCount = (body.match(/<tr[\s>]/gi) || []).length;
-						const pageNums = (body.match(/[?&]page=(\d+)/g) || []).map((x) => parseInt(x.split("=")[1], 10));
-						const maxPage = pageNums.length ? Math.max(...pageNums) : 1;
-						results.push({
-							url: baseUrl + p,
-							status: r.status,
-							location: r.headers.get("location"),
-							len: body.length,
-							trCount,
-							maxPage,
-							loginPage: /entered_login|vb_login_md5password|silakan login|please login/i.test(body),
-							hasPeriode: /name=["']?periode["']?[^>]*value=["'](\d+)["']/i.test(body),
-							snippet: (() => {
-								const find = url.searchParams.get("find");
-								if (find) {
-									const i = body.toLowerCase().indexOf(find.toLowerCase());
-									return i < 0 ? "[not found: " + find + "]" : body.slice(Math.max(0, i - 200), i + 1400);
-								}
-								return url.searchParams.get("full") ? body.slice(0, 4000) : body.slice(0, 300);
-							})(),
-						});
-					} catch (e) {
-						results.push({ url: baseUrl + p, error: e instanceof Error ? e.message : String(e) });
-					}
-				}
-				return json({ ok: true, baseUrl, cookiePreview: cookie.slice(0, 20) + "…", results });
-			}
 
 			// PERNAH DICOBA: balas cron SEGERA lalu lanjutkan botNewsRun via
 			// ctx.waitUntil supaya cron eksternal tidak pernah menunggu lama.
@@ -566,12 +519,6 @@ export default {
 				if (job === "disablegnews") {
 					out.disabled = await disableGnewsSources(env);
 				}
-				// One-shot: sumber Liputan6 Bola sempat disuntik dgn category='olahraga'
-				// sebelum "bola" jadi kategori tersendiri -- perbaiki jadi 'bola'.
-				if (job === "fixbolacat") {
-					const r = await getTurso(env).prepare(`UPDATE news_source SET category='bola' WHERE url LIKE '%rss/bola%'`).run();
-					out.fixed = r.meta.changes;
-				}
 				// Diagnosa sementara: lihat semua sumber terdaftar (nama/kind/url asli)
 				// supaya tahu persis kenapa filter "kompas" di job disablegnews tidak
 				// menemukan apa pun.
@@ -607,25 +554,6 @@ export default {
 							)
 							.all()
 					).results;
-				}
-				// One-shot: sumber Kompas sudah nonaktif duluan, TAPI ratusan artikel
-				// yang sudah kelanjur ditarik sebelumnya (status='new') tetap akan terus
-				// diproses selama belum dibersihkan -- nonaktifkan source cuma menghentikan
-				// TARIKAN BARU, tidak menyentuh backlog yang sudah ada.
-				if (job === "skipkompasqueue") {
-					const r1 = await getTurso(env)
-						.prepare(`UPDATE news_article SET status='skipped' WHERE status='new' AND source LIKE '%ompas%'`)
-						.run();
-					// Template FB (fbTemplateGenerate) TIDAK dibatasi status='new' -- dia
-					// jalan lewat kolom terpisah fb_direct_posted_at='' yg mencakup
-					// SEMUA artikel lama (termasuk yg sudah lama posting ke Blogger),
-					// jadi backlog Kompas juga harus dibersihkan dari SINI supaya tidak
-					// terus muncul di antrean Template FB.
-					const r2 = await getTurso(env)
-						.prepare(`UPDATE news_article SET fb_direct_posted_at='skip' WHERE fb_direct_posted_at='' AND source LIKE '%ompas%'`)
-						.run();
-					out.skippedMain = r1.meta.changes;
-					out.skippedFbTemplate = r2.meta.changes;
 				}
 			} catch (e) {
 				out.ok = false;

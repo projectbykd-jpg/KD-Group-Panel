@@ -4,10 +4,11 @@
 // - Scripts.html: <script>...</script>  (uses google.script.run)
 //
 // We inline Styles + Scripts and prepend a google.script.run -> fetch('/api') shim.
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import vm from "node:vm";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
@@ -101,6 +102,7 @@ const shim = `<script>
 (function () {
   var API = "/api";
   var ARG_MAP = ${JSON.stringify(ARG_MAP)};
+  var SESSION_EXEMPT = { checkLogin: 1, resumeSession: 1, getBootstrapData: 1, logout: 1, logoutSession: 1 };
   function call(fn, args, onOk, onErr) {
     var body = { action: fn };
     var names = ARG_MAP[fn];
@@ -109,20 +111,38 @@ const shim = `<script>
     } else {
       body._args = Array.prototype.slice.call(args);
     }
+    // Batas waktu: tanpa ini request yang menggantung (jaringan HP putus di
+    // tengah jalan) membuat tombol "MENYIMPAN..." berputar selamanya.
+    // 180 dtk sengaja longgar -- tarik laporan / proses BOT bisa puluhan detik.
+    var ctrl = typeof AbortController === "function" ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 180000) : null;
     fetch(API, {
       method: "POST",
       credentials: "same-origin",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
+      signal: ctrl ? ctrl.signal : undefined,
     })
       .then(function (r) { return r.text(); })
       .then(function (t) {
+        if (timer) clearTimeout(timer);
         var data;
         try { data = t ? JSON.parse(t) : null; } catch (e) { data = t; }
+        // Sesi ditolak server -> beri tahu panel sekali (lihat listener
+        // 'kd:session-expired' di Scripts.html). Endpoint login/bootstrap
+        // punya penanganan sendiri, jadi dikecualikan.
+        if (data && data.success === false && !SESSION_EXEMPT[fn] &&
+            /sesi tidak valid|telah berakhir|akun tidak ditemukan|akun sedang|akun terkunci/i.test(String(data.message || ""))) {
+          try { window.dispatchEvent(new CustomEvent("kd:session-expired", { detail: String(data.message) })); } catch (e) {}
+        }
         (onOk || function () {})(data);
       })
       .catch(function (e) {
-        (onErr || function () {})(e instanceof Error ? e : new Error(String(e)));
+        if (timer) clearTimeout(timer);
+        var msg = e && e.name === "AbortError"
+          ? "Server tidak merespons (lebih dari 3 menit). Coba lagi."
+          : (navigator.onLine === false ? "Tidak ada koneksi internet." : "Tidak dapat menghubungi server. Periksa koneksi lalu coba lagi.");
+        (onErr || function () {})(new Error(msg));
       });
   }
   function makeRunner(onOk, onErr) {
@@ -149,8 +169,10 @@ const shim = `<script>
 function buildTailwind() {
 	const cli = resolve(root, "node_modules", "tailwindcss", "lib", "cli.js");
 	if (!existsSync(cli)) {
-		console.warn("WARNING: tailwindcss belum ter-install -> pakai Play CDN (lebih lambat). Jalankan `npm install`.");
-		return null;
+		// Dulu jatuh diam-diam ke Tailwind Play CDN (compiler runtime di browser
+		// -> panel berat). Sekarang build GAGAL supaya itu tidak pernah ter-deploy.
+		console.error("ERROR: tailwindcss belum ter-install. Jalankan `npm ci` dulu.");
+		process.exit(1);
 	}
 	const outCss = resolve(root, "public", "_tw.css");
 	mkdirSync(dirname(outCss), { recursive: true });
@@ -163,28 +185,57 @@ function buildTailwind() {
 }
 const tailwindCss = buildTailwind();
 
-let out = indexHtml;
-if (tailwindCss) {
-	out = out.replace(/\s*<link rel="preconnect" href="https:\/\/cdn\.tailwindcss\.com">/, "");
-	out = out.replace(/\s*<script src="https:\/\/cdn\.tailwindcss\.com"><\/script>/, "");
-	out = out.replace(
-		/<\?!?=?\s*include\(\s*['"]Styles['"]\s*\)\s*;?\s*\?>/,
-		stylesHtml + `\n<style id="tw-base">\n${tailwindCss}\n</style>\n<style id="kd-professional-redesign">\n${redesignCss}\n</style>`,
-	);
-} else {
-	out = out.replace(
-		/<\?!?=?\s*include\(\s*['"]Styles['"]\s*\)\s*;?\s*\?>/,
-		stylesHtml + `\n<style id="kd-professional-redesign">\n${redesignCss}\n</style>`,
-	);
+// Partial yang di-inline (Styles/Fixes/LiveResultFix/Scripts) hanya boleh berisi
+// blok <style>/<script> + komentar HTML. Teks lain di luar tag itu -- mis. CSS
+// yang tertulis sesudah </style> -- tampil mentah di halaman. Pernah terjadi
+// (header "V5") dan dulu "diperbaiki" dengan JS yang menghapus teksnya.
+for (const [name, html] of [["Styles.html", stylesHtml], ["Fixes.html", fixesHtml], ["LiveResultFix.html", liveResultFixHtml], ["Scripts.html", scriptsHtml]]) {
+	const stray = html
+		.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+		.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+		.replace(/<!--[\s\S]*?-->/g, "")
+		.trim();
+	if (stray) {
+		console.error(`ERROR: ui-src/${name} punya teks di luar <style>/<script> (akan tampil mentah di halaman):\n  ${stray.slice(0, 160)}`);
+		process.exit(1);
+	}
 }
-out = out.replace(/<\?!?=?\s*include\(\s*['"]Scripts['"]\s*\)\s*;?\s*\?>/, shim + "\n" + scriptsHtml + "\n" + fixesHtml + "\n" + liveResultFixHtml);
+
+let out = indexHtml;
+// Tailwind di-inline SESUDAH Styles.html: kalau sebelum, CSS custom menang atas
+// utility Tailwind dan layout (mis. header) berantakan.
+out = out.replace(
+	/<\?!?=?\s*include\(\s*['"]Styles['"]\s*\)\s*;?\s*\?>/,
+	() => stylesHtml + `\n<style id="tw-base">\n${tailwindCss}\n</style>\n<style id="kd-professional-redesign">\n${redesignCss}\n</style>`,
+);
+out = out.replace(/<\?!?=?\s*include\(\s*['"]Scripts['"]\s*\)\s*;?\s*\?>/, () => shim + "\n" + scriptsHtml + "\n" + fixesHtml + "\n" + liveResultFixHtml);
 out = out.replace(/<\?!?=?[\s\S]*?\?>/g, "");
 
 if (/<\?/.test(out) || /include\(/.test(out)) {
-	console.warn("WARNING: sisa scriptlet Apps Script masih ada di output.");
+	console.error("ERROR: sisa scriptlet Apps Script masih ada di output.");
+	process.exit(1);
+}
+
+// Cek sintaks SEMUA <script> inline sebelum ditulis: satu koma/kurung yang
+// salah di Scripts.html dulu baru ketahuan sesudah deploy (panel blank).
+// Sekarang build langsung gagal dan menyebut baris yang rusak.
+let scriptNo = 0;
+for (const m of out.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)) {
+	scriptNo++;
+	try {
+		new vm.Script(m[1], { filename: `inline-script-${scriptNo}.js` });
+	} catch (e) {
+		const line = out.slice(0, m.index).split("\n").length;
+		console.error(`ERROR: sintaks JS rusak di <script> inline #${scriptNo} (public/index.html sekitar baris ${line}): ${e.message}`);
+		console.error(String(e.stack || "").split("\n").slice(0, 4).join("\n"));
+		process.exit(1);
+	}
 }
 
 const outDir = resolve(root, "public");
 mkdirSync(outDir, { recursive: true });
+// Aset gambar milik panel (logo, favicon) disimpan di ui-src/ (public/ di-ignore
+// karena hasil build) lalu disalin ke sini -- tidak lagi bergantung ke i.ibb.co.
+for (const f of ["logo.png", "favicon.png"]) copyFileSync(resolve(root, "ui-src", f), resolve(outDir, f));
 writeFileSync(resolve(outDir, "index.html"), out, "utf8");
 console.log("OK -> public/index.html (" + out.length + " bytes)");

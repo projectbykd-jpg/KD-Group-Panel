@@ -92,21 +92,6 @@
   setTimeout(install, 0);
   setTimeout(install, 300);
 
-  /* The V5 header patch was appended after </style> in Styles.html, so its CSS
-     became a visible text node in the page. Remove only that leaked legacy block;
-     the valid V6 <style> in Fixes.html remains untouched. */
-  function removeLeakedHeaderCss() {
-    var nodes = document.body ? document.body.childNodes : [];
-    for (var i = nodes.length - 1; i >= 0; i--) {
-      var n = nodes[i];
-      if (n.nodeType !== 3) continue;
-      var t = String(n.nodeValue || '');
-      if (/KD HEADER LAYOUT V5|\.session-header\{\s*grid-template-columns:150px/.test(t)) {
-        n.parentNode.removeChild(n);
-      }
-    }
-  }
-
   /* Re-apply Live Chat visibility after the login profile is restored. The
      permission rule is unchanged: only ADMIN/OPERATOR may use the panel menu.
      This fixes the startup race where the menu was hidden before the profile
@@ -124,7 +109,6 @@
   }
 
   function bootUiRepairs() {
-    removeLeakedHeaderCss();
     syncLiveChatMenu();
   }
 

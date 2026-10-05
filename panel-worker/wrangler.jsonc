@@ -43,9 +43,10 @@
 			"deleted_classes": ["LivechatBotDO"]
 		}
 	],
+	// CRON_KEY BUKAN di sini lagi -- disimpan sebagai secret Cloudflare (lihat
+	// src/secrets.d.ts & langkah "Sinkron secret" di .github/workflows/deploy.yml).
 	"vars": {
 		"TZ_OFFSET_HOURS": "7",
-		"CRON_KEY": "2ivwrtzgczxuwe1w637k0l4ki9g4hthh2m64jnrz",
 		"PUBLIC_URL": "https://panel-worker.projectbykd.workers.dev",
 		"GH_REPO": "projectbykd-jpg/daygroup-scraper"
 	},

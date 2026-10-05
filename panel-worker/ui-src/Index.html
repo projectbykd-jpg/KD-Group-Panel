@@ -10,14 +10,16 @@
     html.kd-booting { background: #060a15 !important; }
   </style>
   <script>document.documentElement.classList.add('kd-booting');</script>
-  <link rel="icon" type="image/png" href="https://i.ibb.co/r203LHQm/3b266ede-033f-4c5b-a125-77b76028439f.png">
-  <!-- Buka koneksi ke CDN lebih awal supaya aset (Tailwind, ikon, font) mulai diunduh
-       tanpa nunggu antrean DNS/TLS satu per satu. Aman: cuma "pemanasan" koneksi. -->
-  <link rel="preconnect" href="https://cdn.tailwindcss.com">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="apple-touch-icon" href="/logo.png">
+  <!-- Buka koneksi ke CDN lebih awal supaya aset (ikon, font) mulai diunduh
+       tanpa nunggu antrean DNS/TLS satu per satu. Tailwind TIDAK dari CDN:
+       di-compile saat build (scripts/build-ui.mjs). -->
+  <meta name="theme-color" content="#060a15">
   <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <script src="https://cdn.tailwindcss.com"></script>
   <script>
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
@@ -36,11 +38,14 @@
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/themes/dark.css">
-  <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
+  <!-- defer: flatpickr baru dipakai saat halaman Laporan dibuka (dicek window.flatpickr), jadi tidak perlu menahan render awal. -->
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js" defer></script>
   <?!= include('Styles'); ?>
 </head>
 <body class="p-3 sm:p-6 min-h-screen flex flex-col items-center">
+
+  <div id="offline-banner" class="offline-banner" role="status" hidden><i class="fa-solid fa-wifi"></i>Tidak ada koneksi internet. Data &amp; pengiriman akan gagal sampai koneksi kembali.</div>
 
   <!-- LOGIN SCREEN -->
   <div id="login-screen" class="w-full max-w-md glass-card rounded-[2.5rem] p-8 sm:p-10 flex flex-col gap-6 relative overflow-hidden border-t-2 border-cyan-500/60 shadow-2xl fade-in my-auto">
@@ -52,7 +57,7 @@
            tanpa kotak/latar tambahan -- lambang bundar + teks di bawahnya tetap
            utuh, tidak terpotong seperti kalau pakai object-cover. -->
       <div class="w-24 h-24 mx-auto mb-5 flex items-center justify-center">
-        <img src="https://i.ibb.co/r203LHQm/3b266ede-033f-4c5b-a125-77b76028439f.png" width="96" height="96" decoding="async" referrerpolicy="no-referrer" alt="KD-Group" class="w-full h-full object-contain drop-shadow-[0_0_15px_rgba(34,211,238,0.5)]">
+        <img src="/logo.png" width="96" height="96" decoding="async" fetchpriority="high" alt="KD-Group" onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('span'),{className:'kd-logo-fallback',textContent:'KD'}))" class="w-full h-full object-contain drop-shadow-[0_0_15px_rgba(34,211,238,0.5)]">
       </div>
       <h2 class="text-2xl font-extrabold neon-cyan tracking-tight">SECURE ACCESS</h2>
       <p class="text-[11px] text-slate-400 font-bold tracking-[0.3em] mt-1.5">KD GROUP PANEL SYSTEM</p>
@@ -61,17 +66,19 @@
     <div class="flex flex-col gap-4 relative z-10">
       <div class="glass-inner rounded-2xl flex items-center px-4 py-3.5 border border-white/5 transition-all">
         <i class="fas fa-user text-cyan-400 mr-3.5 text-sm"></i>
-        <input type="text" id="user" placeholder="Username" class="bg-transparent outline-none w-full text-sm font-medium text-white placeholder-slate-500">
+        <input type="text" id="user" name="username" placeholder="Username" autocomplete="username" autocapitalize="none" spellcheck="false" aria-label="Username" class="bg-transparent outline-none w-full text-sm font-medium text-white placeholder-slate-500">
       </div>
       <div class="glass-inner rounded-2xl flex items-center px-4 py-3.5 border border-white/5 transition-all">
         <i class="fas fa-lock text-pink-400 mr-3.5 text-sm"></i>
-        <input type="password" id="pass" placeholder="Password" class="bg-transparent outline-none w-full text-sm font-medium text-white placeholder-slate-500">
+        <input type="password" id="pass" name="password" placeholder="Password" autocomplete="current-password" aria-label="Password" aria-describedby="caps-warn" class="bg-transparent outline-none w-full text-sm font-medium text-white placeholder-slate-500">
+        <button type="button" id="passToggle" onclick="togglePasswordVisibility()" class="login-eye" aria-label="Tampilkan password" aria-pressed="false"><i class="fa-solid fa-eye"></i></button>
       </div>
+      <p id="caps-warn" class="login-caps" hidden><i class="fa-solid fa-triangle-exclamation"></i> Caps Lock aktif</p>
       <button onclick="handleLogin()" id="btnLogin" class="w-full py-4 bg-gradient-to-r from-cyan-400 via-cyan-500 to-blue-600 hover:from-cyan-300 hover:to-blue-500 rounded-2xl font-extrabold text-xs tracking-[0.25em] transition-all active:scale-95 shadow-lg shadow-cyan-500/30 text-slate-950 cursor-pointer">
         LOGIN
       </button>
     </div>
-    <p id="login-err" class="text-[11px] text-rose-400 text-center font-semibold h-4 relative z-10"></p>
+    <p id="login-err" class="text-[11px] text-rose-400 text-center font-semibold min-h-4 relative z-10" role="alert" aria-live="assertive"></p>
   </div>
 
   <!-- MAIN WRAPPER -->
@@ -82,7 +89,7 @@
       <div class="flex flex-row lg:flex-col items-center lg:items-stretch gap-4 w-full">
         <div class="flex items-center gap-3 px-1.5 pb-3.5 mb-1 border-b border-white/[0.06] w-full">
           <div class="w-11 h-11 flex items-center justify-center shrink-0">
-            <img src="https://i.ibb.co/r203LHQm/3b266ede-033f-4c5b-a125-77b76028439f.png" width="44" height="44" decoding="async" referrerpolicy="no-referrer" alt="KD-Group" class="w-full h-full object-contain">
+            <img src="/logo.png" width="44" height="44" decoding="async" alt="KD-Group" onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('span'),{className:'kd-logo-fallback',textContent:'KD'}))" class="w-full h-full object-contain">
           </div>
           <div class="hidden lg:block overflow-hidden">
             <h3 class="text-[13px] font-extrabold text-white tracking-wide truncate leading-tight">KD-GROUP</h3>
@@ -547,7 +554,7 @@
         <div class="glass-card rounded-3xl p-5 sm:p-6 flex flex-col gap-4">
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <div class="text-[9px] font-extrabold tracking-[.16em] text-cyan-400">SMART ACTIVITY CENTER V5</div>
+              <div class="text-[9px] font-extrabold tracking-[.16em] text-cyan-400">ACTIVITY CENTER</div>
               <h2 class="text-lg font-extrabold mt-1">RIWAYAT AKTIVITAS</h2>
               <p id="activityScopeText" class="text-xs text-slate-400 mt-1">Riwayat akun hari ini.</p>
             </div>
@@ -707,7 +714,7 @@
           <div class="admin-panel" data-admin-panel="users">
           <div class="mini-card flex flex-col gap-4">
             <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
-              <div><div class="font-extrabold text-base">Kelola Users</div><div class="text-xs text-slate-400 mt-1">Tambah, edit, nonaktifkan, atau hapus akun. Perubahan langsung tersimpan ke sheet Users.</div></div>
+              <div><div class="font-extrabold text-base">Kelola Users</div><div class="text-xs text-slate-400 mt-1">Tambah, edit, nonaktifkan, atau hapus akun. Perubahan langsung tersimpan ke database panel.</div></div>
               <div class="flex gap-2"><button onclick="loadUsers(true)" class="glass-inner px-4 py-3 rounded-2xl text-xs font-bold"><i class="fa-solid fa-rotate mr-2"></i>REFRESH</button><button onclick="openUserModal()" class="bg-gradient-to-r from-cyan-400 to-blue-600 text-slate-950 px-4 py-3 rounded-2xl text-xs font-extrabold"><i class="fa-solid fa-user-plus mr-2"></i>TAMBAH USER</button></div>
             </div>
             <div class="flex flex-col sm:flex-row gap-3"><input id="userSearch" oninput="filterUserRows()" class="glass-inner rounded-2xl px-4 py-3 text-xs flex-1" placeholder="Cari username, nama, website, role..."><select id="userRoleFilter" onchange="filterUserRows()" class="glass-inner rounded-2xl px-4 py-3 text-xs"><option value="">Semua Role</option><option>ADMIN</option><option>OPERATOR</option><option>VIEWER</option><option>BOT</option></select><select id="userStatusFilter" onchange="filterUserRows()" class="glass-inner rounded-2xl px-4 py-3 text-xs"><option value="">Semua Status</option><option>AKTIF</option><option>NONAKTIF</option><option>TERKUNCI</option></select></div>
@@ -931,7 +938,7 @@
                   <input id="botRunCount" type="number" min="1" placeholder="Semua" class="glass-inner rounded-xl px-3 py-2.5 text-slate-100 text-xs font-bold w-24" title="Kosongkan = pakai 'Artikel per proses' di Setting & jalan sampai antrean habis.">
                 </label>
                 <button onclick="botNewsRunGithub()" class="bg-gradient-to-r from-purple-400 to-fuchsia-500 text-slate-950 text-xs font-bold px-4 py-2.5 rounded-xl" title="Diproses lewat GitHub Actions -- tidak kena limit 'Too many subrequests'. Hasilnya masuk 1-2 menit kemudian, bukan instan -- tinggal tunggu, progress kelihatan di bawah."><i class="fa-brands fa-github mr-1"></i>PROSES</button>
-                <button onclick="loadBotNews()" class="btn-secondary text-xs font-bold px-4 py-2.5 rounded-xl" title="Refresh angka & status"><i class="fa-solid fa-rotate"></i></button>
+                <button onclick="loadBotNews()" class="btn-secondary text-xs font-bold px-4 py-2.5 rounded-xl" title="Refresh angka & status" aria-label="Refresh angka & status"><i class="fa-solid fa-rotate"></i></button>
               </div>
             </div>
 
@@ -1226,7 +1233,7 @@
   <!-- MODAL KELOLA USER -->
   <div id="userEditModal" class="modal-shell" style="display:none" role="dialog" aria-modal="true" aria-labelledby="userModalTitle">
     <div class="glass-card popup-card w-full max-w-3xl rounded-[2rem] p-6 flex flex-col gap-5 relative max-h-[92vh] overflow-y-auto">
-      <div class="flex items-start justify-between gap-4"><div><div class="text-[10px] text-amber-400 font-bold tracking-widest">ADMIN • USER MANAGEMENT</div><h3 id="userModalTitle" class="text-lg font-extrabold mt-1">Tambah User</h3><p class="text-xs text-slate-400 mt-1">Data akan langsung diperbarui di sheet Users.</p></div><button onclick="closeUserModal()" class="w-10 h-10 rounded-xl glass-inner"><i class="fa-solid fa-xmark"></i></button></div>
+      <div class="flex items-start justify-between gap-4"><div><div class="text-[10px] text-amber-400 font-bold tracking-widest">ADMIN • USER MANAGEMENT</div><h3 id="userModalTitle" class="text-lg font-extrabold mt-1">Tambah User</h3><p class="text-xs text-slate-400 mt-1">Data akan langsung diperbarui di database panel.</p></div><button onclick="closeUserModal()" class="w-10 h-10 rounded-xl glass-inner" aria-label="Tutup"><i class="fa-solid fa-xmark"></i></button></div>
       <input type="hidden" id="userOriginalUsername">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
         <label class="text-xs text-slate-400">Username<input id="editUsername" class="glass-inner rounded-2xl px-4 py-3 text-white w-full mt-1" autocomplete="off"></label>
@@ -1244,7 +1251,7 @@
         <label class="glass-inner rounded-2xl p-4 flex items-center gap-3 text-xs font-bold"><input id="editPanelz" type="checkbox" class="w-4 h-4"> Panel-Z</label>
       </div>
       <div id="userModalError" class="text-xs text-rose-300 hidden"></div>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3"><button onclick="closeUserModal()" class="glass-inner py-3.5 rounded-2xl text-xs font-bold">BATAL</button><button id="saveUserBtn" onclick="saveUserFromModal()" class="bg-gradient-to-r from-emerald-400 to-teal-500 text-slate-950 py-3.5 rounded-2xl text-xs font-extrabold"><i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN KE SHEET USERS</button></div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3"><button onclick="closeUserModal()" class="glass-inner py-3.5 rounded-2xl text-xs font-bold">BATAL</button><button id="saveUserBtn" onclick="saveUserFromModal()" class="bg-gradient-to-r from-emerald-400 to-teal-500 text-slate-950 py-3.5 rounded-2xl text-xs font-extrabold"><i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN USER</button></div>
     </div>
   </div>
 
@@ -1257,7 +1264,7 @@
           <h3 id="siteModalTitle" class="text-lg font-extrabold mt-1">Tambah Website</h3>
           <p class="text-xs text-slate-400 mt-1">Kolom kosong berarti fitur itu tidak dipakai untuk website ini.</p>
         </div>
-        <button onclick="closeSiteModal()" class="w-10 h-10 rounded-xl glass-inner"><i class="fa-solid fa-xmark"></i></button>
+        <button onclick="closeSiteModal()" class="w-10 h-10 rounded-xl glass-inner" aria-label="Tutup"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <input type="hidden" id="siteOriginalWebsite">
 
@@ -1315,27 +1322,7 @@
     </div>
   </div>
 
-  <!-- MODAL RESULT -->
-  <div id="resultModal" role="dialog" aria-modal="true" style="display:none; position:fixed; inset:0; background:rgba(2,6,23,.92); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); z-index:1000000; justify-content:center; align-items:center; padding:1rem;" class="fade-in">
-    <div class="glass-card bg-slate-900/95 text-white p-6 sm:p-8 rounded-[2.5rem] w-full max-w-md text-center border border-white/10 shadow-2xl flex flex-col gap-5">
-      <div class="flex items-center justify-center gap-2.5">
-        <div class="w-9 h-9 rounded-2xl bg-cyan-500/20 flex items-center justify-center"><i class="fas fa-paper-plane text-cyan-400 text-sm"></i></div>
-        <h2 class="text-base font-bold tracking-wider neon-cyan">HASIL PENGIRIMAN</h2>
-      </div>
-      <div id="modalResult" class="glass-inner p-4 rounded-2xl border border-white/5 text-left"></div>
-      <button onclick="closeModal()" class="w-full bg-gradient-to-r from-cyan-400 to-blue-600 hover:from-cyan-300 hover:to-blue-500 text-slate-950 font-extrabold text-xs py-4 rounded-2xl transition-all shadow-lg shadow-cyan-500/20 cursor-pointer">
-        Tutup
-      </button>
-    </div>
-  </div>
-
-
-  <div id="sendConfirmModal" class="modal-shell" role="dialog" aria-modal="true"><div class="glass-card popup-card w-full max-w-lg rounded-[2rem] p-6 flex flex-col gap-5 relative">
-    <div><div class="text-[10px] text-cyan-400 font-bold tracking-widest">KONFIRMASI PENGIRIMAN</div><h3 class="text-lg font-extrabold mt-1">Periksa data sebelum dikirim</h3></div>
-    <div id="sendPreviewData" class="glass-inner rounded-2xl p-4 text-xs font-mono whitespace-pre-wrap"></div><div id="destinationPreview" class="grid gap-2"></div><div id="duplicateWarning" style="display:none" class="rounded-2xl p-4 bg-rose-500/10 border border-rose-500/30 text-xs text-rose-200"></div>
-    <div class="grid grid-cols-2 gap-3"><button onclick="closeSendConfirm()" class="glass-inner py-3 rounded-2xl font-bold text-xs">BATAL</button><button id="confirmSendBtn" onclick="confirmSendNow()" class="bg-gradient-to-r from-cyan-400 to-blue-600 text-slate-950 py-3 rounded-2xl font-extrabold text-xs">YA, KIRIM SEKARANG</button></div>
-  </div></div>
-  <div id="sendResultModal" class="modal-shell" role="dialog" aria-modal="true"><div class="send-result-card glass-card popup-card w-full rounded-[1.7rem] flex flex-col"><div class="flex items-start justify-between gap-3"><div><div class="text-[9px] text-emerald-400 font-bold tracking-[.2em]">HASIL PENGIRIMAN</div><h3 class="text-base font-extrabold mt-1">Status setiap website & sistem</h3><div id="resultSummary" class="result-summary"></div></div><button onclick="document.getElementById('sendResultModal').classList.remove('open')" class="w-9 h-9 shrink-0 rounded-xl glass-inner"><i class="fa-solid fa-xmark"></i></button></div><div id="systemResultList" class="grid gap-2.5"></div><button onclick="document.getElementById('sendResultModal').classList.remove('open')" class="glass-inner py-2.5 rounded-xl font-bold text-[10px]">TUTUP</button></div></div>
+  <div id="sendResultModal" class="modal-shell" role="dialog" aria-modal="true"><div class="send-result-card glass-card popup-card w-full rounded-[1.7rem] flex flex-col"><div class="flex items-start justify-between gap-3"><div><div class="text-[9px] text-emerald-400 font-bold tracking-[.2em]">HASIL PENGIRIMAN</div><h3 class="text-base font-extrabold mt-1">Status setiap website & sistem</h3><div id="resultSummary" class="result-summary"></div></div><button onclick="document.getElementById('sendResultModal').classList.remove('open')" class="w-9 h-9 shrink-0 rounded-xl glass-inner" aria-label="Tutup"><i class="fa-solid fa-xmark"></i></button></div><div id="systemResultList" class="grid gap-2.5"></div><button onclick="document.getElementById('sendResultModal').classList.remove('open')" class="glass-inner py-2.5 rounded-xl font-bold text-[10px]">TUTUP</button></div></div>
 
 
   <div id="predictionSendModal" class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="predictionResultTitle">
@@ -1346,7 +1333,7 @@
           <h3 id="predictionResultTitle" class="text-base font-extrabold mt-1">Hasil pengiriman per website</h3>
           <div id="predictionResultSummary" class="result-summary"></div>
         </div>
-        <button onclick="closePredictionSendModal()" class="w-9 h-9 shrink-0 rounded-xl glass-inner"><i class="fa-solid fa-xmark"></i></button>
+        <button onclick="closePredictionSendModal()" class="w-9 h-9 shrink-0 rounded-xl glass-inner" aria-label="Tutup"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div id="predictionSendList"></div>
       <div id="predictionResultActions" class="prediction-result-actions">

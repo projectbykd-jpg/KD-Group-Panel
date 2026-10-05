@@ -13,7 +13,9 @@ function b64urlNoPad(buf: ArrayBuffer): string {
 	return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-function constEq(a: string, b: string): boolean {
+/** Perbandingan string waktu-konstan -- dipakai utk password & kunci rahasia
+ *  (CRON_KEY, kunci userscript, kunci job) supaya tidak bisa ditebak lewat timing. */
+export function constEq(a: string, b: string): boolean {
 	a = a ?? "";
 	b = b ?? "";
 	if (a.length !== b.length) return false;

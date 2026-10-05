@@ -317,7 +317,10 @@ input:focus, select:focus, textarea:focus {
 
   .mobile-nav-bar {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    /* Kolom mengikuti jumlah item yang TAMPIL (role BOT cuma punya 2), jadi
+       tidak ada slot kosong dan item tidak menumpuk di kiri. */
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
     gap: 4px;
     width: 100%;
     padding: 5px;
@@ -325,7 +328,6 @@ input:focus, select:focus, textarea:focus {
     border-radius: 18px;
     background: rgba(7,12,23,.97);
     box-shadow: 0 16px 50px rgba(0,0,0,.48);
-    backdrop-filter: blur(18px);
   }
 
   .mobile-nav-item {

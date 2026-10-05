@@ -2,6 +2,7 @@
 // Fase A: kredensial (Setting) + Lap Motion + Lap Mozart (API JSON, jalan langsung
 // di Worker). Lap Admin (scraper berat) menyusul lewat GitHub Actions.
 import { requireSession } from "./auth";
+import { constEq } from "../lib/crypto";
 import { logActivity } from "../lib/activity";
 import { tsNow } from "../lib/time";
 import { getTurso } from "../lib/turso"; // tabel lap_* ada di Turso, bukan D1
@@ -664,7 +665,7 @@ export async function lapJobStart(env: Env, jobId: string, key: string) {
 	} catch {
 		/* ignore */
 	}
-	if (!p.key || p.key !== key) return { success: false, message: "key salah" };
+	if (!p.key || !constEq(p.key, String(key ?? ""))) return { success: false, message: "key salah" };
 	await getTurso(env).prepare(`UPDATE lap_job SET status='running', message='Scraping...', updated_at=? WHERE id=?`)
 		.bind(tsNow(), jobId)
 		.run();
@@ -699,7 +700,7 @@ export async function lapJobResult(
 	} catch {
 		/* ignore */
 	}
-	if (!p.key || p.key !== key) return { success: false, message: "key salah" };
+	if (!p.key || !constEq(p.key, String(key ?? ""))) return { success: false, message: "key salah" };
 
 	if (ok && data && typeof data === "object") {
 		const save: Record<string, unknown[]> = {};

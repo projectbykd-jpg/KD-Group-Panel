@@ -5,7 +5,7 @@
         if (local) return String(local).trim();
       } catch (e) {}
       try {
-        const m = document.cookie.match(/(?:^|;\\s*)kd_session=([^;]+)/);
+        const m = document.cookie.match(/(?:^|;\s*)kd_session=([^;]+)/);
         return m ? decodeURIComponent(m[1]) : "";
       } catch (e) { return ""; }
     }
@@ -849,6 +849,53 @@
       toast("Berhasil Keluar Sesi");
     }
 
+    function togglePasswordVisibility() {
+      const input = document.getElementById('pass');
+      const btn = document.getElementById('passToggle');
+      if (!input || !btn) return;
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      btn.setAttribute('aria-pressed', String(show));
+      btn.setAttribute('aria-label', show ? 'Sembunyikan password' : 'Tampilkan password');
+      btn.innerHTML = show ? '<i class="fa-solid fa-eye-slash"></i>' : '<i class="fa-solid fa-eye"></i>';
+      input.focus();
+    }
+    ['keydown', 'keyup'].forEach(evt => document.getElementById('pass').addEventListener(evt, e => {
+      const warn = document.getElementById('caps-warn');
+      if (warn && e.getModifierState) warn.hidden = !e.getModifierState('CapsLock');
+    }));
+
+    // Sesi ditolak server di tengah kerja (habis 21 hari, dihapus admin, akun
+    // dinonaktifkan/terkunci): shim /api memancarkan 'kd:session-expired'.
+    // Dulu panel tetap terbuka dan setiap tombol gagal diam-diam sampai
+    // operator reload sendiri. Sekarang langsung kembali ke layar login.
+    window.addEventListener('kd:session-expired', e => {
+      if (!currentUser) return;
+      const msg = (e && e.detail) || 'Sesi berakhir. Silakan login kembali.';
+      const maintModal = document.getElementById('maintenanceModal');
+      if (maintModal) maintModal.classList.remove('open');
+      document.querySelectorAll('.modal-shell.open').forEach(m => m.classList.remove('open'));
+      document.body.classList.remove('modal-open');
+      try { closeActionPopup(); } catch (err) {}
+      clearLocalSession();
+      stopLivePolling();
+      stopInvestPolling();
+      clearTimeout(lapAdminPollTimer);
+      clearTimeout(inactivityTimer);
+      headerSummaryLoadedOnce = false;
+      document.getElementById('pass').value = '';
+      openLoginScreen(msg);
+    });
+
+    // Status koneksi: banner tipis selama offline, supaya operator tahu kenapa
+    // kirim/refresh gagal, bukan mengira panelnya rusak.
+    function syncOnlineBanner() {
+      const el = document.getElementById('offline-banner');
+      if (el) el.hidden = navigator.onLine !== false;
+    }
+    window.addEventListener('online', () => { syncOnlineBanner(); toast('Koneksi kembali normal'); if (currentUser) pumpLivePoll(true); });
+    window.addEventListener('offline', syncOnlineBanner);
+
     const LAP_PAGES = ['lap-admin','lap-motion','lap-mozart','lap-setting'];
     const BOT_PAGES = ['bot-dashboard','bot-sources','bot-history','bot-fbdirect','bot-config'];
     const LIVECHAT_PAGES = ['livechat-sessions','livechat-templates'];
@@ -903,7 +950,7 @@
       const visibleButtons = Array.from(source.querySelectorAll(':scope > button'))
         .filter(btn => !btn.hidden && getComputedStyle(btn).display !== 'none');
       content.innerHTML = visibleButtons.length
-        ? visibleButtons.map(btn => btn.outerHTML.replace(/\\sid="[^"]*"/g, '')).join('')
+        ? visibleButtons.map(btn => btn.outerHTML.replace(/\sid="[^"]*"/g, '')).join('')
         : '<div class="mobile-nav-empty">Tidak ada fitur di menu ini.</div>';
       drawer.dataset.group = name;
       drawer.hidden = false;
@@ -934,7 +981,7 @@
       const addButton = (selector) => {
         const btn = document.querySelector(selector);
         if (!btn || btn.hidden || getComputedStyle(btn).display === 'none') return;
-        items.push(btn.outerHTML.replace(/\\sid="[^"]*"/g, ''));
+        items.push(btn.outerHTML.replace(/\sid="[^"]*"/g, ''));
       };
 
       addButton('#nav-livechat-sessions');
@@ -1196,13 +1243,13 @@
           <div class="lap-date-field"><i class="fa-regular fa-calendar"></i><input id="${prefix}Start" value="${lapToday()}" readonly placeholder="dd-mm-yyyy"></div></div>
         <div class="flex flex-col gap-1"><label class="text-[10px] font-bold text-slate-400 tracking-wide">TANGGAL SELESAI</label>
           <div class="lap-date-field"><i class="fa-regular fa-calendar"></i><input id="${prefix}End" value="${lapToday()}" readonly placeholder="dd-mm-yyyy"></div></div>
-        <div class="flex gap-1.5">
+        <div class="lap-quick-row flex gap-1.5">
           <button onclick="lapSetRange('${prefix}',0)" class="lap-quick">Hari ini</button>
           <button onclick="lapSetRange('${prefix}',1)" class="lap-quick">Kemarin</button>
           <button onclick="lapSetRange('${prefix}',7)" class="lap-quick">7 hari</button>
         </div>
-        <button id="${prefix}Btn" onclick="window['__lapRun_${prefix}']()" class="bg-gradient-to-r from-cyan-400 to-blue-600 text-slate-950 font-extrabold px-5 py-2.5 rounded-xl text-xs shrink-0"><i class="fa-solid fa-cloud-arrow-down mr-2"></i>TARIK DATA</button>
-        <span id="${prefix}Status" class="text-[11px] text-slate-400"></span>
+        <button id="${prefix}Btn" onclick="window['__lapRun_${prefix}']()" class="lap-run-btn bg-gradient-to-r from-cyan-400 to-blue-600 text-slate-950 font-extrabold px-5 py-2.5 rounded-xl text-xs shrink-0"><i class="fa-solid fa-cloud-arrow-down mr-2"></i>TARIK DATA</button>
+        <span id="${prefix}Status" class="lap-run-status text-[11px] text-slate-400"></span>
       </div>`;
     }
     function lapSetRange(prefix, daysBack) {
@@ -1298,7 +1345,6 @@
       if (st.q && st.searchKeys.length) list = list.filter(r => st.searchKeys.some(k => String(r[k]==null?'':r[k]).toLowerCase().includes(st.q)));
       return list;
     }
-    function lapSetPrefilter(id, fn) { if (lapTblState[id]) { lapTblState[id].prefilter = fn; lapTblState[id].page = 1; lapTblState[id].open = true; lapTblRepaint(id); } }
     window.__lapPage = (id, delta) => {
       const st = lapTblState[id]; if (!st) return;
       const totalP = Math.max(1, Math.ceil(lapTblFiltered(id).length / LAP_PAGE_SIZE));
@@ -1337,7 +1383,7 @@
             }
             return rowHtml;
           }).join('')
-        : `<tr><td colspan="${colCount}" class="table-empty-cell"><i class="fa-solid fa-inbox"></i>Tidak ada data.</td></tr>`;
+        : `<tr><td colspan="${colCount}" class="table-empty-cell"><span class="table-empty-inner"><i class="fa-solid fa-inbox"></i>Tidak ada data.</span></td></tr>`;
       const pager = list.length > LAP_PAGE_SIZE ? `
         <div class="flex items-center justify-between px-3 py-2 text-[10px] text-slate-400 border-t border-white/5">
           <span>${from+1}-${Math.min(from+LAP_PAGE_SIZE, list.length)} dari ${list.length}</span>
@@ -1348,7 +1394,7 @@
           </div>
         </div>` : '';
       body.innerHTML = `
-        ${st.searchKeys.length ? `<div class="p-2"><input id="lapSearch_${id}" value="${st.q||''}" oninput="window['__lapSearch_${id}'](this.value)" placeholder="Cari di ${(st.title||id).toLowerCase()}..." class="w-full glass-inner rounded-lg px-3 py-1.5 text-xs text-slate-100"></div>` : ''}
+        ${st.searchKeys.length ? `<div class="p-2"><input id="lapSearch_${id}" value="${escapeHtml(st.q||'')}" oninput="window['__lapSearch_${id}'](this.value)" placeholder="Cari di ${(st.title||id).toLowerCase()}..." class="w-full glass-inner rounded-lg px-3 py-1.5 text-xs text-slate-100"></div>` : ''}
         <div class="overflow-x-auto"><table class="w-full text-[11px] text-slate-300 font-mono min-w-[560px]">
           <thead class="bg-slate-900/60 text-slate-400 text-[9px] uppercase sticky top-0" style="user-select:none"><tr>${head}</tr></thead>
           <tbody>${rowsHtml}</tbody></table></div>${st.footer || ''}${pager}`;
@@ -1365,7 +1411,12 @@
     function lapTblMountAll() {
       Object.keys(lapTblState).forEach(id => { if (document.getElementById('lapTbl_' + id)) lapTblRepaint(id); });
     }
-    const td = (v, cls) => `<td class="px-3 py-1.5 ${cls||''}">${v==null?'':v}</td>`;
+    // td() SELALU escape isinya: data laporan berasal dari scrape situs pihak
+    // ketiga (username, nama rekening, bank, catatan) dan tidak boleh bisa
+    // menyisipkan HTML/script ke panel. Pakai tdRaw() HANYA untuk markup yang
+    // dibangun panel sendiri (tombol, link) dan escape data di dalamnya.
+    const tdRaw = (html, cls) => `<td class="px-3 py-1.5 ${cls||''}">${html==null?'':html}</td>`;
+    const td = (v, cls) => tdRaw(v==null ? '' : escapeHtml(v), cls);
 
     // ---------- SETTING ----------
     function lapRenderSetting(host) {
@@ -1875,7 +1926,7 @@
         <div class="mt-1">
           <div id="wdListedTableWrap">
             ${lapTable('wd_listed', ['WEBSITE','ID TRANS','TANGGAL','ID USER','JUMLAH','PGA REF NO','VENDOR','CEK TERAKHIR','ACTION'], wdListedRows,
-              r => `<tr>${td(r.website)}${td(r.idTrans,'text-[10px]')}${td(r.tanggal)}${td(r.idUser,'font-bold text-cyan-300')}${td('Rp '+lapFmt(r.jumlah),'text-right text-emerald-400')}${td(`<a href="https://dbb2b.q2checkout.com/struk/disbursement/${encodeURIComponent(r.pgaRefNo)}" target="_blank" rel="noopener" class="text-[10px] underline decoration-dotted">${r.pgaRefNo}</a>`)}${td(r.vendorName,'text-amber-300')}${td(r.checkStatus?(`<span class="${wdListedStatusClass(r.checkStatus)}">${r.checkStatus}</span>${r.checkDate?`<div class="text-[9px] text-slate-500 mt-0.5">${r.checkDate}</div>`:''}`):'<span class="text-slate-600">—</span>')}${td(`<div class="flex items-center gap-1.5"><button onclick="wdListedCheckClick(${r.id},this)" class="lap-pg-btn !w-auto px-2" title="Cek status terbaru"><i class="fa-solid fa-rotate"></i> CEK</button><button onclick="wdListedDeleteClick(${r.id})" class="lap-pg-btn !w-auto px-2 text-rose-400" title="Hapus dari list"><i class="fa-solid fa-xmark"></i></button></div>`)}</tr>`,
+              r => `<tr>${td(r.website)}${td(r.idTrans,'text-[10px]')}${td(r.tanggal)}${td(r.idUser,'font-bold text-cyan-300')}${td('Rp '+lapFmt(r.jumlah),'text-right text-emerald-400')}${tdRaw(`<a href="https://dbb2b.q2checkout.com/struk/disbursement/${encodeURIComponent(r.pgaRefNo)}" target="_blank" rel="noopener" class="text-[10px] underline decoration-dotted">${escapeHtml(r.pgaRefNo)}</a>`)}${td(r.vendorName,'text-amber-300')}${tdRaw(r.checkStatus?(`<span class="${wdListedStatusClass(r.checkStatus)}">${escapeHtml(r.checkStatus)}</span>${r.checkDate?`<div class="text-[9px] text-slate-500 mt-0.5">${escapeHtml(r.checkDate)}</div>`:''}`):'<span class="text-slate-600">—</span>')}${tdRaw(`<div class="flex items-center gap-1.5"><button onclick="wdListedCheckClick(${Number(r.id)},this)" class="lap-pg-btn !w-auto px-2" title="Cek status terbaru"><i class="fa-solid fa-rotate"></i> CEK</button><button onclick="wdListedDeleteClick(${Number(r.id)})" class="lap-pg-btn !w-auto px-2 text-rose-400" title="Hapus dari list"><i class="fa-solid fa-xmark"></i></button></div>`)}</tr>`,
               r => r.pgaRefNo,
               ['website','idTrans','idUser','pgaRefNo','vendorName'], {title:'WD Listed', open:true, checkable:true})}
           </div>
@@ -2122,7 +2173,7 @@
       const panelBar = panelNames.length > 1 ? `
         <div class="flex flex-wrap items-center gap-1.5 mt-3">
           <span class="text-[10px] font-bold text-slate-500 uppercase mr-1">Panel:</span>
-          ${['SEMUA', ...panelNames].map(p => `<button onclick="lapSetMozPanel('${p.replace(/'/g,"\\'")}')" class="lap-chip ${lapMozPanel===p?'on':''}">${p}</button>`).join('')}
+          ${['SEMUA', ...panelNames].map(p => `<button onclick="lapSetMozPanel(${jsArg(p)})" class="lap-chip ${lapMozPanel===p?'on':''}">${escapeHtml(p)}</button>`).join('')}
         </div>` : '';
       const dpBot = dp.filter(r => r.statusRaw === 'done' && r.doneBy === 'BOT');
       const wdOk = wd.filter(r => r.approved);
@@ -2258,11 +2309,11 @@
             (r,i) => `<tr>${td(i+1)}${td(r.username,'font-bold text-slate-200')}${td(lapFmt(r.deposit),'text-right '+((r.deposit>0)?'text-emerald-400 font-bold':''))}${td(lapFmt(r.withdraw),'text-right')}${td(lapFmt(r.winLose),'text-right font-bold '+((r.winLose>=0)?'text-emerald-400':'text-rose-400'))}${td(r.type,'text-[10px]')}</tr>`,
             (r,i) => [i+1,r.username,r.deposit,r.withdraw,r.winLose].join('\t'), ['username'], {title:'Register', open:true})}
           ${lapTable('id_selisih', ['NO','USER ID','NOMINAL'], idS,
-            (r,i) => `<tr class="cursor-pointer hover:bg-cyan-950/20" onclick="lapFocusSelisih('${(r.userId||'').replace(/'/g,'')}')">${td(i+1)}${td(r.userId,'font-bold text-cyan-400')}${td(lapFmt(r.nominal),'text-right text-rose-400 font-bold')}</tr>`,
+            (r,i) => `<tr class="cursor-pointer hover:bg-cyan-950/20" onclick="lapFocusSelisih(${jsArg(r.userId||'')})">${td(i+1)}${td(r.userId,'font-bold text-cyan-400')}${td(lapFmt(r.nominal),'text-right text-rose-400 font-bold')}</tr>`,
             (r,i) => [i+1,r.userId,r.nominal].join('\t'), ['userId'], {title:'ID Selisih', open:true})}
           <div class="flex flex-col gap-1.5 mt-3 mb-1 glass-inner rounded-xl p-2">
-            <div class="flex flex-wrap gap-1.5 items-center"><span class="text-[9px] font-bold text-slate-500">ACTION:</span>${acts.map(a => raChip(a, `lapToggleRA('actions','${a.replace(/'/g,"")}',this)`)).join('')}</div>
-            <div class="flex flex-wrap gap-1.5 items-center"><span class="text-[9px] font-bold text-slate-500">OPERATOR:</span>${ops.map(o => raChip(o, `lapToggleRA('agents','${o.replace(/'/g,"")}',this)`)).join('')}</div>
+            <div class="flex flex-wrap gap-1.5 items-center"><span class="text-[9px] font-bold text-slate-500">ACTION:</span>${acts.map(a => raChip(a, `lapToggleRA('actions',${jsArg(a)},this)`)).join('')}</div>
+            <div class="flex flex-wrap gap-1.5 items-center"><span class="text-[9px] font-bold text-slate-500">OPERATOR:</span>${ops.map(o => raChip(o, `lapToggleRA('agents',${jsArg(o)},this)`)).join('')}</div>
           </div>
           ${lapTable('report_agent', ['NO','TGL TERIMA','USER','ACTION','DARI BANK','TUJUAN BANK','JUMLAH','STATUS','OPERATOR'], ra,
             (r,i) => `<tr>${td(i+1)}${td(r.tanggalTerima)}${td(r.user,'font-bold text-slate-200')}${td(r.action,'text-[10px]')}${td(r.dariBank,'text-[10px]')}${td(r.tujuanBank,'text-[10px]')}${td(r.jumlah,'text-right font-bold')}${td(r.status,'text-center text-emerald-400')}${td(r.operator,'text-indigo-400')}</tr>`,
@@ -2282,7 +2333,7 @@
         lapAdminF.actions.has((r.action||'').trim()) && lapAdminF.agents.has((r.operator||'').trim()));
       if (lapAdminJobId && !reg.length) lapPollAdmin();
     }
-    function raChip(label, fn) { return `<span class="lap-chip on" onclick="${fn}">${label}</span>`; }
+    function raChip(label, fn) { return `<span class="lap-chip on" onclick="${fn}">${escapeHtml(label)}</span>`; }
     let lapAdminF = { refType:'all', actions:new Set(), agents:new Set() };
     function lapRegFilter(type, el) {
       lapAdminF.refType = type;
@@ -2432,7 +2483,7 @@
       if (!card) return;
       if (!closing) {
         card.style.display = 'block';
-        card.innerHTML = '<div class="text-xs font-bold text-rose-200">Backend belum mengirim data kata-kata penutup. Gunakan code.gs Smart Lock V4.1 dan buat deployment versi baru.</div>';
+        card.innerHTML = '<div class="text-xs font-bold text-rose-200">Data kata-kata penutup belum tersedia dari server. Klik Refresh Status; kalau tetap kosong, hubungi admin.</div>';
         return;
       }
 
@@ -2502,6 +2553,9 @@
 
           const tbody = document.getElementById('prediction-table-body');
           tbody.innerHTML = '';
+          if (!globalPredictionsData.length) {
+            tbody.innerHTML = '<tr><td colspan="4" class="table-empty-cell"><span class="table-empty-inner"><i class="fa-solid fa-calendar-xmark"></i>Belum ada jadwal prediksi dari server. Klik Refresh Status.</span></td></tr>';
+          } else
 
           tbody.innerHTML = globalPredictionsData.map((item, index) => {
             const ui = getPredictionRowUi(item, 'prediction-send-btn');
@@ -3395,17 +3449,6 @@
         .smartAutoSendFast(txt, currentSessionToken);
     }
 
-    // Modal konfirmasi lama dipertahankan agar fungsi lain tidak error,
-    // tetapi Auto Send cepat tidak memakainya.
-    function closeSendConfirm() {
-      document.getElementById('sendConfirmModal').classList.remove('open');
-    }
-
-    function confirmSendNow() {
-      closeSendConfirm();
-      triggerAutoSend();
-    }
-
     function showSendResult(result) {
       lastSendResult = result;
 
@@ -3413,7 +3456,6 @@
       const icons = { telegram: 'fa-brands fa-telegram', linktree: 'fa-solid fa-link', panelz: 'fa-solid fa-bolt' };
       const sysKeys = Object.keys(labels);
       const esc = escapeHtml;
-      const safe = s => String(s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
       const websiteResults = Array.isArray(result.websiteResults) ? result.websiteResults : [];
 
@@ -3456,7 +3498,7 @@
           if (s !== 'GAGAL' && s !== 'DIBLOKIR') return '';
           const canRetry = s === 'GAGAL' && !/tidak diizinkan/i.test(String(it.reason || ''));
           const retry = canRetry
-            ? `<button onclick="retryOneSystem('${k}','${safe(site.website)}')" class="retry-mini"><i class="fa-solid fa-rotate-right mr-1"></i>COBA ULANG</button>`
+            ? `<button onclick="retryOneSystem(${jsArg(k)},${jsArg(site.website)})" class="retry-mini"><i class="fa-solid fa-rotate-right mr-1"></i>COBA ULANG</button>`
             : '';
           return `<div class="system-compact">
               <div class="system-compact-top">
@@ -3514,6 +3556,10 @@
 
       google.script.run
         .withSuccessHandler(result => {
+          if (apiFailed(result) && !Array.isArray(result && result.websiteResults)) {
+            showActionPopup('ERROR', 'Retry Gagal', apiMessage(result), 'fa-triangle-exclamation');
+            return;
+          }
           closeActionPopup();
           showSendResult(result);
         })
@@ -3528,32 +3574,6 @@
         .retryFailedSystem(pendingSendText, currentSessionToken, systemName, website);
     }
 
-    function sendToPanelZ(){
-      const market = document.getElementById('marketSelect').value;
-      const angka  = document.getElementById('angkaInput').value;
-      if(!market || !angka){ toast("❌ Pilih pasaran dan isi angka!"); return; }
-      
-      showActionPopup("LOADING", "Sedang Mengirim ke Panel-Z...", `Mengirim pasaran ${market}...`, "fa-bolt");
-
-      google.script.run
-        .withSuccessHandler(res => {
-          showActionPopup("DONE", "Berhasil Terkirim!", `Data pasaran ${market} masuk ke Panel-Z.`, "fa-check");
-          document.getElementById("modalResult").innerHTML = `
-            <div style="display:flex;flex-direction:column;gap:12px;font-size:12px;">
-                <div class="flex items-center justify-between glass-inner p-3 rounded-2xl border border-white/5"><span>⚙️ Panel-Z</span> <b class="text-indigo-400">${escapeHtml(res.message || "Berhasil")}</b></div>
-                <div class="flex items-center justify-between glass-inner p-3 rounded-2xl border border-white/5"><span>📍 Pasaran</span> <b class="text-white">${escapeHtml(market)}</b></div>
-                <div class="flex items-center justify-between glass-inner p-3 rounded-2xl border border-white/5"><span>🎯 Angka</span> <b class="text-amber-400">${escapeHtml(angka)}</b></div>
-            </div>
-          `;
-        })
-        .withFailureHandler(err => { 
-          showActionPopup("ERROR", "Pengiriman Gagal", err.message || "Terjadi kesalahan saat menghubungi sistem.", "fa-triangle-exclamation"); 
-        })
-        .sendToPanelZOnly(market, angka, currentSessionToken);
-    }
-
-    function closeModal(){ document.getElementById("resultModal").style.display = "none"; }
-
     function sendToPanelZCustom() {
       const market = document.getElementById('marketSelect').value;
       const angka  = document.getElementById('angkaInput').value;
@@ -3567,14 +3587,11 @@
 
       google.script.run
         .withSuccessHandler(res => {
-          showActionPopup("DONE", "Berhasil Terkirim!", `Panel-Z berhasil diperbarui.`, "fa-check");
-          document.getElementById("modalResult").innerHTML = `
-            <div style="display:flex;flex-direction:column;gap:12px;font-size:12px;">
-                <div class="flex items-center justify-between glass-inner p-3 rounded-2xl border border-white/5"><span>⚙️ Panel-Z</span> <b class="text-indigo-400">${escapeHtml(res.message || "Berhasil")}</b></div>
-                <div class="flex items-center justify-between glass-inner p-3 rounded-2xl border border-white/5"><span>📍 Pasaran</span> <b class="text-white">${escapeHtml(market)}</b></div>
-                <div class="flex items-center justify-between glass-inner p-3 rounded-2xl border border-white/5"><span>🎯 Angka</span> <b class="text-amber-400">${escapeHtml(angka)}</b></div>
-            </div>
-          `;
+          if (!res || !res.success) {
+            showActionPopup("ERROR", "Pengiriman Gagal", (res && res.message) || "Panel-Z tidak mengonfirmasi pengiriman.", "fa-triangle-exclamation");
+            return;
+          }
+          showActionPopup("DONE", "Berhasil Terkirim!", `Pasaran ${market} · angka ${angka} masuk ke Panel-Z.`, "fa-check");
         })
         .withFailureHandler(err => { 
           showActionPopup("ERROR", "Pengiriman Gagal", err.message || "Terjadi kesalahan saat menghubungi sistem.", "fa-triangle-exclamation"); 
@@ -3772,6 +3789,17 @@
         : 'Setiap user hanya melihat riwayat akunnya sendiri pada hari ini.';
     }
     function escapeHtml(s){return String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
+    // Argumen string yang AMAN ditaruh di atribut handler inline, mis.
+    // onclick="fn(${jsArg(nilai)})". JSON.stringify membuat literal JS yang valid
+    // (kutip, backslash, baris baru ter-escape) lalu escapeHtml mencegah nilai
+    // keluar dari atribut "...". Dulu cuma kutip tunggal yang di-escape, jadi
+    // nilai berisi " (dari data scrape / livechat) bisa menyisipkan HTML.
+    function jsArg(v){return escapeHtml(JSON.stringify(String(v==null?'':v)));}
+    // Shim /api mengirim error server (HTTP 500, mis. sesi habis / maintenance /
+    // bukan ADMIN) ke handler SUKSES sebagai {success:false,message}. Handler
+    // yang mengubah state atau menampilkan "berhasil" wajib cek ini dulu.
+    function apiFailed(res){return !res || res.success === false;}
+    function apiMessage(res, fallback){return (res && res.message) || fallback || 'Gagal memproses permintaan.';}
     function restoreDraft(){
       let d = null;
       try { d = JSON.parse(localStorage.getItem('daygroup_draft') || 'null'); } catch (e) { d = null; }
@@ -3816,7 +3844,7 @@
       ];
       if (s.topUser) arr.push(['User Teraktif', s.topUser]);
       if (Number(s.backupTotal || 0) > 0) arr.push(['Arsip Backup', s.backupTotal]);
-      return arr.map(item => `<div class="mini-card"><div class="text-[10px] text-slate-300 font-semibold">${item[0]}</div><div class="text-xl font-black mt-1 text-slate-50">${item[1]}</div></div>`).join('');
+      return arr.map(item => `<div class="mini-card"><div class="text-[10px] text-slate-300 font-semibold">${escapeHtml(item[0])}</div><div class="text-xl font-black mt-1 text-slate-50">${escapeHtml(item[1])}</div></div>`).join('');
     }
 
     function compactLogPreview(value, maxLength) {
@@ -3888,7 +3916,7 @@
       if (!body) return;
 
       if (!Array.isArray(rows) || !rows.length) {
-        body.innerHTML = '<tr><td colspan="7" class="table-empty-cell"><i class="fa-solid fa-clock-rotate-left"></i>Belum ada aktivitas yang cocok dengan filter.</td></tr>';
+        body.innerHTML = '<tr><td colspan="7" class="table-empty-cell"><span class="table-empty-inner"><i class="fa-solid fa-clock-rotate-left"></i>Belum ada aktivitas yang cocok dengan filter.</span></td></tr>';
         return;
       }
 
@@ -4095,7 +4123,7 @@
           clearTimeout(slowNoticeTimer);
           try {
             if (!data || !data.stats || !Array.isArray(data.rows)) {
-              throw new Error('Format data dashboard tidak lengkap. Pastikan code.gs Smart V5 sudah dipasang.');
+              throw new Error('Format data dashboard dari server tidak lengkap. Coba muat ulang halaman.');
             }
             applyDashboardData(data, mode);
           } catch (err) {
@@ -4112,7 +4140,7 @@
           renderLogs([], bodyTarget);
           if (adminStatus) {
             adminStatus.className = 'text-xs text-rose-300 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3';
-            adminStatus.textContent = message + ' Pastikan code.gs terbaru sudah dideploy.';
+            adminStatus.textContent = message + ' Coba muat ulang; kalau berlanjut, hubungi admin.';
           }
           toast(message);
         })
@@ -4171,7 +4199,9 @@
       if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>MENYIMPAN...'; }
       const done = (result, ok) => {
         if (btn) btn.disabled = false;
-        autoPostEnabledState = turnOn;
+        // Status hanya dibalik kalau server benar-benar menerima perubahan.
+        if (ok && !apiFailed(result)) autoPostEnabledState = turnOn;
+        else ok = false;
         paintAutoPostToggle();
         toast((result && result.message) || (ok ? 'Tersimpan' : 'Gagal'));
       };
@@ -4280,7 +4310,7 @@
         .withSuccessHandler(data => renderActiveSessions(data))
         .withFailureHandler(err => {
           if (meta) meta.textContent = 'Gagal memuat sesi aktif: ' + ((err && err.message) || err);
-          body.innerHTML = '<tr><td colspan="7" class="p-3 text-center text-rose-300 py-6">Gagal memuat. Pastikan code.gs terbaru sudah dideploy.</td></tr>';
+          body.innerHTML = '<tr><td colspan="7" class="p-3 text-center text-rose-300 py-6">Gagal memuat sesi aktif. Coba refresh.</td></tr>';
         })
         .adminListActiveSessions(currentSessionToken);
     }
@@ -4288,8 +4318,8 @@
     function boolBadge(v,label){return `<span class="px-2 py-1 rounded-full text-[9px] font-bold ${v?'bg-emerald-500/15 text-emerald-300':'bg-rose-500/10 text-rose-300'}">${v?'✓':'✕'} ${label}</span>`;}
     function loadUsers(force){
       const status=document.getElementById('userManageStatus'); if(!status)return;
-      status.textContent='Memuat daftar user dari Sheet Users...';
-      google.script.run.withSuccessHandler(data=>{adminUsersData=Array.isArray(data)?data:[];renderUserRows(adminUsersData);status.textContent=`${adminUsersData.length} akun berhasil dimuat dari Sheet Users.`;}).withFailureHandler(e=>{status.textContent='Gagal memuat users: '+((e&&e.message)||e);toast('Gagal memuat daftar user');}).adminListUsers(currentSessionToken);
+      status.textContent='Memuat daftar user...';
+      google.script.run.withSuccessHandler(data=>{if(!Array.isArray(data)){status.textContent='Gagal memuat user: '+apiMessage(data);return;}adminUsersData=data;renderUserRows(adminUsersData);status.textContent=`${adminUsersData.length} akun berhasil dimuat.`;}).withFailureHandler(e=>{status.textContent='Gagal memuat users: '+((e&&e.message)||e);toast('Gagal memuat daftar user');}).adminListUsers(currentSessionToken);
     }
     function renderUserRows(rows){
       const body=document.getElementById('userTableBody');
@@ -4322,15 +4352,15 @@
               <button onclick="openUserModal(${i})" class="admin-icon-btn admin-icon-edit" title="Edit user">
                 <i class="fa-solid fa-pen"></i>
               </button>
-              <button onclick="resetUserLock('${encodeURIComponent(u.username)}')" class="admin-icon-btn admin-icon-unlock" title="Reset login gagal dan buka kunci">
+              <button onclick="resetUserLock(${jsArg(encodeURIComponent(u.username))})" class="admin-icon-btn admin-icon-unlock" title="Reset login gagal dan buka kunci">
                 <i class="fa-solid fa-unlock-keyhole"></i>
               </button>
-              <button onclick="deleteManagedUser('${encodeURIComponent(u.username)}')" class="admin-icon-btn admin-icon-delete" title="Hapus user">
+              <button onclick="deleteManagedUser(${jsArg(encodeURIComponent(u.username))})" class="admin-icon-btn admin-icon-delete" title="Hapus user">
                 <i class="fa-solid fa-trash"></i>
               </button>
             </div>
           </td>
-        </tr>`).join('')||'<tr><td colspan="10" class="table-empty-cell"><i class="fa-solid fa-users-slash"></i>Belum ada user</td></tr>';
+        </tr>`).join('')||'<tr><td colspan="10" class="table-empty-cell"><span class="table-empty-inner"><i class="fa-solid fa-users-slash"></i>Belum ada user</span></td></tr>';
     }
     function filterUserRows(){const q=(document.getElementById('userSearch').value||'').toLowerCase();const role=document.getElementById('userRoleFilter').value;const status=document.getElementById('userStatusFilter').value;document.querySelectorAll('#userTableBody tr[data-search]').forEach(tr=>{tr.style.display=(!q||tr.dataset.search.includes(q))&&(!role||tr.dataset.role===role)&&(!status||tr.dataset.status===status)?'':'none';});}
 
@@ -4364,8 +4394,8 @@
             ${b(!!(s.pz_url&&(s.pz_user||s.pz_user2)),'Panel-Z')}
           </div>
           <div class="site-card-actions">
-            <button onclick="openSiteModal('${encodeURIComponent(s.website)}')"><i class="fa-solid fa-pen mr-1"></i>EDIT</button>
-            <button onclick="deleteSite('${encodeURIComponent(s.website)}')"><i class="fa-solid fa-trash mr-1"></i>HAPUS</button>
+            <button onclick="openSiteModal(${jsArg(encodeURIComponent(s.website))})"><i class="fa-solid fa-pen mr-1"></i>EDIT</button>
+            <button onclick="deleteSite(${jsArg(encodeURIComponent(s.website))})"><i class="fa-solid fa-trash mr-1"></i>HAPUS</button>
           </div>
         </div>`).join('');
     }
@@ -4431,7 +4461,7 @@
       const payload={originalUsername:document.getElementById('userOriginalUsername').value,username:document.getElementById('editUsername').value.trim(),password:document.getElementById('editPassword').value,websites:document.getElementById('editWebsite').value.trim(),displayName:document.getElementById('editDisplayName').value.trim(),role:document.getElementById('editRole').value,status:document.getElementById('editStatus').value,timeout:Number(document.getElementById('editTimeout').value||60),note:document.getElementById('editNote').value.trim(),telegram:document.getElementById('editTelegram').checked,linktree:document.getElementById('editLinktree').checked,panelz:document.getElementById('editPanelz').checked};
       if(!payload.username||(!payload.originalUsername&&!payload.password)){err.textContent='Username dan password wajib diisi untuk akun baru.';err.classList.remove('hidden');return;}
       btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin mr-2"></i>MENYIMPAN...';
-      google.script.run.withSuccessHandler(res=>{btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN KE SHEET USERS';closeUserModal();toast(res.message||'User berhasil disimpan');loadUsers(true);loadDashboard(true,'admin');}).withFailureHandler(e=>{btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN KE SHEET USERS';err.textContent=(e&&e.message)||'Gagal menyimpan user';err.classList.remove('hidden');}).adminSaveUser(currentSessionToken,payload);
+      google.script.run.withSuccessHandler(res=>{btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN USER';closeUserModal();toast(res.message||'User berhasil disimpan');loadUsers(true);loadDashboard(true,'admin');}).withFailureHandler(e=>{btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN USER';err.textContent=(e&&e.message)||'Gagal menyimpan user';err.classList.remove('hidden');}).adminSaveUser(currentSessionToken,payload);
     }
 
     let centerNoticeResolver = null;
@@ -4535,14 +4565,14 @@
       const approved = await confirmCenter({
         type: 'danger',
         title: 'Hapus Akun User?',
-        message: `Akun "${username}" akan dihapus langsung dari Sheet Users.
+        message: `Akun "${username}" akan dihapus permanen dari database panel.
 
 Tindakan ini tidak dapat dibatalkan.`,
         confirmText: 'YA, HAPUS AKUN'
       });
       if (!approved) return;
 
-      showActionPopup('LOADING','Menghapus User',`Sedang menghapus akun ${username} dari Sheet Users...`,'fa-user-minus');
+      showActionPopup('LOADING','Menghapus User',`Sedang menghapus akun ${username}...`,'fa-user-minus');
 
       google.script.run
         .withSuccessHandler(result => {
@@ -4595,8 +4625,6 @@ Tindakan ini tidak dapat dibatalkan.`,
       }
       const edit = document.getElementById('userEditModal');
       if (edit && edit.style.display !== 'none' && edit.classList.contains('modal-shell')) { closeUserModal(); return true; }
-      const result = document.getElementById('resultModal');
-      if (result && result.style.display !== 'none') { closeModal(); return true; }
       return false;
     }
     document.addEventListener('keydown', e => {
@@ -4606,13 +4634,13 @@ Tindakan ini tidak dapat dibatalkan.`,
       if (document.getElementById('centerNoticeModal').classList.contains('open')) return;
       closeTopModal();
     });
-    ['sendConfirmModal','sendResultModal','predictionSendModal','userEditModal','resultModal'].forEach(id => {
+    ['sendResultModal','predictionSendModal','userEditModal'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.addEventListener('mousedown', e => { if (e.target === el) closeTopModal(); });
     });
 
     function toggleMaintenance(){maintenanceState=!maintenanceState;document.getElementById('maintenanceSwitch').classList.toggle('on',maintenanceState);}
-    function saveMaintenance(){google.script.run.withSuccessHandler(x=>{maintenanceState=x.enabled;document.getElementById('maintenanceSwitch').classList.toggle('on',maintenanceState);toast('Pengaturan maintenance disimpan');}).withFailureHandler(e=>toast(e.message)).setMaintenance(currentSessionToken,maintenanceState,document.getElementById('maintenanceMessage').value);}
+    function saveMaintenance(){google.script.run.withSuccessHandler(x=>{if(apiFailed(x)){toast(apiMessage(x,'Gagal menyimpan maintenance'));return;}maintenanceState=!!x.enabled;document.getElementById('maintenanceSwitch').classList.toggle('on',maintenanceState);toast('Pengaturan maintenance disimpan');}).withFailureHandler(e=>toast(e.message)).setMaintenance(currentSessionToken,maintenanceState,document.getElementById('maintenanceMessage').value);}
 
     /* =========================================================
        MENU INVEST — AutoCheck batas line invest per user.
@@ -5244,12 +5272,12 @@ Tindakan ini tidak dapat dibatalkan.`,
       const key=g('botGeminiKey'); if(key) data.gemini_key=key;
       const groqKey=g('botGroqKey'); if(groqKey) data.groq_key=groqKey;
       const fbTok=g('botFbToken'); if(fbTok) data.fb_page_token=fbTok;
-      google.script.run.withSuccessHandler(s=>{toast('Konfigurasi BOT tersimpan');['botGeminiKey','botGroqKey','botFbToken'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});applyBotNews(s);}).withFailureHandler(e=>toast('Gagal: '+((e&&e.message)||e))).botNewsSaveConfig(currentSessionToken,data);
+      google.script.run.withSuccessHandler(s=>{if(apiFailed(s)){toast('Gagal: '+apiMessage(s));return;}toast('Konfigurasi BOT tersimpan');['botGeminiKey','botGroqKey','botFbToken'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});applyBotNews(s);}).withFailureHandler(e=>toast('Gagal: '+((e&&e.message)||e))).botNewsSaveConfig(currentSessionToken,data);
     }
     function addBotSource(){
       const data={name:document.getElementById('botSrcName').value.trim(),kind:document.getElementById('botSrcKind').value,category:document.getElementById('botSrcCategory').value,url:document.getElementById('botSrcUrl').value.trim()};
       if(!data.name||!data.url){toast('Isi nama & URL feed');return;}
-      google.script.run.withSuccessHandler(s=>{toast('Sumber ditambah');document.getElementById('botSrcName').value='';document.getElementById('botSrcUrl').value='';applyBotNews(s);}).withFailureHandler(e=>toast('Gagal: '+((e&&e.message)||e))).botNewsAddSource(currentSessionToken,data);
+      google.script.run.withSuccessHandler(s=>{if(apiFailed(s)){toast('Gagal: '+apiMessage(s));return;}toast('Sumber ditambah');document.getElementById('botSrcName').value='';document.getElementById('botSrcUrl').value='';applyBotNews(s);}).withFailureHandler(e=>toast('Gagal: '+((e&&e.message)||e))).botNewsAddSource(currentSessionToken,data);
     }
     function toggleBotSource(id,active){ google.script.run.withSuccessHandler(applyBotNews).withFailureHandler(e=>toast('Gagal: '+((e&&e.message)||e))).botNewsToggleSource(currentSessionToken,{id:id,active:String(active)}); }
     function deleteBotSource(id){ if(!confirm('Hapus sumber ini?'))return; google.script.run.withSuccessHandler(applyBotNews).withFailureHandler(e=>toast('Gagal: '+((e&&e.message)||e))).botNewsDeleteSource(currentSessionToken,{id:id}); }
@@ -5382,7 +5410,6 @@ Tindakan ini tidak dapat dibatalkan.`,
       if (hint) hint.textContent = 'Sinkron terakhir: ' + (newest.last_seen_at || '-');
       wrap.innerHTML = list.map(row => {
         const on = Number(row.bot_enabled) === 1;
-        const keySafe = String(row.session_key).replace(/'/g, "\\'");
         return '<div class="mini-card flex items-center justify-between gap-3 flex-wrap' + (on ? ' border border-emerald-400/30' : '') + '">'
           + '<div class="flex flex-col gap-0.5 min-w-0">'
             + '<div class="text-xs font-bold text-slate-100 truncate">' + escapeHtml(row.customer_name || row.session_key) + '</div>'
@@ -5391,14 +5418,15 @@ Tindakan ini tidak dapat dibatalkan.`,
           + '</div>'
           + '<div class="flex items-center gap-2 shrink-0">'
             + '<span class="text-[10px] font-bold ' + (on ? 'text-emerald-400' : 'text-slate-500') + '">' + (on ? 'BOT AKTIF' : 'MANUAL') + '</span>'
-            + '<div class="switch' + (on ? ' on' : '') + '" onclick="toggleLivechatBot(\'' + keySafe + '\', ' + (!on) + ')" title="Aktifkan/matikan auto-reply utk sesi ini"></div>'
+            + '<div class="switch' + (on ? ' on' : '') + '" onclick="toggleLivechatBot(' + jsArg(row.session_key) + ', ' + (!on) + ')" title="Aktifkan/matikan auto-reply utk sesi ini"></div>'
           + '</div>'
         + '</div>';
       }).join('');
     }
 
     function toggleLivechatBot(sessionKey, enabled) {
-      google.script.run.withSuccessHandler(() => {
+      google.script.run.withSuccessHandler(res => {
+        if (apiFailed(res)) { toast(apiMessage(res, 'Gagal mengubah auto-reply')); loadLivechatSessions(true); return; }
         toast(enabled ? 'Auto-reply diaktifkan utk sesi ini' : 'Auto-reply dimatikan utk sesi ini');
         loadLivechatSessions(true);
       }).withFailureHandler(e => toast((e && e.message) || String(e))).livechatSetBotEnabled(currentSessionToken, sessionKey, enabled);
