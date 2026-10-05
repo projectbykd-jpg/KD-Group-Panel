@@ -32,14 +32,17 @@ jobs:
     steps:
       - name: Pompa scan sampai selesai
         env:
-          # CRON_KEY di sini SENGAJA sama persis dgn wrangler.jsonc (vars.CRON_KEY)
-          # -- nilai itu SUDAH plaintext di repo ini (bukan secret sungguhan),
-          # jadi menaruhnya di sini tidak menambah kebocoran apa pun.
-          CRON_KEY: "2ivwrtzgczxuwe1w637k0l4ki9g4hthh2m64jnrz"
+          # Repository secret CRON_KEY -- nilai yang SAMA dgn yang dipasang ke
+          # Worker oleh deploy.yml (tidak lagi ditulis plaintext di repo).
+          CRON_KEY: ${{ secrets.CRON_KEY }}
           PUBLIC_URL: "https://panel-worker.projectbykd.workers.dev"
           INVEST_USER: ${{ github.event.inputs.user }}
         run: |
           set -eu
+          if [ -z "$CRON_KEY" ]; then
+            echo "::error::Repository secret CRON_KEY belum diisi (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
           echo "[diag] Memompa scan INVEST untuk user: $INVEST_USER"
           for i in $(seq 1 200); do
             resp=$(curl -sS -G "$PUBLIC_URL/__cron" \

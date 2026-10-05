@@ -1,6 +1,9 @@
 // Secret yang di-set via `wrangler secret put` (tidak muncul di wrangler.jsonc,
 // jadi tidak ikut ter-generate oleh `wrangler types`).
 interface Env {
+	/** Kunci endpoint /__cron. Diisi dari GitHub secret CRON_KEY saat deploy
+	 *  (deploy.yml -> wrangler deploy --secrets-file). Kosong = /__cron menolak semua. */
+	CRON_KEY?: string;
 	/** Fine-grained GitHub PAT, akses repo daygroup-scraper, Actions: read/write. */
 	GH_TOKEN?: string;
 	/** URL /exec Apps Script daygroup-mozart (scrape Mozart). */

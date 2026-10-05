@@ -9,6 +9,7 @@
 //      mengunci login CS ke IP tertentu, jadi bot TIDAK BISA login dari
 //      server (lihat catatan di lib/livechat-bot.ts).
 import { requireSession } from "./auth";
+import { constEq } from "../lib/crypto";
 import { logActivity } from "../lib/activity";
 import {
 	deleteTemplate,
@@ -32,7 +33,7 @@ async function gatePanel(env: Env, token: string) {
 
 function gateBotKey(env: Env, key: string) {
 	if (!env.LIVECHAT_BOT_KEY) throw new Error("Live Chat Bot belum dikonfigurasi (secret LIVECHAT_BOT_KEY). Hubungi admin.");
-	if (!key || key !== env.LIVECHAT_BOT_KEY) throw new Error("Kunci userscript tidak valid.");
+	if (!key || !constEq(key, env.LIVECHAT_BOT_KEY)) throw new Error("Kunci userscript tidak valid.");
 }
 
 // --- Panel ---

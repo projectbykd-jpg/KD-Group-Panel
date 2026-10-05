@@ -4,6 +4,7 @@ import { hashPassword, isHashed, verifyPassword } from "../lib/crypto";
 import { createSession, deleteSession, loadSession } from "../lib/session";
 import { logActivity } from "../lib/activity";
 import { tsNow, tsPlusMinutes } from "../lib/time";
+import { clearLoginFailures, loginBlockedMinutes, recordLoginFailure } from "../lib/login-throttle";
 
 const SERVER_VERSION = "PANEL-WORKER-1.0";
 
@@ -22,11 +23,20 @@ export function publicProfile(p: UserProfile, token: string, maintenance: Mainte
 	};
 }
 
-export async function checkLogin(env: Env, username: string, password: string) {
+export async function checkLogin(env: Env, username: string, password: string, ip = "") {
 	const clean = String(username ?? "").trim();
 	try {
+		const blockedMin = await loginBlockedMinutes(env, ip);
+		if (blockedMin > 0) {
+			await logActivity(env, clean || "UNKNOWN", "LOGIN", "Diblokir: terlalu banyak percobaan gagal dari IP " + ip, "GAGAL");
+			return {
+				success: false,
+				message: `Terlalu banyak percobaan login gagal dari jaringan ini. Coba lagi dalam ${blockedMin} menit.`,
+			};
+		}
 		const p = await getUserProfile(env, clean);
 		if (!p) {
+			await recordLoginFailure(env, ip);
 			await logActivity(env, clean || "UNKNOWN", "LOGIN", "Username tidak ditemukan", "GAGAL");
 			return { success: false, message: "Username atau Password Salah!" };
 		}
@@ -40,7 +50,12 @@ export async function checkLogin(env: Env, username: string, password: string) {
 
 		const ok = await verifyPassword(p.passwordHash, password);
 		if (!ok) {
-			const n = p.failedLogin + 1;
+			await recordLoginFailure(env, ip);
+			// Kunci lama yang SUDAH lewat tidak boleh terbawa: tanpa reset ini,
+			// failed_login tetap >= 5 sesudah kunci habis, jadi satu salah ketik
+			// berikutnya langsung mengunci akun 10 menit lagi.
+			const prevFails = p.lockedUntil && p.lockedUntil <= tsNow() ? 0 : p.failedLogin;
+			const n = prevFails + 1;
 			const lock = n >= 5 ? tsPlusMinutes(10) : null;
 			await env.DB.prepare(`UPDATE users SET failed_login = ?, locked_until = ? WHERE id = ?`)
 				.bind(n, lock, p.id)
@@ -61,6 +76,7 @@ export async function checkLogin(env: Env, username: string, password: string) {
 			.bind(tsNow(), p.id)
 			.run();
 
+		await clearLoginFailures(env, ip);
 		const maintenance = await getMaintenance(env);
 		const token = await createSession(env, p.username);
 		await logActivity(env, p.username, "LOGIN", "Login berhasil ke KD-Group Panel", "BERHASIL");
