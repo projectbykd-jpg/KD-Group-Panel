@@ -10,7 +10,8 @@
     html.kd-booting { background: #060a15 !important; }
   </style>
   <script>document.documentElement.classList.add('kd-booting');</script>
-  <link rel="icon" type="image/png" href="https://i.ibb.co/r203LHQm/3b266ede-033f-4c5b-a125-77b76028439f.png">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="apple-touch-icon" href="/logo.png">
   <!-- Buka koneksi ke CDN lebih awal supaya aset (ikon, font) mulai diunduh
        tanpa nunggu antrean DNS/TLS satu per satu. Tailwind TIDAK dari CDN:
        di-compile saat build (scripts/build-ui.mjs). -->
@@ -56,7 +57,7 @@
            tanpa kotak/latar tambahan -- lambang bundar + teks di bawahnya tetap
            utuh, tidak terpotong seperti kalau pakai object-cover. -->
       <div class="w-24 h-24 mx-auto mb-5 flex items-center justify-center">
-        <img src="https://i.ibb.co/r203LHQm/3b266ede-033f-4c5b-a125-77b76028439f.png" width="96" height="96" decoding="async" referrerpolicy="no-referrer" alt="KD-Group" onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('span'),{className:'kd-logo-fallback',textContent:'KD'}))" class="w-full h-full object-contain drop-shadow-[0_0_15px_rgba(34,211,238,0.5)]">
+        <img src="/logo.png" width="96" height="96" decoding="async" fetchpriority="high" alt="KD-Group" onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('span'),{className:'kd-logo-fallback',textContent:'KD'}))" class="w-full h-full object-contain drop-shadow-[0_0_15px_rgba(34,211,238,0.5)]">
       </div>
       <h2 class="text-2xl font-extrabold neon-cyan tracking-tight">SECURE ACCESS</h2>
       <p class="text-[11px] text-slate-400 font-bold tracking-[0.3em] mt-1.5">KD GROUP PANEL SYSTEM</p>
@@ -88,7 +89,7 @@
       <div class="flex flex-row lg:flex-col items-center lg:items-stretch gap-4 w-full">
         <div class="flex items-center gap-3 px-1.5 pb-3.5 mb-1 border-b border-white/[0.06] w-full">
           <div class="w-11 h-11 flex items-center justify-center shrink-0">
-            <img src="https://i.ibb.co/r203LHQm/3b266ede-033f-4c5b-a125-77b76028439f.png" width="44" height="44" decoding="async" referrerpolicy="no-referrer" alt="KD-Group" onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('span'),{className:'kd-logo-fallback',textContent:'KD'}))" class="w-full h-full object-contain">
+            <img src="/logo.png" width="44" height="44" decoding="async" alt="KD-Group" onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('span'),{className:'kd-logo-fallback',textContent:'KD'}))" class="w-full h-full object-contain">
           </div>
           <div class="hidden lg:block overflow-hidden">
             <h3 class="text-[13px] font-extrabold text-white tracking-wide truncate leading-tight">KD-GROUP</h3>
