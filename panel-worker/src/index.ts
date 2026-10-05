@@ -62,6 +62,9 @@ import {
 	lapSaveConfig,
 } from "./api/lap";
 import {
+	botBloggerAuthUrl,
+	botBloggerConnect,
+	botBloggerTest,
 	botFbRunNow,
 	botFbTemplateGenerate,
 	botNewsAddSource,
@@ -241,6 +244,9 @@ const ROUTES: Record<string, Handler> = {
 	botFbRunNow: (env, b) => botFbRunNow(env, s(b.token)),
 	botFbTemplateGenerate: (env, b) => botFbTemplateGenerate(env, s(b.token)),
 	botNewsSkip: (env, b) => botNewsSkip(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
+	botBloggerAuthUrl: (env, b) => botBloggerAuthUrl(env, s(b.token)),
+	botBloggerConnect: (env, b) => botBloggerConnect(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
+	botBloggerTest: (env, b) => botBloggerTest(env, s(b.token)),
 
 	// Live Chat Auto-Reply — sisi panel (sesi login ADMIN/OPERATOR)
 	livechatListSessions: (env, b) => livechatListSessions(env, s(b.token)),

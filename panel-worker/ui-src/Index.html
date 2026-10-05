@@ -921,6 +921,14 @@
 
         <!-- ============ SUB-HALAMAN: DASHBOARD ============ -->
         <div id="bot-sec-dashboard" class="flex flex-col gap-5">
+          <div id="botBloggerAlert" class="blogger-alert" role="alert" hidden>
+            <div class="blogger-alert-icon"><i class="fa-brands fa-blogger"></i></div>
+            <div class="min-w-0 flex-1">
+              <div class="blogger-alert-title">Posting ke Blogger berhenti</div>
+              <div id="botBloggerAlertMsg" class="blogger-alert-msg"></div>
+            </div>
+            <button type="button" onclick="botBloggerGoConnect()" class="blogger-alert-btn"><i class="fa-solid fa-link mr-1.5"></i>Hubungkan Ulang</button>
+          </div>
           <div class="glass-card rounded-3xl p-6 flex flex-col gap-5">
             <div class="flex items-start justify-between gap-4 flex-wrap">
               <div class="panel-section-title pt-2.5"><i class="fa-solid fa-gauge-high text-emerald-400 text-sm"></i> RINGKASAN</div>
@@ -1111,8 +1119,39 @@
               <label class="cfg-field">Model Gemini<input id="botModel" class="cfg-input" placeholder="gemini-flash-latest"></label>
             </div>
 
-            <div class="cfg-group">
+            <div class="cfg-group" id="botBloggerGroup">
               <div class="cfg-group-title"><i class="fa-brands fa-blogger text-cyan-300"></i>Blogger</div>
+              <div class="blogger-conn">
+                <div class="blogger-conn-row">
+                  <span id="botBloggerPill" class="blogger-pill is-unknown"><i class="fa-solid fa-circle"></i><span>Memeriksa...</span></span>
+                  <div class="flex gap-2 flex-wrap">
+                    <button type="button" id="botBloggerTestBtn" onclick="botBloggerTestConn()" class="btn-secondary text-xs font-bold px-3.5 py-2 rounded-xl"><i class="fa-solid fa-stethoscope mr-1.5"></i>Tes Koneksi</button>
+                    <button type="button" onclick="botBloggerToggleConnect(true)" class="blogger-connect-btn"><i class="fa-solid fa-link mr-1.5"></i>Hubungkan Ulang</button>
+                  </div>
+                </div>
+                <div id="botBloggerDetail" class="blogger-conn-detail"></div>
+                <div id="botBloggerConnect" class="blogger-steps" hidden>
+                  <ol>
+                    <li><b>Buka halaman izin Google</b>, login dengan akun pemilik blog, lalu klik <b>Izinkan</b>.
+                      <div><button type="button" onclick="botBloggerOpenAuth()" class="blogger-connect-btn mt-2"><i class="fa-brands fa-google mr-1.5"></i>Buka Izin Google</button></div></li>
+                    <li>Browser akan membuka alamat <code>localhost</code> yang <b>tidak bisa dimuat</b> (memang begitu). <b>Salin seluruh alamat</b> dari address bar.</li>
+                    <li>Tempel di sini lalu simpan:
+                      <div class="flex gap-2 mt-2 flex-wrap">
+                        <input id="botBloggerCode" class="cfg-input flex-1 min-w-[220px]" placeholder="http://localhost/?code=4/0A...&amp;scope=..." autocomplete="off" spellcheck="false">
+                        <button type="button" id="botBloggerSaveBtn" onclick="botBloggerSubmitCode()" class="blogger-connect-btn"><i class="fa-solid fa-floppy-disk mr-1.5"></i>Simpan &amp; Tes</button>
+                      </div></li>
+                  </ol>
+                  <details class="blogger-advanced">
+                    <summary>Client OAuth (isi hanya kalau ganti client di Google Cloud)</summary>
+                    <div class="grid sm:grid-cols-2 gap-3 mt-2">
+                      <label class="cfg-field">Client ID<input id="botBloggerClientId" class="cfg-input" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off"></label>
+                      <label class="cfg-field">Client Secret<input id="botBloggerClientSecret" class="cfg-input" placeholder="kosongkan = tidak diubah" autocomplete="off"></label>
+                    </div>
+                    <span class="cfg-hint">Disimpan lewat tombol SIMPAN SETTING di bawah. Jenis client: <b>Desktop app</b>.</span>
+                  </details>
+                  <p class="blogger-warn"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Supaya tidak putus lagi tiap 7 hari: di <b>Google Cloud Console &rarr; Google Auth Platform &rarr; Audience</b>, ubah <b>Publishing status</b> dari <i>Testing</i> ke <b>In production</b>, lalu hubungkan ulang sekali lagi.</p>
+                </div>
+              </div>
               <label class="cfg-field">Blog ID<input id="botBlogId" class="cfg-input"></label>
               <label class="cfg-field">Link situs Blogger<input id="botBloggerSiteUrl" class="cfg-input" placeholder="https://lokalstore88.blogspot.com"></label>
               <span class="cfg-hint">Dipromosikan otomatis di tiap artikel, termasuk yang tayang di Berita Terkini.</span>

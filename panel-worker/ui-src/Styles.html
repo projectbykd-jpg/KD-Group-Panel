@@ -2457,6 +2457,34 @@ table tbody tr:hover td{
 .offline-banner i{margin-right:6px}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 
+/* ===== Koneksi Blogger (BOT) ===== */
+.blogger-alert{display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:18px;
+  background:linear-gradient(135deg,rgba(244,63,94,.14),rgba(244,63,94,.06));border:1px solid rgba(251,113,133,.32)}
+.blogger-alert[hidden]{display:none}
+.blogger-alert-icon{width:40px;height:40px;flex:0 0 40px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:rgba(251,113,133,.16);color:#fda4af;font-size:18px}
+.blogger-alert-title{font-size:13px;font-weight:800;color:#ffe4e6}
+.blogger-alert-msg{font-size:11px;color:#fecdd3;margin-top:2px;line-height:1.45;overflow-wrap:anywhere}
+.blogger-alert-btn,.blogger-connect-btn{display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;min-height:38px;padding:0 14px;border-radius:12px;font-size:11px;font-weight:800;
+  color:#0b1220;background:linear-gradient(110deg,#fda4af,#fb7185);border:0;cursor:pointer}
+.blogger-connect-btn{color:#04121c;background:linear-gradient(110deg,#67e8f9,#22d3ee)}
+.blogger-alert-btn:disabled,.blogger-connect-btn:disabled{opacity:.6;cursor:wait}
+@media(max-width:560px){.blogger-alert{flex-wrap:wrap}.blogger-alert-btn{width:100%}}
+.blogger-conn{display:flex;flex-direction:column;gap:10px;padding:12px;border-radius:14px;background:rgba(2,6,23,.35);border:1px solid rgba(148,163,184,.10)}
+.blogger-conn-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.blogger-pill{display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border-radius:999px;font-size:11px;font-weight:800;border:1px solid transparent}
+.blogger-pill i{font-size:11px}
+.blogger-pill.is-ok{color:#6ee7b7;background:rgba(16,185,129,.12);border-color:rgba(52,211,153,.25)}
+.blogger-pill.is-bad{color:#fda4af;background:rgba(244,63,94,.12);border-color:rgba(251,113,133,.28)}
+.blogger-pill.is-unknown{color:#94a3b8;background:rgba(148,163,184,.08);border-color:rgba(148,163,184,.16)}
+.blogger-conn-detail{font-size:11px;color:#94a3b8;line-height:1.6;overflow-wrap:anywhere}
+.blogger-conn-detail:empty{display:none}
+.blogger-steps{display:flex;flex-direction:column;gap:10px;padding-top:6px;border-top:1px dashed rgba(148,163,184,.14)}
+.blogger-steps[hidden]{display:none}
+.blogger-steps ol{margin:0;padding-left:18px;list-style:decimal;display:flex;flex-direction:column;gap:10px;font-size:12px;color:#cbd5e1;line-height:1.5}
+.blogger-steps code{font-size:11px;padding:1px 5px;border-radius:6px;background:rgba(148,163,184,.12);color:#e2e8f0}
+.blogger-advanced summary{cursor:pointer;font-size:11px;font-weight:700;color:#94a3b8}
+.blogger-warn{margin:0;font-size:11px;line-height:1.5;color:#fcd34d;padding:9px 11px;border-radius:12px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2)}
+
 /* ===== SESSION HEADER — satu-satunya sumber gaya header =====
    Menggantikan lapisan V4 (di sini), V5 (dulu tertulis di LUAR tag style
    sehingga tampil sebagai teks lalu dihapus pakai JS) dan V6 (Fixes.html).

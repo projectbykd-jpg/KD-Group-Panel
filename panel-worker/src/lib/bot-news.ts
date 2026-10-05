@@ -670,12 +670,45 @@ export async function geminiRewrite(env: Env, cfg: Record<string, string>, art: 
 // ---------------------------------------------------------------------------
 let _bloggerTok: { token: string; exp: number } | null = null;
 
-export async function bloggerAccessToken(env: Env, cfg: Record<string, string>): Promise<string> {
-	if (_bloggerTok && _bloggerTok.exp > Date.now() + 60_000) return _bloggerTok.token;
+export const BLOGGER_SCOPE = "https://www.googleapis.com/auth/blogger";
+
+/**
+ * Izin Google untuk Blogger sudah tidak berlaku (refresh token kedaluwarsa /
+ * dicabut / client OAuth salah). BUKAN masalah sementara: setiap percobaan
+ * berikutnya pasti gagal sampai pemilik menghubungkan ulang dari panel
+ * (BOT -> Setting -> Koneksi Blogger). Dibedakan dari error biasa supaya
+ * artikel TIDAK dibakar jadi 'error' satu per satu tiap tick.
+ *
+ * Penyebab paling sering: app OAuth di Google Cloud masih berstatus
+ * "Testing" -> refresh token otomatis mati 7 hari setelah dibuat.
+ */
+export class BloggerAuthError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "BloggerAuthError";
+	}
+}
+
+export function isBloggerAuthMessage(msg: string): boolean {
+	return /Blogger terputus|Blogger OAuth refresh gagal|invalid_grant/i.test(String(msg || ""));
+}
+
+export function resetBloggerTokenCache(): void {
+	_bloggerTok = null;
+}
+
+export async function bloggerAccessToken(env: Env, cfg: Record<string, string>, opts: { fresh?: boolean } = {}): Promise<string> {
+	if (!opts.fresh && _bloggerTok && _bloggerTok.exp > Date.now() + 60_000) return _bloggerTok.token;
+	if (!cfg.blogger_client_id || !cfg.blogger_client_secret) {
+		throw new BloggerAuthError("Blogger terputus: Client ID / Client Secret OAuth belum diisi (BOT -> Setting -> Koneksi Blogger).");
+	}
+	if (!cfg.blogger_refresh_token) {
+		throw new BloggerAuthError("Blogger terputus: belum pernah dihubungkan. Klik Hubungkan Ulang di BOT -> Setting -> Koneksi Blogger.");
+	}
 	const body = new URLSearchParams({
-		client_id: cfg.blogger_client_id || "",
-		client_secret: cfg.blogger_client_secret || "",
-		refresh_token: cfg.blogger_refresh_token || "",
+		client_id: cfg.blogger_client_id,
+		client_secret: cfg.blogger_client_secret,
+		refresh_token: cfg.blogger_refresh_token,
 		grant_type: "refresh_token",
 	});
 	const r = await fetch("https://oauth2.googleapis.com/token", {
@@ -683,12 +716,133 @@ export async function bloggerAccessToken(env: Env, cfg: Record<string, string>):
 		headers: { "Content-Type": "application/x-www-form-urlencoded" },
 		body: body.toString(),
 	});
-	const j = (await r.json()) as any;
+	const j = (await r.json().catch(() => ({}))) as any;
 	if (!r.ok || !j.access_token) {
-		throw new Error("Blogger OAuth refresh gagal: " + JSON.stringify(j).slice(0, 300));
+		const code = String(j?.error || "");
+		if (code === "invalid_grant") {
+			throw new BloggerAuthError(
+				"Blogger terputus: izin Google kedaluwarsa/dicabut (invalid_grant). Hubungkan ulang di BOT -> Setting -> Koneksi Blogger.",
+			);
+		}
+		if (code === "invalid_client" || code === "unauthorized_client") {
+			throw new BloggerAuthError(`Blogger terputus: Client ID/Secret OAuth ditolak Google (${code}). Periksa di BOT -> Setting -> Koneksi Blogger.`);
+		}
+		throw new Error("Blogger OAuth sementara gagal (HTTP " + r.status + "): " + JSON.stringify(j).slice(0, 200));
 	}
 	_bloggerTok = { token: j.access_token, exp: Date.now() + Number(j.expires_in || 3500) * 1000 };
 	return _bloggerTok.token;
+}
+
+/** Simpan/hapus status "Blogger terputus" -- hanya menulis kalau berubah. */
+export async function bloggerSetAuthState(env: Env, cfg: Record<string, string>, error: string): Promise<void> {
+	const current = cfg.blogger_auth_error || "";
+	if (current === error) return;
+	await botCfgSet(env, { blogger_auth_error: error, blogger_auth_error_at: error ? tsNow() : "" });
+	cfg.blogger_auth_error = error;
+}
+
+export function bloggerRedirectUri(cfg: Record<string, string>): string {
+	// Client OAuth jenis "Desktop app" menerima redirect ke localhost. Halaman
+	// localhost memang tidak terbuka di browser -- yang dibutuhkan cuma `code`
+	// di address bar, lalu ditempel ke panel (lihat bloggerExchangeCode).
+	return (cfg.blogger_redirect_uri || "http://localhost").trim();
+}
+
+export function bloggerAuthUrl(cfg: Record<string, string>): string {
+	if (!cfg.blogger_client_id) throw new Error("Isi Client ID OAuth dulu (BOT -> Setting -> Koneksi Blogger).");
+	const q = new URLSearchParams({
+		client_id: cfg.blogger_client_id,
+		redirect_uri: bloggerRedirectUri(cfg),
+		response_type: "code",
+		scope: BLOGGER_SCOPE,
+		// offline + consent = Google SELALU memberi refresh_token baru.
+		access_type: "offline",
+		prompt: "consent",
+	});
+	return "https://accounts.google.com/o/oauth2/v2/auth?" + q.toString();
+}
+
+/** Terima URL lengkap dari address bar ("http://localhost/?code=...&scope=...") ATAU kode mentahnya saja. */
+export function extractOAuthCode(input: string): string {
+	const raw = String(input || "").trim();
+	if (!raw) return "";
+	const m = raw.match(/[?&#]code=([^&#\s]+)/);
+	const code = m ? m[1] : raw;
+	try {
+		return decodeURIComponent(code).trim();
+	} catch {
+		return code.trim();
+	}
+}
+
+export async function bloggerExchangeCode(
+	cfg: Record<string, string>,
+	input: string,
+): Promise<{ refreshToken: string; refreshExpiresAt: string }> {
+	const code = extractOAuthCode(input);
+	if (!code || code.length < 10) throw new Error("Kode izin Google tidak ditemukan. Tempel URL lengkap dari address bar setelah klik Izinkan.");
+	if (!cfg.blogger_client_id || !cfg.blogger_client_secret) throw new Error("Client ID / Client Secret OAuth belum diisi.");
+	const r = await fetch("https://oauth2.googleapis.com/token", {
+		method: "POST",
+		headers: { "Content-Type": "application/x-www-form-urlencoded" },
+		body: new URLSearchParams({
+			code,
+			client_id: cfg.blogger_client_id,
+			client_secret: cfg.blogger_client_secret,
+			redirect_uri: bloggerRedirectUri(cfg),
+			grant_type: "authorization_code",
+		}).toString(),
+	});
+	const j = (await r.json().catch(() => ({}))) as any;
+	if (!r.ok || !j.refresh_token) {
+		const code = String(j?.error || "");
+		const hint =
+			code === "invalid_grant"
+				? " Kode sudah dipakai/kedaluwarsa (kode cuma berlaku beberapa menit & sekali pakai) -- ulangi dari langkah 1."
+				: code === "redirect_uri_mismatch"
+					? " Redirect URI tidak cocok dengan client OAuth -- pakai client jenis Desktop app."
+					: !j.refresh_token && j.access_token
+						? " Google tidak memberi refresh token -- ulangi dari langkah 1 (link sudah memakai prompt=consent)."
+						: "";
+		throw new Error("Gagal menukar kode izin Google: " + (code || "HTTP " + r.status) + "." + hint);
+	}
+	// Ada refresh_token_expires_in = app OAuth masih "Testing": token mati
+	// otomatis setelah ~7 hari. Disimpan supaya panel bisa memperingatkan.
+	const expIn = Number(j.refresh_token_expires_in || 0);
+	const refreshExpiresAt = expIn > 0 ? new Date(Date.now() + expIn * 1000 + 7 * 3600 * 1000).toISOString().slice(0, 16).replace("T", " ") : "";
+	return { refreshToken: String(j.refresh_token), refreshExpiresAt };
+}
+
+/** Cek token + akses ke blog yang diset. Mengembalikan nama & URL blog. */
+export async function bloggerVerify(env: Env, cfg: Record<string, string>): Promise<{ name: string; url: string }> {
+	const token = await bloggerAccessToken(env, cfg, { fresh: true });
+	const blogId = cfg.blogger_blog_id;
+	if (!blogId) throw new Error("Blog ID belum diisi (BOT -> Setting -> Blogger).");
+	const r = await fetch(`https://www.googleapis.com/blogger/v3/blogs/${encodeURIComponent(blogId)}?fields=name,url`, {
+		headers: { Authorization: "Bearer " + token },
+	});
+	const j = (await r.json().catch(() => ({}))) as any;
+	if (!r.ok) {
+		const msg = String(j?.error?.message || "HTTP " + r.status);
+		if (r.status === 401) throw new BloggerAuthError("Blogger terputus: akses ditolak (401). Hubungkan ulang. " + msg);
+		throw new Error(`Blog ${blogId} tidak bisa diakses akun Google ini: ${msg}`);
+	}
+	return { name: String(j.name || ""), url: String(j.url || "") };
+}
+
+/**
+ * Artikel yang sempat GAGAL hanya karena izin Blogger mati (dulu langsung
+ * ditandai 'error' permanen tiap tick) dikembalikan ke antrean -- dipanggil
+ * sesudah berhasil menghubungkan ulang, supaya artikelnya tidak hilang.
+ */
+export async function requeueBloggerAuthFailures(env: Env): Promise<number> {
+	const r = await getTurso(env)
+		.prepare(
+			`UPDATE news_article SET status='new', error='' WHERE status='error'
+			 AND (error LIKE 'Blogger OAuth refresh gagal%' OR error LIKE 'Blogger terputus%')`,
+		)
+		.run();
+	return r.meta.changes;
 }
 
 export async function bloggerCreatePost(
@@ -712,7 +866,11 @@ export async function bloggerCreatePost(
 			searchDescription: (post.searchDescription || "").slice(0, 155),
 		}),
 	});
-	const j = (await r.json()) as any;
+	const j = (await r.json().catch(() => ({}))) as any;
+	if (r.status === 401) {
+		resetBloggerTokenCache();
+		throw new BloggerAuthError("Blogger terputus: akses posting ditolak (401). Hubungkan ulang di BOT -> Setting -> Koneksi Blogger.");
+	}
 	if (!r.ok || !j.url) throw new Error("Blogger post gagal: " + JSON.stringify(j).slice(0, 300));
 	return String(j.url);
 }
@@ -1334,6 +1492,14 @@ export async function newsProcessOne(
 		return { done: true, title: rw.title, postUrl: postUrl || undefined, siteOnly: !postUrl };
 	} catch (e) {
 		const msg = e instanceof Error ? e.message : String(e);
+		// Izin Blogger mati: artikel ini TIDAK salah apa-apa -- kembalikan ke
+		// antrean (dulu ditandai 'error' permanen, jadi tiap tick "membakar" satu
+		// artikel + kuota AI tanpa hasil sampai Blogger dihubungkan ulang).
+		if (e instanceof BloggerAuthError || isBloggerAuthMessage(msg)) {
+			await getTurso(env).prepare(`UPDATE news_article SET status='new' WHERE id=? AND status='processing'`).bind(id).run();
+			await bloggerSetAuthState(env, cfg, msg).catch(() => {});
+			return { done: false, error: msg };
+		}
 		// "User location is not supported" = Cloudflare edge yg kebagian request ini
 		// kena geo-block Gemini, sifatnya per-titik-edge & sementara (edge lain masih
 		// jalan). JANGAN tandai error permanen -> biarkan 'new' supaya tick berikutnya
@@ -1482,11 +1648,11 @@ const MAX_RUN_COUNT = 5;
 export async function botNewsRun(
 	env: Env,
 	opts: { force?: boolean; count?: number; mode?: "both" | "blogger" | "site" } = {},
-): Promise<{ pulled: number; posted: number; siteOnly: number; capped: boolean; message: string }> {
+): Promise<{ pulled: number; posted: number; siteOnly: number; capped: boolean; message: string; bloggerBlocked: string }> {
 	const mode = opts.mode || "both";
 	const cfg = await botCfg(env);
 	if (!opts.force && String(cfg.enabled || "0") !== "1") {
-		return { pulled: 0, posted: 0, siteOnly: 0, capped: false, message: "BOT NEWS dimatikan (enabled=0)." };
+		return { pulled: 0, posted: 0, siteOnly: 0, capped: false, message: "BOT NEWS dimatikan (enabled=0).", bloggerBlocked: "" };
 	}
 	const countOverride = opts.count ? Math.max(1, Math.min(MAX_RUN_COUNT, Math.floor(opts.count))) : 0;
 	let perRun = mode === "site" ? 0 : countOverride || Math.max(1, Number(cfg.per_run || "2"));
@@ -1497,6 +1663,25 @@ export async function botNewsRun(
 	// Number("")=0 -> loop situs mati total tanpa pesan error apa pun. "||" aman
 	// dari kasus itu, dan tetap menghormati "0" eksplisit (mematikan loop situs).
 	let sitePerRun = mode === "blogger" ? 0 : countOverride || Math.max(0, Number(cfg.site_per_run || "5"));
+
+	// Cek izin Blogger SEKALI di awal, sebelum mengambil artikel apa pun.
+	// Kalau izinnya mati, loop Blogger dilewati (artikel tidak disentuh, kuota
+	// AI tidak terpakai) dan jatahnya diberikan ke situs sendiri. Token yang
+	// didapat di sini ter-cache, jadi tidak menambah subrequest saat posting.
+	let bloggerBlocked = "";
+	if (perRun > 0) {
+		try {
+			await bloggerAccessToken(env, cfg);
+			if (cfg.blogger_auth_error) await bloggerSetAuthState(env, cfg, "");
+		} catch (e) {
+			if (e instanceof BloggerAuthError) {
+				bloggerBlocked = e.message;
+				await bloggerSetAuthState(env, cfg, e.message);
+				perRun = 0;
+			}
+			// error lain (jaringan dsb) -> biarkan loop di bawah mencoba seperti biasa
+		}
+	}
 	// PENTING: kalau mode="both" (ini yang dipanggil cron eksternal otomatis),
 	// loop Blogger & situs jalan dalam 1 INVOCATION yang SAMA -> subrequest-nya
 	// NUMPUK (tiap artikel Blogger ~6-9 subrequest: Gemini+Blogger+FB+Turso;
@@ -1565,7 +1750,10 @@ export async function botNewsRun(
 	for (let i = 0; i < perRun; i++) {
 		if (postedSoFar >= cap) break; // Blogger capped -> loop Blogger cukup di sini, bukan urusan loop situs di bawah.
 		const r = await newsProcessOne(env, { postToBlogger: true });
-		if (!r.done) break; // tidak ada artikel 'new'
+		if (!r.done) {
+			if (r.error) bloggerBlocked = r.error; // izin Blogger mati di tengah jalan
+			break; // tidak ada artikel 'new' / Blogger terputus
+		}
 		if (r.postUrl) {
 			posted++;
 			postedSoFar++;
@@ -1597,7 +1785,12 @@ export async function botNewsRun(
 		capped,
 		// Kalau 0 posting & ada error, tampilkan alasannya -- biar user/kita tidak
 		// perlu buka database tiap kali cuma buat tahu KENAPA 0.
-		message: parts.join("; ") + "." + (posted === 0 && siteOnly === 0 && lastError ? ` [${lastError.slice(0, 200)}]` : ""),
+		message:
+			parts.join("; ") +
+			"." +
+			(bloggerBlocked ? ` [${bloggerBlocked.slice(0, 220)}]` : "") +
+			(posted === 0 && siteOnly === 0 && lastError && lastError !== bloggerBlocked ? ` [${lastError.slice(0, 200)}]` : ""),
+		bloggerBlocked,
 	};
 }
 
@@ -1663,6 +1856,13 @@ export async function botNewsSnapshot(env: Env) {
 			has_gemini_key: !!cfg.gemini_key,
 			has_groq_key: !!cfg.groq_key,
 			has_blogger: !!(cfg.blogger_refresh_token && cfg.blogger_blog_id),
+			has_blogger_client: !!(cfg.blogger_client_id && cfg.blogger_client_secret),
+			blogger_client_id: cfg.blogger_client_id || "",
+			blogger_auth_error: cfg.blogger_auth_error || "",
+			blogger_auth_error_at: cfg.blogger_auth_error_at || "",
+			blogger_refresh_expires_at: cfg.blogger_refresh_expires_at || "",
+			blogger_connected_at: cfg.blogger_connected_at || "",
+			blogger_redirect_uri: bloggerRedirectUri(cfg),
 			blog_id: cfg.blogger_blog_id || "",
 			blogger_site_url: cfg.blogger_site_url || "",
 			fb_enabled: String(cfg.fb_enabled || "0") === "1",
