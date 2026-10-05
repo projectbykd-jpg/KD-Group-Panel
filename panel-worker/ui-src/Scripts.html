@@ -849,6 +849,53 @@
       toast("Berhasil Keluar Sesi");
     }
 
+    function togglePasswordVisibility() {
+      const input = document.getElementById('pass');
+      const btn = document.getElementById('passToggle');
+      if (!input || !btn) return;
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      btn.setAttribute('aria-pressed', String(show));
+      btn.setAttribute('aria-label', show ? 'Sembunyikan password' : 'Tampilkan password');
+      btn.innerHTML = show ? '<i class="fa-solid fa-eye-slash"></i>' : '<i class="fa-solid fa-eye"></i>';
+      input.focus();
+    }
+    ['keydown', 'keyup'].forEach(evt => document.getElementById('pass').addEventListener(evt, e => {
+      const warn = document.getElementById('caps-warn');
+      if (warn && e.getModifierState) warn.hidden = !e.getModifierState('CapsLock');
+    }));
+
+    // Sesi ditolak server di tengah kerja (habis 21 hari, dihapus admin, akun
+    // dinonaktifkan/terkunci): shim /api memancarkan 'kd:session-expired'.
+    // Dulu panel tetap terbuka dan setiap tombol gagal diam-diam sampai
+    // operator reload sendiri. Sekarang langsung kembali ke layar login.
+    window.addEventListener('kd:session-expired', e => {
+      if (!currentUser) return;
+      const msg = (e && e.detail) || 'Sesi berakhir. Silakan login kembali.';
+      const maintModal = document.getElementById('maintenanceModal');
+      if (maintModal) maintModal.classList.remove('open');
+      document.querySelectorAll('.modal-shell.open').forEach(m => m.classList.remove('open'));
+      document.body.classList.remove('modal-open');
+      try { closeActionPopup(); } catch (err) {}
+      clearLocalSession();
+      stopLivePolling();
+      stopInvestPolling();
+      clearTimeout(lapAdminPollTimer);
+      clearTimeout(inactivityTimer);
+      headerSummaryLoadedOnce = false;
+      document.getElementById('pass').value = '';
+      openLoginScreen(msg);
+    });
+
+    // Status koneksi: banner tipis selama offline, supaya operator tahu kenapa
+    // kirim/refresh gagal, bukan mengira panelnya rusak.
+    function syncOnlineBanner() {
+      const el = document.getElementById('offline-banner');
+      if (el) el.hidden = navigator.onLine !== false;
+    }
+    window.addEventListener('online', () => { syncOnlineBanner(); toast('Koneksi kembali normal'); if (currentUser) pumpLivePoll(true); });
+    window.addEventListener('offline', syncOnlineBanner);
+
     const LAP_PAGES = ['lap-admin','lap-motion','lap-mozart','lap-setting'];
     const BOT_PAGES = ['bot-dashboard','bot-sources','bot-history','bot-fbdirect','bot-config'];
     const LIVECHAT_PAGES = ['livechat-sessions','livechat-templates'];
@@ -2506,6 +2553,9 @@
 
           const tbody = document.getElementById('prediction-table-body');
           tbody.innerHTML = '';
+          if (!globalPredictionsData.length) {
+            tbody.innerHTML = '<tr><td colspan="4" class="table-empty-cell"><span class="table-empty-inner"><i class="fa-solid fa-calendar-xmark"></i>Belum ada jadwal prediksi dari server. Klik Refresh Status.</span></td></tr>';
+          } else
 
           tbody.innerHTML = globalPredictionsData.map((item, index) => {
             const ui = getPredictionRowUi(item, 'prediction-send-btn');

@@ -44,6 +44,8 @@
 </head>
 <body class="p-3 sm:p-6 min-h-screen flex flex-col items-center">
 
+  <div id="offline-banner" class="offline-banner" role="status" hidden><i class="fa-solid fa-wifi"></i>Tidak ada koneksi internet. Data &amp; pengiriman akan gagal sampai koneksi kembali.</div>
+
   <!-- LOGIN SCREEN -->
   <div id="login-screen" class="w-full max-w-md glass-card rounded-[2.5rem] p-8 sm:p-10 flex flex-col gap-6 relative overflow-hidden border-t-2 border-cyan-500/60 shadow-2xl fade-in my-auto">
     <div class="absolute -top-20 -right-20 w-48 h-48 bg-cyan-500/20 blur-[70px] rounded-full pointer-events-none"></div>
@@ -54,7 +56,7 @@
            tanpa kotak/latar tambahan -- lambang bundar + teks di bawahnya tetap
            utuh, tidak terpotong seperti kalau pakai object-cover. -->
       <div class="w-24 h-24 mx-auto mb-5 flex items-center justify-center">
-        <img src="https://i.ibb.co/r203LHQm/3b266ede-033f-4c5b-a125-77b76028439f.png" width="96" height="96" decoding="async" referrerpolicy="no-referrer" alt="KD-Group" class="w-full h-full object-contain drop-shadow-[0_0_15px_rgba(34,211,238,0.5)]">
+        <img src="https://i.ibb.co/r203LHQm/3b266ede-033f-4c5b-a125-77b76028439f.png" width="96" height="96" decoding="async" referrerpolicy="no-referrer" alt="KD-Group" onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('span'),{className:'kd-logo-fallback',textContent:'KD'}))" class="w-full h-full object-contain drop-shadow-[0_0_15px_rgba(34,211,238,0.5)]">
       </div>
       <h2 class="text-2xl font-extrabold neon-cyan tracking-tight">SECURE ACCESS</h2>
       <p class="text-[11px] text-slate-400 font-bold tracking-[0.3em] mt-1.5">KD GROUP PANEL SYSTEM</p>
@@ -63,17 +65,19 @@
     <div class="flex flex-col gap-4 relative z-10">
       <div class="glass-inner rounded-2xl flex items-center px-4 py-3.5 border border-white/5 transition-all">
         <i class="fas fa-user text-cyan-400 mr-3.5 text-sm"></i>
-        <input type="text" id="user" placeholder="Username" class="bg-transparent outline-none w-full text-sm font-medium text-white placeholder-slate-500">
+        <input type="text" id="user" name="username" placeholder="Username" autocomplete="username" autocapitalize="none" spellcheck="false" aria-label="Username" class="bg-transparent outline-none w-full text-sm font-medium text-white placeholder-slate-500">
       </div>
       <div class="glass-inner rounded-2xl flex items-center px-4 py-3.5 border border-white/5 transition-all">
         <i class="fas fa-lock text-pink-400 mr-3.5 text-sm"></i>
-        <input type="password" id="pass" placeholder="Password" class="bg-transparent outline-none w-full text-sm font-medium text-white placeholder-slate-500">
+        <input type="password" id="pass" name="password" placeholder="Password" autocomplete="current-password" aria-label="Password" aria-describedby="caps-warn" class="bg-transparent outline-none w-full text-sm font-medium text-white placeholder-slate-500">
+        <button type="button" id="passToggle" onclick="togglePasswordVisibility()" class="login-eye" aria-label="Tampilkan password" aria-pressed="false"><i class="fa-solid fa-eye"></i></button>
       </div>
+      <p id="caps-warn" class="login-caps" hidden><i class="fa-solid fa-triangle-exclamation"></i> Caps Lock aktif</p>
       <button onclick="handleLogin()" id="btnLogin" class="w-full py-4 bg-gradient-to-r from-cyan-400 via-cyan-500 to-blue-600 hover:from-cyan-300 hover:to-blue-500 rounded-2xl font-extrabold text-xs tracking-[0.25em] transition-all active:scale-95 shadow-lg shadow-cyan-500/30 text-slate-950 cursor-pointer">
         LOGIN
       </button>
     </div>
-    <p id="login-err" class="text-[11px] text-rose-400 text-center font-semibold h-4 relative z-10"></p>
+    <p id="login-err" class="text-[11px] text-rose-400 text-center font-semibold min-h-4 relative z-10" role="alert" aria-live="assertive"></p>
   </div>
 
   <!-- MAIN WRAPPER -->
@@ -84,7 +88,7 @@
       <div class="flex flex-row lg:flex-col items-center lg:items-stretch gap-4 w-full">
         <div class="flex items-center gap-3 px-1.5 pb-3.5 mb-1 border-b border-white/[0.06] w-full">
           <div class="w-11 h-11 flex items-center justify-center shrink-0">
-            <img src="https://i.ibb.co/r203LHQm/3b266ede-033f-4c5b-a125-77b76028439f.png" width="44" height="44" decoding="async" referrerpolicy="no-referrer" alt="KD-Group" class="w-full h-full object-contain">
+            <img src="https://i.ibb.co/r203LHQm/3b266ede-033f-4c5b-a125-77b76028439f.png" width="44" height="44" decoding="async" referrerpolicy="no-referrer" alt="KD-Group" onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('span'),{className:'kd-logo-fallback',textContent:'KD'}))" class="w-full h-full object-contain">
           </div>
           <div class="hidden lg:block overflow-hidden">
             <h3 class="text-[13px] font-extrabold text-white tracking-wide truncate leading-tight">KD-GROUP</h3>

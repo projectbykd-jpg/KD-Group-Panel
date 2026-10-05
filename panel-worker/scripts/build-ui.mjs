@@ -102,6 +102,7 @@ const shim = `<script>
 (function () {
   var API = "/api";
   var ARG_MAP = ${JSON.stringify(ARG_MAP)};
+  var SESSION_EXEMPT = { checkLogin: 1, resumeSession: 1, getBootstrapData: 1, logout: 1, logoutSession: 1 };
   function call(fn, args, onOk, onErr) {
     var body = { action: fn };
     var names = ARG_MAP[fn];
@@ -110,20 +111,38 @@ const shim = `<script>
     } else {
       body._args = Array.prototype.slice.call(args);
     }
+    // Batas waktu: tanpa ini request yang menggantung (jaringan HP putus di
+    // tengah jalan) membuat tombol "MENYIMPAN..." berputar selamanya.
+    // 180 dtk sengaja longgar -- tarik laporan / proses BOT bisa puluhan detik.
+    var ctrl = typeof AbortController === "function" ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 180000) : null;
     fetch(API, {
       method: "POST",
       credentials: "same-origin",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
+      signal: ctrl ? ctrl.signal : undefined,
     })
       .then(function (r) { return r.text(); })
       .then(function (t) {
+        if (timer) clearTimeout(timer);
         var data;
         try { data = t ? JSON.parse(t) : null; } catch (e) { data = t; }
+        // Sesi ditolak server -> beri tahu panel sekali (lihat listener
+        // 'kd:session-expired' di Scripts.html). Endpoint login/bootstrap
+        // punya penanganan sendiri, jadi dikecualikan.
+        if (data && data.success === false && !SESSION_EXEMPT[fn] &&
+            /sesi tidak valid|telah berakhir|akun tidak ditemukan|akun sedang|akun terkunci/i.test(String(data.message || ""))) {
+          try { window.dispatchEvent(new CustomEvent("kd:session-expired", { detail: String(data.message) })); } catch (e) {}
+        }
         (onOk || function () {})(data);
       })
       .catch(function (e) {
-        (onErr || function () {})(e instanceof Error ? e : new Error(String(e)));
+        if (timer) clearTimeout(timer);
+        var msg = e && e.name === "AbortError"
+          ? "Server tidak merespons (lebih dari 3 menit). Coba lagi."
+          : (navigator.onLine === false ? "Tidak ada koneksi internet." : "Tidak dapat menghubungi server. Periksa koneksi lalu coba lagi.");
+        (onErr || function () {})(new Error(msg));
       });
   }
   function makeRunner(onOk, onErr) {
