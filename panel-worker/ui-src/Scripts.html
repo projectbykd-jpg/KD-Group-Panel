@@ -839,6 +839,7 @@
       lapResetForLogout();
       pageDataCache.activity = null;
       pageFetchedAt.activity = 0; pageFetchedAt.prediction = 0;
+      botAiData = null; botAiFetchedAt = 0;
       headerSummaryLoadedOnce = false;
       clearTimeout(inactivityTimer);
       document.getElementById('user').value = '';
@@ -5432,6 +5433,269 @@ Tindakan ini tidak dapat dibatalkan.`,
       // Semua sub-halaman BOT memakai snapshot yang sama: pindah tab tidak perlu
       // menarik ulang 6 query Turso kalau datanya baru dimuat (<20 dtk).
       if (Date.now() - pageFetchedAt.bot > 20000) loadBotNews();
+      if (page === 'bot-config') {
+        let tab = 'ai';
+        try { tab = localStorage.getItem('kd_bot_cfg_tab') || 'ai'; } catch (e) {}
+        switchBotCfgTab(tab);
+      }
+      if (page === 'bot-dashboard') loadBotAi(false);
+    }
+
+    /* ===== Setting BOT: 5 tab (AI Provider, Konten, Jadwal, Blogger, Sosial) ===== */
+    const BOT_CFG_TABS = ['ai','content','schedule','blogger','social'];
+    function switchBotCfgTab(tab) {
+      if (BOT_CFG_TABS.indexOf(tab) < 0) tab = 'ai';
+      try { localStorage.setItem('kd_bot_cfg_tab', tab); } catch (e) {}
+      document.querySelectorAll('#botCfgTabs .admin-tab').forEach(t => t.classList.toggle('active', t.dataset.cfgTab === tab));
+      document.querySelectorAll('#bot-sec-config .bot-cfg-panel').forEach(p => p.classList.toggle('active', p.dataset.cfgPanel === tab));
+      const sel = document.getElementById('botCfgTabSelect');
+      if (sel && sel.value !== tab) sel.value = tab;
+      // AI Provider menyimpan per provider (tombol di tiap kartu); tab lain lewat SIMPAN SETTING.
+      const bar = document.getElementById('botCfgSaveBar');
+      if (bar) bar.hidden = tab === 'ai';
+      if (tab === 'ai') loadBotAi(false);
+    }
+
+    /* ===== AI Provider: daftar base URL + key + model, urutan = prioritas ===== */
+    let botAiData = null;
+    let botAiFetchedAt = 0;
+    const fmtTok = n => Number(n || 0).toLocaleString('id-ID');
+    const fmtTokShort = n => {
+      n = Number(n || 0);
+      if (n >= 1e9) return (n / 1e9).toFixed(n >= 1e10 ? 0 : 1).replace('.', ',') + ' M';
+      if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace('.', ',') + ' jt';
+      if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1).replace('.', ',') + ' rb';
+      return String(n);
+    };
+    const AI_STATE_LABEL = { active: ['Aktif', 'ok'], disabled: ['Nonaktif', 'off'], expired: ['Masa aktif habis', 'bad'], exhausted: ['Kuota habis', 'bad'], incomplete: ['Belum lengkap', 'warn'] };
+    const AI_PRESETS = {
+      dattio: { name: 'DattioAI', base: 'https://bandelbanget.xyz/v1', model: 'deepseek-v4-flash', days: '28' },
+      groq: { name: 'Groq', base: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile', days: '' },
+      gemini: { name: 'Gemini', base: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-flash-latest', days: '' },
+      openrouter: { name: 'OpenRouter', base: 'https://openrouter.ai/api/v1', model: '', days: '' },
+      deepseek: { name: 'DeepSeek', base: 'https://api.deepseek.com/v1', model: 'deepseek-chat', days: '' }
+    };
+    const hostOf = u => { try { return new URL(u).host; } catch (e) { return u || '-'; } };
+    const shortDate = d => { if (!d) return ''; const p = String(d).slice(0, 10).split('-'); const m = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'][Number(p[1]) - 1] || ''; return Number(p[2]) + ' ' + m + ' ' + p[0]; };
+
+    let botAiLoading = false;
+    function loadBotAi(force) {
+      if (!currentUser) return;
+      if (botAiData) renderBotAi(botAiData);
+      if (botAiLoading || (!force && botAiData && Date.now() - botAiFetchedAt < 15000)) return;
+      botAiLoading = true;
+      google.script.run
+        .withSuccessHandler(res => { botAiLoading = false; if (apiFailed(res)) { toast(apiMessage(res, 'Gagal memuat AI provider')); return; } applyBotAi(res); })
+        .withFailureHandler(e => { botAiLoading = false; toast('AI provider: ' + ((e && e.message) || e)); })
+        .botAiList(currentSessionToken);
+    }
+    function applyBotAi(res) {
+      botAiData = res;
+      botAiFetchedAt = Date.now();
+      renderBotAi(res);
+    }
+
+    function aiQuotaLine(p) {
+      if (p.quota > 0) {
+        const tone = p.pctUsed >= 90 ? 'bad' : p.pctUsed >= 70 ? 'warn' : 'ok';
+        return `<div class="ai-meter ai-meter-${tone}"><span style="width:${Math.min(100, p.pctUsed)}%"></span></div>
+          <div class="ai-meter-text"><b>${fmtTok(p.used)}</b> / ${fmtTok(p.quota)} token terpakai · sisa <b>${fmtTok(p.remaining)}</b> (${String(p.pctUsed).replace('.', ',')}%)</div>`;
+      }
+      return `<div class="ai-meter-text"><b>${fmtTok(p.used)}</b> token terpakai · tanpa batas kuota di panel</div>`;
+    }
+
+    function renderBotAi(res) {
+      const list = (res && res.providers) || [];
+      const active = list.find(p => p.id === res.active_id);
+      const sum = document.getElementById('botAiSummary');
+      if (sum) {
+        sum.innerHTML = `
+          <div class="ai-stat"><span>Dipakai sekarang</span><b>${active ? escapeHtml(active.name) : '—'}</b><em>${active ? escapeHtml(active.model) : 'tidak ada provider aktif'}</em></div>
+          <div class="ai-stat"><span>Token hari ini</span><b>${fmtTokShort(res.totals && res.totals.today)}</b><em>${fmtTok(res.totals && res.totals.today)} token</em></div>
+          <div class="ai-stat"><span>Total terpakai</span><b>${fmtTokShort(res.totals && res.totals.used)}</b><em>${fmtTok(res.totals && res.totals.calls)} panggilan</em></div>
+          <div class="ai-stat"><span>Provider aktif</span><b>${list.filter(p => p.usable).length} / ${list.length}</b><em>${active && active.quota > 0 ? 'sisa ' + fmtTokShort(active.remaining) + ' token' : 'urutan = prioritas'}</em></div>`;
+      }
+      const box = document.getElementById('botAiList');
+      if (box) {
+        box.innerHTML = list.length ? list.map((p, i) => {
+          const st = AI_STATE_LABEL[p.state] || ['?', 'warn'];
+          const using = p.id === res.active_id;
+          const expiry = p.expiresAt ? (p.expired ? 'Masa aktif habis ' + shortDate(p.expiresAt) : 'Aktif s/d ' + shortDate(p.expiresAt) + ' · ' + p.daysLeft + ' hari lagi') : 'Tanpa masa aktif';
+          const warn = p.warn ? `<div class="ai-note ai-note-warn"><i class="fa-solid fa-triangle-exclamation"></i>${escapeHtml(p.warn)}</div>` : '';
+          const err = p.last_error ? `<div class="ai-note ai-note-bad"><i class="fa-solid fa-circle-exclamation"></i>Gagal terakhir ${escapeHtml(String(p.last_error_at).slice(5, 16))}: ${escapeHtml(p.last_error)}</div>` : '';
+          return `<div class="ai-card${using ? ' is-using' : ''}${p.usable ? '' : ' is-off'}">
+            <div class="ai-card-head">
+              <span class="ai-rank">${i + 1}</span>
+              <div class="min-w-0 flex-1">
+                <div class="ai-name">${escapeHtml(p.name)} ${using ? '<span class="ai-using"><i class="fa-solid fa-bolt"></i>Dipakai sekarang</span>' : ''}</div>
+                <div class="ai-sub"><code>${escapeHtml(p.model)}</code> · ${escapeHtml(hostOf(p.base_url))} · key <code>${escapeHtml(p.key_mask || '-')}</code></div>
+              </div>
+              <span class="ai-pill ai-pill-${st[1]}">${st[0]}</span>
+            </div>
+            ${aiQuotaLine(p)}
+            <div class="ai-facts"><span><i class="fa-regular fa-calendar"></i>${escapeHtml(expiry)}</span><span><i class="fa-solid fa-sun"></i>Hari ini ${fmtTok(p.today_tokens)} token · ${fmtTok(p.today_calls)}x</span><span><i class="fa-solid fa-signal"></i>${fmtTok(p.calls)} panggilan${p.failed ? ' · ' + fmtTok(p.failed) + ' gagal' : ''}${p.estimated_calls ? ' · ≈' + fmtTok(p.estimated_calls) + ' perkiraan' : ''}</span></div>
+            ${warn}${err}
+            <div class="ai-actions">
+              <button type="button" onclick="botAiMove(${jsArg(p.id)},-1)" ${i === 0 ? 'disabled' : ''} title="Naikkan prioritas" aria-label="Naikkan prioritas"><i class="fa-solid fa-arrow-up"></i></button>
+              <button type="button" onclick="botAiMove(${jsArg(p.id)},1)" ${i === list.length - 1 ? 'disabled' : ''} title="Turunkan prioritas" aria-label="Turunkan prioritas"><i class="fa-solid fa-arrow-down"></i></button>
+              <button type="button" onclick="botAiMove(${jsArg(p.id)},-999)" ${i === 0 ? 'disabled' : ''}><i class="fa-solid fa-star"></i>Utamakan</button>
+              <button type="button" onclick="botAiTest(${jsArg(p.id)})"><i class="fa-solid fa-stethoscope"></i>Tes</button>
+              <button type="button" onclick="botAiToggle(${jsArg(p.id)})"><i class="fa-solid fa-power-off"></i>${p.enabled ? 'Matikan' : 'Aktifkan'}</button>
+              <button type="button" onclick="botAiTopUp(${jsArg(p.id)})"><i class="fa-solid fa-circle-plus"></i>Top-up</button>
+              <button type="button" onclick="botAiOpenForm(${jsArg(p.id)})"><i class="fa-solid fa-pen"></i>Edit</button>
+              <button type="button" class="is-danger" onclick="botAiDelete(${jsArg(p.id)})"><i class="fa-solid fa-trash"></i>Hapus</button>
+            </div>
+          </div>`;
+        }).join('') : '<div class="ai-empty"><i class="fa-solid fa-microchip"></i>Belum ada AI provider. Klik <b>Tambah Provider</b> lalu isi Base URL, API key, dan model.</div>';
+      }
+      const body = document.getElementById('botAiUsageBody');
+      if (body) {
+        const rows = (res && res.recent) || [];
+        body.innerHTML = rows.length ? rows.map(u => `<tr>
+          <td class="whitespace-nowrap">${escapeHtml(String(u.ts).slice(5, 16))}</td>
+          <td>${escapeHtml(u.provider || '-')}</td>
+          <td><code>${escapeHtml(u.model || '-')}</code></td>
+          <td>${escapeHtml(({ 'news-rewrite': 'Artikel', 'fb-caption': 'Caption FB', 'fb-template': 'Template FB', test: 'Tes koneksi' })[u.purpose] || u.purpose || '-')}</td>
+          <td class="text-right whitespace-nowrap">${u.estimated ? '≈' : ''}${fmtTok(u.total)}</td>
+          <td>${u.ok ? '<span class="ai-pill ai-pill-ok">OK</span>' : `<span class="ai-pill ai-pill-bad" title="${escapeHtml(u.err)}">Gagal</span>`}</td>
+        </tr>`).join('') : '<tr><td colspan="6" class="table-empty-cell"><span class="table-empty-inner">Belum ada pemakaian.</span></td></tr>';
+      }
+      renderBotAiDash(res);
+    }
+
+    // Kartu ringkas di Dashboard BOT -- langsung terlihat begitu login.
+    function renderBotAiDash(res) {
+      const card = document.getElementById('botAiDashCard');
+      if (!card) return;
+      const list = (res && res.providers) || [];
+      const active = list.find(p => p.id === res.active_id);
+      card.hidden = false;
+      const warnP = list.find(p => p.warn && p.state !== 'disabled');
+      card.className = 'ai-dash-card' + (!active ? ' is-bad' : warnP ? ' is-warn' : '');
+      card.innerHTML = `
+        <div class="ai-dash-icon"><i class="fa-solid fa-microchip"></i></div>
+        <div class="min-w-0 flex-1">
+          <div class="ai-dash-title">${active ? 'AI: ' + escapeHtml(active.name) + ' <code>' + escapeHtml(active.model) + '</code>' : 'Tidak ada AI provider aktif — bot tidak bisa menulis artikel'}</div>
+          <div class="ai-dash-sub">Hari ini <b>${fmtTok(res.totals && res.totals.today)}</b> token · total <b>${fmtTok(res.totals && res.totals.used)}</b>${active && active.quota > 0 ? ' · sisa kuota <b>' + fmtTok(active.remaining) + '</b>' : ''}${active && active.expiresAt ? ' · aktif s/d ' + shortDate(active.expiresAt) : ''}${warnP ? ' · <span class="text-amber-300">' + escapeHtml(warnP.name + ': ' + warnP.warn) + '</span>' : ''}</div>
+          ${active && active.quota > 0 ? `<div class="ai-meter ai-meter-${active.pctUsed >= 90 ? 'bad' : active.pctUsed >= 70 ? 'warn' : 'ok'} mt-2"><span style="width:${Math.min(100, active.pctUsed)}%"></span></div>` : ''}
+        </div>
+        <button type="button" class="btn-secondary text-xs font-bold px-4 py-2.5 rounded-xl shrink-0" onclick="switchPage('bot-config');switchBotCfgTab('ai')"><i class="fa-solid fa-gear mr-1.5"></i>Kelola</button>`;
+    }
+
+    function botAiCall(method, data, okMsg, btn) {
+      if (btn) btn.disabled = true;
+      google.script.run
+        .withSuccessHandler(res => {
+          if (btn) btn.disabled = false;
+          if (apiFailed(res)) { toast(apiMessage(res, 'Gagal')); return; }
+          applyBotAi(res);
+          if (okMsg) toast(okMsg);
+        })
+        .withFailureHandler(e => { if (btn) btn.disabled = false; toast((e && e.message) || String(e)); })
+        [method](currentSessionToken, data);
+    }
+
+    function botAiOpenForm(id) {
+      const p = id && botAiData ? (botAiData.providers || []).find(x => x.id === id) : null;
+      const form = document.getElementById('botAiForm');
+      if (!form) return;
+      const v = (eid, val) => { const el = document.getElementById(eid); if (el) { if (el.type === 'checkbox') el.checked = !!val; else el.value = val == null ? '' : val; } };
+      v('botAiId', p ? p.id : '');
+      v('botAiName', p ? p.name : '');
+      v('botAiBase', p ? p.base_url : '');
+      v('botAiKey', '');
+      v('botAiModel', p ? p.model : '');
+      v('botAiQuota', p && p.quota ? p.quota : '');
+      v('botAiActivated', p ? p.activated : '');
+      v('botAiDays', p && p.valid_days ? p.valid_days : '');
+      v('botAiAdjust', p && p.used_adjust ? p.used_adjust : '');
+      v('botAiEnabled', p ? p.enabled : true);
+      document.getElementById('botAiKey').placeholder = p ? 'kosongkan = tetap pakai key lama (' + (p.key_mask || '-') + ')' : 'sk-...';
+      document.getElementById('botAiFormTitle').innerHTML = p ? '<i class="fa-solid fa-pen text-emerald-300"></i>Edit ' + escapeHtml(p.name) : '<i class="fa-solid fa-plus text-emerald-300"></i>Tambah Provider';
+      const more = form.querySelector('details');
+      if (more) more.open = !!(p && (p.quota || p.valid_days));
+      form.hidden = false;
+      form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      document.getElementById(p ? 'botAiModel' : 'botAiName').focus();
+    }
+    function botAiCloseForm() { const f = document.getElementById('botAiForm'); if (f) f.hidden = true; }
+    function botAiPreset(key) {
+      const pr = AI_PRESETS[key];
+      if (!pr) return;
+      document.getElementById('botAiName').value = pr.name;
+      document.getElementById('botAiBase').value = pr.base;
+      if (pr.model) document.getElementById('botAiModel').value = pr.model;
+      if (pr.days) {
+        document.getElementById('botAiDays').value = pr.days;
+        if (!document.getElementById('botAiActivated').value) document.getElementById('botAiActivated').value = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
+        const more = document.querySelector('#botAiForm details');
+        if (more) more.open = true;
+      }
+      document.getElementById('botAiKey').focus();
+    }
+    function botAiSubmit() {
+      const g = id => { const el = document.getElementById(id); return el ? (el.type === 'checkbox' ? (el.checked ? '1' : '0') : String(el.value || '').trim()) : ''; };
+      const data = { id: g('botAiId'), name: g('botAiName'), base_url: g('botAiBase'), key: g('botAiKey'), model: g('botAiModel'), quota: g('botAiQuota'), activated: g('botAiActivated'), valid_days: g('botAiDays'), used_adjust: g('botAiAdjust'), enabled: g('botAiEnabled') };
+      if (!data.base_url || !data.model || (!data.id && !data.key)) { toast('Isi Base URL, API key, dan model'); return; }
+      const btn = document.getElementById('botAiSaveBtn');
+      if (btn) btn.disabled = true;
+      google.script.run
+        .withSuccessHandler(res => {
+          if (btn) btn.disabled = false;
+          if (apiFailed(res)) { toast(apiMessage(res, 'Gagal menyimpan provider')); return; }
+          document.getElementById('botAiKey').value = '';
+          botAiCloseForm();
+          applyBotAi(res);
+          toast(data.id ? 'Provider diperbarui' : 'Provider ditambahkan');
+        })
+        .withFailureHandler(e => { if (btn) btn.disabled = false; toast((e && e.message) || String(e)); })
+        .botAiSave(currentSessionToken, data);
+    }
+    async function botAiDelete(id) {
+      const p = (botAiData && botAiData.providers || []).find(x => x.id === id);
+      if (!p) return;
+      const ok = await confirmCenter({ type: 'danger', title: 'Hapus provider?', message: `"${p.name}" (${p.model}) dihapus dari daftar dan API key-nya tidak dipakai lagi. Riwayat pemakaian token tetap tersimpan.`, confirmText: 'YA, HAPUS' });
+      if (ok) botAiCall('botAiDelete', { id }, 'Provider dihapus');
+    }
+    function botAiMove(id, dir) {
+      const ids = ((botAiData && botAiData.providers) || []).map(p => p.id);
+      const i = ids.indexOf(id);
+      if (i < 0) return;
+      ids.splice(i, 1);
+      const to = dir === -999 ? 0 : Math.max(0, Math.min(ids.length, i + dir));
+      ids.splice(to, 0, id);
+      botAiCall('botAiReorder', { ids }, dir === -999 ? 'Dijadikan provider utama' : 'Urutan disimpan');
+    }
+    function botAiToggle(id) {
+      const p = (botAiData && botAiData.providers || []).find(x => x.id === id);
+      if (p) botAiCall('botAiSave', { id, enabled: p.enabled ? '0' : '1' }, p.enabled ? 'Provider dimatikan' : 'Provider diaktifkan');
+    }
+    function botAiTopUp(id) {
+      const p = (botAiData && botAiData.providers || []).find(x => x.id === id);
+      if (!p) return;
+      const raw = prompt(`Top-up ${p.name}: tambah berapa token?\n(Masa aktif dihitung ulang mulai hari ini${p.valid_days ? ', ' + p.valid_days + ' hari' : ', 28 hari'}.)`, '100000000');
+      if (raw == null) return;
+      const add = String(raw).replace(/[^\d]/g, '');
+      if (!add) { toast('Jumlah token tidak valid'); return; }
+      botAiCall('botAiTopUp', { id, add_tokens: add }, 'Top-up tersimpan: +' + fmtTok(add) + ' token');
+    }
+    function botAiTest(id) {
+      const p = (botAiData && botAiData.providers || []).find(x => x.id === id);
+      toast('Mengetes ' + (p ? p.name : 'provider') + '…');
+      google.script.run
+        .withSuccessHandler(res => {
+          if (apiFailed(res)) { toast(apiMessage(res, 'Tes gagal')); return; }
+          if (res.list) applyBotAi(res.list);
+          const dl = document.getElementById('botAiModelList');
+          if (dl && res.models && res.models.length) dl.innerHTML = res.models.map(m => `<option value="${escapeHtml(m)}">`).join('');
+          const hint = res.suggested ? `\nModel "${p && p.model}" tidak ada di daftar provider ini. Coba: ${res.suggested}` : '';
+          notifyCenter(res.ok
+            ? `Balasan: "${res.reply}" · ${res.model} · ${fmtTok(res.tokens)} token${res.estimated ? ' (perkiraan)' : ''} · ${res.ms} ms` + (res.models && res.models.length ? `\n${res.models.length} model tersedia (muncul sebagai pilihan saat mengisi Model).` : '') + hint
+            : (res.message || 'Tes gagal') + hint,
+            res.ok ? 'success' : 'danger', res.ok ? 'Koneksi OK' : 'Koneksi gagal');
+        })
+        .withFailureHandler(e => toast((e && e.message) || String(e)))
+        .botAiTest(currentSessionToken, { id });
     }
     function renderBotAutoBar(on){
       const bar = document.getElementById('botAutoChip');
@@ -5539,15 +5803,15 @@ Tindakan ini tidak dapat dibatalkan.`,
       renderBotAutoBar(!!c.enabled);
       set('botPerRun', c.per_run); set('botDailyCap', c.daily_cap); set('botSitePerRun', c.site_per_run);
       set('botAutoInterval', c.auto_interval_minutes);
-      set('botParaMin', c.para_min); set('botParaMax', c.para_max);
+      set('botParaMin', c.para_min); set('botParaMax', c.para_max); set('botImagesPer', c.images_per_article);
       set('botLabels', c.post_labels); set('botPromoUrl', c.promo_url); set('botPromoText', c.promo_text);
-      set('botModel', c.gemini_model); set('botStyle', c.rewrite_style);
+      set('botStyle', c.rewrite_style);
       set('botBlogId', c.blog_id); set('botBloggerSiteUrl', c.blogger_site_url);
       set('botFbEnabled', c.fb_enabled); set('botFbPageId', c.fb_page_id); set('botFbPageUrl', c.fb_page_url);
       set('botWaChannelUrl', c.wa_channel_url);
       set('botNewsBannerEnabled', c.news_banner_enabled); set('botNewsBannerImage', c.news_banner_image); set('botNewsBannerUrl', c.news_banner_url); set('botNewsBannerText', c.news_banner_text);
       const hint = document.getElementById('botCredHint');
-      if (hint) hint.textContent = (c.has_gemini_key?'Gemini key OK':'Gemini key BELUM ada') + ' · ' + (c.has_groq_key?'Groq cadangan OK':'Groq cadangan belum diisi') + ' · ' + (c.has_blogger?'Blogger OK':'Blogger BELUM tersambung');
+      if (hint) hint.textContent = (c.ai_providers_on ? c.ai_providers_on + ' AI provider aktif' : 'Belum ada AI provider aktif') + ' · ' + (c.has_blogger ? 'Blogger OK' : 'Blogger BELUM tersambung');
       const fbHint = document.getElementById('botFbHint');
       if (fbHint) fbHint.textContent = c.has_facebook ? 'Facebook Page OK' : 'Facebook belum tersambung';
       renderBloggerStatus(c);
@@ -5650,6 +5914,7 @@ Tindakan ini tidak dapat dibatalkan.`,
     }
     function botBloggerGoConnect() {
       switchPage('bot-config');
+      switchBotCfgTab('blogger'); // grup Blogger ada di tab-nya sendiri
       botBloggerToggleConnect(true);
       setTimeout(() => { const g = document.getElementById('botBloggerGroup'); if (g) g.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 120);
     }
@@ -5696,13 +5961,11 @@ Tindakan ini tidak dapat dibatalkan.`,
 
     function saveBotNewsConfig(){
       const g=id=>{const el=document.getElementById(id);return !el?'':(el.type==='checkbox'?(el.checked?'1':'0'):String(el.value||'').trim());};
-      const data={enabled:g('botEnabled'),attribution:g('botAttribution'),per_run:g('botPerRun'),daily_cap:g('botDailyCap'),site_per_run:g('botSitePerRun'),auto_interval_minutes:g('botAutoInterval'),para_min:g('botParaMin'),para_max:g('botParaMax'),post_labels:g('botLabels'),promo_url:g('botPromoUrl'),promo_text:g('botPromoText'),gemini_model:g('botModel'),rewrite_style:g('botStyle'),blogger_blog_id:g('botBlogId'),fb_enabled:g('botFbEnabled'),fb_page_id:g('botFbPageId'),fb_page_url:g('botFbPageUrl'),wa_channel_url:g('botWaChannelUrl'),blogger_site_url:g('botBloggerSiteUrl'),news_banner_enabled:g('botNewsBannerEnabled'),news_banner_image:g('botNewsBannerImage'),news_banner_url:g('botNewsBannerUrl'),news_banner_text:g('botNewsBannerText')};
-      const key=g('botGeminiKey'); if(key) data.gemini_key=key;
-      const groqKey=g('botGroqKey'); if(groqKey) data.groq_key=groqKey;
+      const data={enabled:g('botEnabled'),attribution:g('botAttribution'),per_run:g('botPerRun'),daily_cap:g('botDailyCap'),site_per_run:g('botSitePerRun'),auto_interval_minutes:g('botAutoInterval'),para_min:g('botParaMin'),para_max:g('botParaMax'),images_per_article:g('botImagesPer'),post_labels:g('botLabels'),promo_url:g('botPromoUrl'),promo_text:g('botPromoText'),rewrite_style:g('botStyle'),blogger_blog_id:g('botBlogId'),fb_enabled:g('botFbEnabled'),fb_page_id:g('botFbPageId'),fb_page_url:g('botFbPageUrl'),wa_channel_url:g('botWaChannelUrl'),blogger_site_url:g('botBloggerSiteUrl'),news_banner_enabled:g('botNewsBannerEnabled'),news_banner_image:g('botNewsBannerImage'),news_banner_url:g('botNewsBannerUrl'),news_banner_text:g('botNewsBannerText')};
       const fbTok=g('botFbToken'); if(fbTok) data.fb_page_token=fbTok;
       const bcId=g('botBloggerClientId'); if(bcId) data.blogger_client_id=bcId;
       const bcSecret=g('botBloggerClientSecret'); if(bcSecret) data.blogger_client_secret=bcSecret;
-      google.script.run.withSuccessHandler(s=>{if(apiFailed(s)){toast('Gagal: '+apiMessage(s));return;}toast('Konfigurasi BOT tersimpan');['botGeminiKey','botGroqKey','botFbToken','botBloggerClientSecret'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});applyBotNews(s);}).withFailureHandler(e=>toast('Gagal: '+((e&&e.message)||e))).botNewsSaveConfig(currentSessionToken,data);
+      google.script.run.withSuccessHandler(s=>{if(apiFailed(s)){toast('Gagal: '+apiMessage(s));return;}toast('Konfigurasi BOT tersimpan');['botFbToken','botBloggerClientSecret'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});applyBotNews(s);}).withFailureHandler(e=>toast('Gagal: '+((e&&e.message)||e))).botNewsSaveConfig(currentSessionToken,data);
     }
     function addBotSource(){
       const data={name:document.getElementById('botSrcName').value.trim(),kind:document.getElementById('botSrcKind').value,category:document.getElementById('botSrcCategory').value,url:document.getElementById('botSrcUrl').value.trim()};

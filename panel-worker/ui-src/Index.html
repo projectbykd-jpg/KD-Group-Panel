@@ -825,7 +825,7 @@
             <div class="page-head-text">
               <div class="page-eyebrow">Bot</div>
               <h2 class="page-title">Bot News</h2>
-              <p class="page-sub">Berita &rarr; tulis ulang AI (Gemini) &rarr; posting otomatis ke Blogger &amp; Facebook.</p>
+              <p class="page-sub">Berita &rarr; tulis ulang AI (provider pilihanmu) &rarr; posting otomatis ke Blogger, situs sendiri &amp; Facebook.</p>
             </div>
             <div class="page-head-actions">
               <div id="botAutoChip" class="glass-inner rounded-2xl px-4 py-2 flex items-center gap-2.5 border-2 border-transparent transition-colors">
@@ -847,6 +847,8 @@
             </div>
             <button type="button" onclick="botBloggerGoConnect()" class="blogger-alert-btn"><i class="fa-solid fa-link mr-1.5"></i>Hubungkan Ulang</button>
           </div>
+          <!-- Ringkasan AI provider & token (detail: Setting -> AI Provider) -->
+          <div id="botAiDashCard" class="ai-dash-card" hidden></div>
           <div class="glass-card rounded-3xl p-6 flex flex-col gap-5">
             <div class="flex items-start justify-between gap-4 flex-wrap">
               <div class="panel-section-title pt-2.5"><i class="fa-solid fa-gauge-high text-emerald-400 text-sm"></i> RINGKASAN</div>
@@ -988,126 +990,208 @@
           </div>
         </div>
 
-        <!-- ============ SUB-HALAMAN: KONFIGURASI LANJUTAN ============ -->
+        <!-- ============ SUB-HALAMAN: SETTING (5 tab) ============ -->
         <div id="bot-sec-config" class="flex flex-col gap-5" style="display:none">
-          <div class="glass-card rounded-3xl p-6 flex flex-col gap-4">
-            <div>
-              <div class="panel-section-title"><i class="fa-solid fa-sliders text-slate-300 text-sm"></i> SETTING</div>
-              <p class="text-[11px] text-slate-500 mt-1">Dikelompokkan per topik biar gampang dicari. Semua field opsional -- kosongkan yang tidak mau diubah.</p>
+          <div class="glass-card rounded-3xl p-5 sm:p-6 flex flex-col gap-5">
+            <div class="page-head tone-emerald">
+              <div class="page-head-icon"><i class="fa-solid fa-sliders"></i></div>
+              <div class="page-head-text">
+                <div class="page-eyebrow">Bot</div>
+                <h2 class="page-title">Setting BOT News</h2>
+                <p class="page-sub">AI provider, isi artikel, jadwal, dan tujuan posting. Tab selain AI Provider disimpan lewat tombol <b>SIMPAN SETTING</b> di bawah.</p>
+              </div>
             </div>
             <input type="checkbox" id="botEnabled" class="hidden">
 
-            <div class="cfg-group cfg-group-accent-emerald">
-              <div class="cfg-group-title text-emerald-300"><i class="fa-solid fa-repeat"></i>Jadwal Auto-Post Otomatis</div>
-              <span class="cfg-hint">Berlaku utk proses OTOMATIS yang jalan sendiri di background (bukan tombol PROSES manual di Dashboard). Jumlah artikelnya ikut "Artikel per proses" di bawah (Blogger &amp; Situs Sendiri masing-masing punya jatah sendiri).</span>
-              <label class="cfg-field">Interval auto-post (menit)<input id="botAutoInterval" type="number" min="1" class="cfg-input" placeholder="10"></label>
+            <div class="admin-tabs" id="botCfgTabs">
+              <button class="admin-tab active" data-cfg-tab="ai" onclick="switchBotCfgTab('ai')"><i class="fa-solid fa-microchip"></i>AI Provider</button>
+              <button class="admin-tab" data-cfg-tab="content" onclick="switchBotCfgTab('content')"><i class="fa-solid fa-pen-nib"></i>Konten &amp; Artikel</button>
+              <button class="admin-tab" data-cfg-tab="schedule" onclick="switchBotCfgTab('schedule')"><i class="fa-solid fa-clock"></i>Jadwal Posting</button>
+              <button class="admin-tab" data-cfg-tab="blogger" onclick="switchBotCfgTab('blogger')"><i class="fa-brands fa-blogger"></i>Blogger</button>
+              <button class="admin-tab" data-cfg-tab="social" onclick="switchBotCfgTab('social')"><i class="fa-solid fa-share-nodes"></i>Sosial &amp; Promo</button>
             </div>
+            <select class="admin-tab-select" id="botCfgTabSelect" aria-label="Pilih bagian setting" onchange="switchBotCfgTab(this.value)">
+              <option value="ai">AI Provider &amp; Token</option>
+              <option value="content">Konten &amp; Artikel</option>
+              <option value="schedule">Jadwal Posting</option>
+              <option value="blogger">Blogger</option>
+              <option value="social">Sosial &amp; Promo</option>
+            </select>
 
-            <div class="cfg-group">
-              <div class="cfg-group-title"><i class="fa-solid fa-clock text-cyan-300"></i>Jadwal &amp; Batas Blogger</div>
-              <div class="grid sm:grid-cols-2 gap-3">
-                <label class="cfg-field">Artikel per proses (cron)<input id="botPerRun" type="number" min="1" class="cfg-input"></label>
-                <label class="cfg-field">Batas artikel / hari<input id="botDailyCap" type="number" min="1" class="cfg-input"></label>
+            <!-- TAB: AI PROVIDER -->
+            <div class="bot-cfg-panel active" data-cfg-panel="ai">
+              <div id="botAiSummary" class="ai-summary"></div>
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div class="font-extrabold text-sm text-slate-100">Daftar Provider</div>
+                  <div class="text-[11px] text-slate-400 mt-0.5">Urutan = prioritas. Bot memakai provider aktif paling atas; kalau gagal, kuota habis, atau masa aktif lewat, otomatis pindah ke berikutnya.</div>
+                </div>
+                <button type="button" onclick="botAiOpenForm('')" class="btn-primary text-xs font-bold px-4 py-2.5 rounded-xl shrink-0"><i class="fa-solid fa-plus mr-1.5"></i>Tambah Provider</button>
               </div>
-              <label class="flex items-center gap-2 text-xs text-slate-300 mt-1"><input type="checkbox" id="botAttribution"> Cantumkan sumber + backlink di tiap artikel</label>
-            </div>
 
-            <div class="cfg-group">
-              <div class="cfg-group-title"><i class="fa-solid fa-pen-nib text-cyan-300"></i>Gaya Penulisan AI</div>
-              <div class="grid sm:grid-cols-2 gap-3">
-                <label class="cfg-field">Paragraf minimal<input id="botParaMin" type="number" min="1" class="cfg-input"></label>
-                <label class="cfg-field">Paragraf maksimal<input id="botParaMax" type="number" min="1" class="cfg-input"></label>
+              <div id="botAiForm" class="cfg-group ai-form" hidden>
+                <div class="cfg-group-title" id="botAiFormTitle"><i class="fa-solid fa-plus text-emerald-300"></i>Tambah Provider</div>
+                <input type="hidden" id="botAiId">
+                <div class="ai-presets"><span>Isi cepat:</span>
+                  <button type="button" onclick="botAiPreset('dattio')">DattioAI</button>
+                  <button type="button" onclick="botAiPreset('groq')">Groq</button>
+                  <button type="button" onclick="botAiPreset('gemini')">Gemini</button>
+                  <button type="button" onclick="botAiPreset('openrouter')">OpenRouter</button>
+                  <button type="button" onclick="botAiPreset('deepseek')">DeepSeek</button>
+                </div>
+                <div class="grid sm:grid-cols-2 gap-3">
+                  <label class="cfg-field">Nama<input id="botAiName" class="cfg-input" placeholder="mis. DattioAI" maxlength="60"></label>
+                  <label class="cfg-field">Base URL<input id="botAiBase" class="cfg-input" placeholder="https://.../v1" autocomplete="off" spellcheck="false"></label>
+                  <label class="cfg-field">API key<input id="botAiKey" class="cfg-input" placeholder="sk-..." autocomplete="off" spellcheck="false"><span class="cfg-hint" id="botAiKeyHint">Disimpan di server, tidak pernah ditampilkan utuh lagi.</span></label>
+                  <label class="cfg-field">Model<input id="botAiModel" class="cfg-input" placeholder="mis. deepseek-v4-flash" list="botAiModelList" autocomplete="off" spellcheck="false"><datalist id="botAiModelList"></datalist></label>
+                </div>
+                <details class="ai-form-more">
+                  <summary>Kuota &amp; masa aktif (opsional, untuk token berbayar)</summary>
+                  <div class="grid sm:grid-cols-3 gap-3 mt-2">
+                    <label class="cfg-field">Kuota token<input id="botAiQuota" class="cfg-input" inputmode="numeric" placeholder="mis. 100000000"></label>
+                    <label class="cfg-field">Tanggal aktif<input id="botAiActivated" type="date" class="cfg-input"></label>
+                    <label class="cfg-field">Masa aktif (hari)<input id="botAiDays" class="cfg-input" inputmode="numeric" placeholder="mis. 28"></label>
+                  </div>
+                  <label class="cfg-field mt-2">Token terpakai di luar panel (koreksi)<input id="botAiAdjust" class="cfg-input" inputmode="numeric" placeholder="0"><span class="cfg-hint">Isi kalau key yang sama juga dipakai di aplikasi lain, supaya sisa kuota akurat.</span></label>
+                </details>
+                <label class="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" id="botAiEnabled" checked> Aktif (dipakai bot)</label>
+                <div class="flex gap-2 flex-wrap">
+                  <button type="button" id="botAiSaveBtn" onclick="botAiSubmit()" class="btn-primary text-xs font-bold px-5 py-2.5 rounded-xl"><i class="fa-solid fa-floppy-disk mr-1.5"></i>Simpan Provider</button>
+                  <button type="button" onclick="botAiCloseForm()" class="btn-secondary text-xs font-bold px-4 py-2.5 rounded-xl">Batal</button>
+                </div>
               </div>
-              <label class="cfg-field">Gaya penulisan ulang (prompt)<textarea id="botStyle" class="cfg-input" rows="3"></textarea></label>
-              <label class="cfg-field">Label/Tag postingan (pisah koma)<input id="botLabels" class="cfg-input" placeholder="LapakStore88"></label>
+
+              <div id="botAiList" class="ai-list"><div class="ai-empty">Memuat provider…</div></div>
+
+              <div class="cfg-group">
+                <div class="cfg-group-title"><i class="fa-solid fa-chart-column text-cyan-300"></i>Pemakaian Terakhir</div>
+                <div class="pretty-table-wrap overflow-x-auto">
+                  <table class="pretty-table ai-usage-table">
+                    <thead><tr><th>Waktu</th><th>Provider</th><th>Model</th><th>Untuk</th><th class="text-right">Token</th><th>Status</th></tr></thead>
+                    <tbody id="botAiUsageBody"></tbody>
+                  </table>
+                </div>
+                <span class="cfg-hint">Angka token diambil dari laporan server provider di setiap panggilan. Tanda ≈ berarti provider tidak melapor dan token diperkirakan.</span>
+              </div>
             </div>
 
-            <div class="cfg-group">
-              <div class="cfg-group-title"><i class="fa-solid fa-bullhorn text-cyan-300"></i>Kotak Promo di Artikel</div>
-              <span class="cfg-hint">Kosongkan link = kotak promo tidak dipasang sama sekali.</span>
-              <label class="cfg-field">Link promo<input id="botPromoUrl" class="cfg-input" placeholder="https://lokalstore88.online/"></label>
-              <label class="cfg-field">Teks promo<input id="botPromoText" class="cfg-input" placeholder="Toko produk Aplikasi Premium Termurah"></label>
+            <!-- TAB: KONTEN & ARTIKEL -->
+            <div class="bot-cfg-panel" data-cfg-panel="content">
+              <div class="cfg-group">
+                <div class="cfg-group-title"><i class="fa-solid fa-pen-nib text-cyan-300"></i>Panjang &amp; Gaya Artikel</div>
+                <div class="grid sm:grid-cols-3 gap-3">
+                  <label class="cfg-field">Paragraf minimal<input id="botParaMin" type="number" min="1" max="40" class="cfg-input"></label>
+                  <label class="cfg-field">Paragraf maksimal<input id="botParaMax" type="number" min="1" max="40" class="cfg-input"></label>
+                  <label class="cfg-field">Gambar per artikel<input id="botImagesPer" type="number" min="1" max="8" class="cfg-input"></label>
+                </div>
+                <span class="cfg-hint">Bawaan 12–18 paragraf (±800–1.500 kata) dan 4 gambar: 1 gambar utama + foto dari isi artikel sumber, disebar di antara paragraf. AI juga membaca isi artikel sumber, jadi artikel panjangnya berisi fakta, bukan diulur-ulur.</span>
+                <label class="cfg-field">Gaya penulisan ulang (prompt)<textarea id="botStyle" class="cfg-input" rows="3"></textarea></label>
+                <label class="cfg-field">Label/Tag postingan (pisah koma)<input id="botLabels" class="cfg-input" placeholder="LapakStore88"></label>
+                <label class="flex items-center gap-2 text-xs text-slate-300 mt-1"><input type="checkbox" id="botAttribution"> Cantumkan sumber + backlink di tiap artikel (juga keterangan "Foto: sumber")</label>
+              </div>
+              <div class="cfg-group">
+                <div class="cfg-group-title"><i class="fa-solid fa-bullhorn text-cyan-300"></i>Kotak Promo di Artikel</div>
+                <span class="cfg-hint">Kosongkan link = kotak promo tidak dipasang sama sekali.</span>
+                <label class="cfg-field">Link promo<input id="botPromoUrl" class="cfg-input" placeholder="https://lokalstore88.online/"></label>
+                <label class="cfg-field">Teks promo<input id="botPromoText" class="cfg-input" placeholder="Toko produk Aplikasi Premium Termurah"></label>
+              </div>
             </div>
 
-            <div class="cfg-group">
-              <div class="cfg-group-title"><i class="fa-solid fa-brain text-cyan-300"></i>Provider AI (Groq &amp; Gemini)</div>
-              <span class="cfg-hint">Groq dicoba lebih dulu (tidak kena geo-block spt Gemini). Gemini cuma jaring pengaman kalau Groq bermasalah -- kosongkan Gemini key kalau mau Groq satu-satunya. Isi field key = ganti, kosongkan = tidak diubah. Boleh lebih dari satu key dipisah koma.</span>
-              <label class="cfg-field">Groq API key<input id="botGroqKey" class="cfg-input" placeholder="gsk_..."></label>
-              <label class="cfg-field">Gemini API key (cadangan)<input id="botGeminiKey" class="cfg-input" placeholder="key1,key2,key3"></label>
-              <label class="cfg-field">Model Gemini<input id="botModel" class="cfg-input" placeholder="gemini-flash-latest"></label>
+            <!-- TAB: JADWAL POSTING -->
+            <div class="bot-cfg-panel" data-cfg-panel="schedule">
+              <div class="cfg-group cfg-group-accent-emerald">
+                <div class="cfg-group-title text-emerald-300"><i class="fa-solid fa-repeat"></i>Auto-Post Otomatis</div>
+                <span class="cfg-hint">Untuk proses otomatis di background (bukan tombol PROSES di Dashboard). Nyala/mati lewat tombol AUTO-POST di atas.</span>
+                <label class="cfg-field">Interval auto-post (menit)<input id="botAutoInterval" type="number" min="1" class="cfg-input" placeholder="10"></label>
+              </div>
+              <div class="cfg-group">
+                <div class="cfg-group-title"><i class="fa-brands fa-blogger text-cyan-300"></i>Jatah Blogger</div>
+                <div class="grid sm:grid-cols-2 gap-3">
+                  <label class="cfg-field">Artikel per proses<input id="botPerRun" type="number" min="1" class="cfg-input"></label>
+                  <label class="cfg-field">Batas artikel / hari<input id="botDailyCap" type="number" min="1" class="cfg-input"></label>
+                </div>
+              </div>
+              <div class="cfg-group cfg-group-accent-emerald">
+                <div class="cfg-group-title text-emerald-300"><i class="fa-solid fa-globe"></i>Auto-Post ke Situs Sendiri</div>
+                <span class="cfg-hint">Jalur &amp; pace TERPISAH TOTAL dari Blogger di atas -- TIDAK ada batas harian. Artikel yang sudah posting ke Blogger tidak ikut dobel tampil di sini.</span>
+                <label class="cfg-field">Artikel per proses<input id="botSitePerRun" type="number" min="0" class="cfg-input"></label>
+                <span class="cfg-hint">Isi 0 buat matikan auto-post ke situs sendiri.</span>
+              </div>
+
             </div>
 
-            <div class="cfg-group" id="botBloggerGroup">
-              <div class="cfg-group-title"><i class="fa-brands fa-blogger text-cyan-300"></i>Blogger</div>
-              <div class="blogger-conn">
-                <div class="blogger-conn-row">
-                  <span id="botBloggerPill" class="blogger-pill is-unknown"><i class="fa-solid fa-circle"></i><span>Memeriksa...</span></span>
-                  <div class="flex gap-2 flex-wrap">
-                    <button type="button" id="botBloggerTestBtn" onclick="botBloggerTestConn()" class="btn-secondary text-xs font-bold px-3.5 py-2 rounded-xl"><i class="fa-solid fa-stethoscope mr-1.5"></i>Tes Koneksi</button>
-                    <button type="button" onclick="botBloggerToggleConnect(true)" class="blogger-connect-btn"><i class="fa-solid fa-link mr-1.5"></i>Hubungkan Ulang</button>
+            <!-- TAB: BLOGGER -->
+            <div class="bot-cfg-panel" data-cfg-panel="blogger">
+              <div class="cfg-group" id="botBloggerGroup">
+                <div class="cfg-group-title"><i class="fa-brands fa-blogger text-cyan-300"></i>Blogger</div>
+                <div class="blogger-conn">
+                  <div class="blogger-conn-row">
+                    <span id="botBloggerPill" class="blogger-pill is-unknown"><i class="fa-solid fa-circle"></i><span>Memeriksa...</span></span>
+                    <div class="flex gap-2 flex-wrap">
+                      <button type="button" id="botBloggerTestBtn" onclick="botBloggerTestConn()" class="btn-secondary text-xs font-bold px-3.5 py-2 rounded-xl"><i class="fa-solid fa-stethoscope mr-1.5"></i>Tes Koneksi</button>
+                      <button type="button" onclick="botBloggerToggleConnect(true)" class="blogger-connect-btn"><i class="fa-solid fa-link mr-1.5"></i>Hubungkan Ulang</button>
+                    </div>
+                  </div>
+                  <div id="botBloggerDetail" class="blogger-conn-detail"></div>
+                  <div id="botBloggerConnect" class="blogger-steps" hidden>
+                    <ol>
+                      <li><b>Buka halaman izin Google</b>, login dengan akun pemilik blog, lalu klik <b>Izinkan</b>.
+                        <div><button type="button" onclick="botBloggerOpenAuth()" class="blogger-connect-btn mt-2"><i class="fa-brands fa-google mr-1.5"></i>Buka Izin Google</button></div></li>
+                      <li>Browser akan membuka alamat <code>localhost</code> yang <b>tidak bisa dimuat</b> (memang begitu). <b>Salin seluruh alamat</b> dari address bar.</li>
+                      <li>Tempel di sini lalu simpan:
+                        <div class="flex gap-2 mt-2 flex-wrap">
+                          <input id="botBloggerCode" class="cfg-input flex-1 min-w-[220px]" placeholder="http://localhost/?code=4/0A...&amp;scope=..." autocomplete="off" spellcheck="false">
+                          <button type="button" id="botBloggerSaveBtn" onclick="botBloggerSubmitCode()" class="blogger-connect-btn"><i class="fa-solid fa-floppy-disk mr-1.5"></i>Simpan &amp; Tes</button>
+                        </div></li>
+                    </ol>
+                    <details class="blogger-advanced">
+                      <summary>Client OAuth (isi hanya kalau ganti client di Google Cloud)</summary>
+                      <div class="grid sm:grid-cols-2 gap-3 mt-2">
+                        <label class="cfg-field">Client ID<input id="botBloggerClientId" class="cfg-input" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off"></label>
+                        <label class="cfg-field">Client Secret<input id="botBloggerClientSecret" class="cfg-input" placeholder="kosongkan = tidak diubah" autocomplete="off"></label>
+                      </div>
+                      <span class="cfg-hint">Disimpan lewat tombol SIMPAN SETTING di bawah. Jenis client: <b>Desktop app</b>.</span>
+                    </details>
+                    <p class="blogger-warn"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Supaya tidak putus lagi tiap 7 hari: di <b>Google Cloud Console &rarr; Google Auth Platform &rarr; Audience</b>, ubah <b>Publishing status</b> dari <i>Testing</i> ke <b>In production</b>, lalu hubungkan ulang sekali lagi.</p>
                   </div>
                 </div>
-                <div id="botBloggerDetail" class="blogger-conn-detail"></div>
-                <div id="botBloggerConnect" class="blogger-steps" hidden>
-                  <ol>
-                    <li><b>Buka halaman izin Google</b>, login dengan akun pemilik blog, lalu klik <b>Izinkan</b>.
-                      <div><button type="button" onclick="botBloggerOpenAuth()" class="blogger-connect-btn mt-2"><i class="fa-brands fa-google mr-1.5"></i>Buka Izin Google</button></div></li>
-                    <li>Browser akan membuka alamat <code>localhost</code> yang <b>tidak bisa dimuat</b> (memang begitu). <b>Salin seluruh alamat</b> dari address bar.</li>
-                    <li>Tempel di sini lalu simpan:
-                      <div class="flex gap-2 mt-2 flex-wrap">
-                        <input id="botBloggerCode" class="cfg-input flex-1 min-w-[220px]" placeholder="http://localhost/?code=4/0A...&amp;scope=..." autocomplete="off" spellcheck="false">
-                        <button type="button" id="botBloggerSaveBtn" onclick="botBloggerSubmitCode()" class="blogger-connect-btn"><i class="fa-solid fa-floppy-disk mr-1.5"></i>Simpan &amp; Tes</button>
-                      </div></li>
-                  </ol>
-                  <details class="blogger-advanced">
-                    <summary>Client OAuth (isi hanya kalau ganti client di Google Cloud)</summary>
-                    <div class="grid sm:grid-cols-2 gap-3 mt-2">
-                      <label class="cfg-field">Client ID<input id="botBloggerClientId" class="cfg-input" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off"></label>
-                      <label class="cfg-field">Client Secret<input id="botBloggerClientSecret" class="cfg-input" placeholder="kosongkan = tidak diubah" autocomplete="off"></label>
-                    </div>
-                    <span class="cfg-hint">Disimpan lewat tombol SIMPAN SETTING di bawah. Jenis client: <b>Desktop app</b>.</span>
-                  </details>
-                  <p class="blogger-warn"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Supaya tidak putus lagi tiap 7 hari: di <b>Google Cloud Console &rarr; Google Auth Platform &rarr; Audience</b>, ubah <b>Publishing status</b> dari <i>Testing</i> ke <b>In production</b>, lalu hubungkan ulang sekali lagi.</p>
+                <label class="cfg-field">Blog ID<input id="botBlogId" class="cfg-input"></label>
+                <label class="cfg-field">Link situs Blogger<input id="botBloggerSiteUrl" class="cfg-input" placeholder="https://lokalstore88.blogspot.com"></label>
+                <span class="cfg-hint">Dipromosikan otomatis di tiap artikel, termasuk yang tayang di Berita Terkini.</span>
+              </div>
+
+            </div>
+
+            <!-- TAB: SOSIAL & PROMO -->
+            <div class="bot-cfg-panel" data-cfg-panel="social">
+              <div class="cfg-group">
+                <div class="cfg-group-title flex items-center justify-between w-full"><span><i class="fa-brands fa-facebook text-cyan-300"></i>Facebook Page</span><span id="botFbHint" class="text-[10px] text-slate-500 font-normal normal-case"></span></div>
+                <label class="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" id="botFbEnabled"> Auto-share tiap post ke Facebook Page</label>
+                <div class="grid sm:grid-cols-2 gap-3">
+                  <label class="cfg-field">Page ID<input id="botFbPageId" class="cfg-input"></label>
+                  <label class="cfg-field">Ganti Page Access Token<input id="botFbToken" class="cfg-input" placeholder="kosongkan = tidak diubah"></label>
                 </div>
+                <label class="cfg-field">Link Fanspage Facebook<input id="botFbPageUrl" class="cfg-input" placeholder="https://www.facebook.com/profile.php?id=..."></label>
               </div>
-              <label class="cfg-field">Blog ID<input id="botBlogId" class="cfg-input"></label>
-              <label class="cfg-field">Link situs Blogger<input id="botBloggerSiteUrl" class="cfg-input" placeholder="https://lokalstore88.blogspot.com"></label>
-              <span class="cfg-hint">Dipromosikan otomatis di tiap artikel, termasuk yang tayang di Berita Terkini.</span>
-            </div>
 
-            <div class="cfg-group cfg-group-accent-emerald">
-              <div class="cfg-group-title text-emerald-300"><i class="fa-solid fa-globe"></i>Auto-Post ke Situs Sendiri</div>
-              <span class="cfg-hint">Jalur &amp; pace TERPISAH TOTAL dari Blogger di atas -- TIDAK ada batas harian. Artikel yang sudah posting ke Blogger tidak ikut dobel tampil di sini.</span>
-              <label class="cfg-field">Artikel per proses<input id="botSitePerRun" type="number" min="0" class="cfg-input"></label>
-              <span class="cfg-hint">Isi 0 buat matikan auto-post ke situs sendiri.</span>
-            </div>
-
-            <div class="cfg-group">
-              <div class="cfg-group-title flex items-center justify-between w-full"><span><i class="fa-brands fa-facebook text-cyan-300"></i>Facebook Page</span><span id="botFbHint" class="text-[10px] text-slate-500 font-normal normal-case"></span></div>
-              <label class="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" id="botFbEnabled"> Auto-share tiap post ke Facebook Page</label>
-              <div class="grid sm:grid-cols-2 gap-3">
-                <label class="cfg-field">Page ID<input id="botFbPageId" class="cfg-input"></label>
-                <label class="cfg-field">Ganti Page Access Token<input id="botFbToken" class="cfg-input" placeholder="kosongkan = tidak diubah"></label>
+              <div class="cfg-group">
+                <div class="cfg-group-title"><i class="fa-brands fa-whatsapp text-cyan-300"></i>Saluran WhatsApp</div>
+                <label class="cfg-field">Link Saluran WhatsApp<input id="botWaChannelUrl" class="cfg-input" placeholder="https://whatsapp.com/channel/..."></label>
+                <span class="cfg-hint">Dipromosikan otomatis di tiap artikel, sama seperti Fanspage &amp; link Blogger di atas.</span>
               </div>
-              <label class="cfg-field">Link Fanspage Facebook<input id="botFbPageUrl" class="cfg-input" placeholder="https://www.facebook.com/profile.php?id=..."></label>
+
+              <div class="cfg-group">
+                <div class="cfg-group-title"><i class="fa-solid fa-rectangle-ad text-cyan-300"></i>Banner Promosi (Berita Terkini)</div>
+                <label class="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" id="botNewsBannerEnabled"> Tampilkan banner di sidebar Berita Terkini</label>
+                <label class="cfg-field">Gambar banner (URL)<input id="botNewsBannerImage" class="cfg-input" placeholder="https://..."></label>
+                <label class="cfg-field">Link tujuan banner<input id="botNewsBannerUrl" class="cfg-input" placeholder="https://lokalstore88.online/produk.html"></label>
+                <label class="cfg-field">Teks banner<input id="botNewsBannerText" class="cfg-input" placeholder="Diskon aplikasi premium minggu ini!"></label>
+              </div>
+
             </div>
 
-            <div class="cfg-group">
-              <div class="cfg-group-title"><i class="fa-brands fa-whatsapp text-cyan-300"></i>Saluran WhatsApp</div>
-              <label class="cfg-field">Link Saluran WhatsApp<input id="botWaChannelUrl" class="cfg-input" placeholder="https://whatsapp.com/channel/..."></label>
-              <span class="cfg-hint">Dipromosikan otomatis di tiap artikel, sama seperti Fanspage &amp; link Blogger di atas.</span>
-            </div>
-
-            <div class="cfg-group">
-              <div class="cfg-group-title"><i class="fa-solid fa-rectangle-ad text-cyan-300"></i>Banner Promosi (Berita Terkini)</div>
-              <label class="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" id="botNewsBannerEnabled"> Tampilkan banner di sidebar Berita Terkini</label>
-              <label class="cfg-field">Gambar banner (URL)<input id="botNewsBannerImage" class="cfg-input" placeholder="https://..."></label>
-              <label class="cfg-field">Link tujuan banner<input id="botNewsBannerUrl" class="cfg-input" placeholder="https://lokalstore88.online/produk.html"></label>
-              <label class="cfg-field">Teks banner<input id="botNewsBannerText" class="cfg-input" placeholder="Diskon aplikasi premium minggu ini!"></label>
-            </div>
-
-            <div class="flex items-center gap-2 pt-1">
-              <button onclick="saveBotNewsConfig()" class="btn-primary text-xs font-bold px-5 py-2.5 rounded-xl"><i class="fa-solid fa-floppy-disk mr-1"></i>SIMPAN SEMUA</button>
+            <div class="bot-cfg-savebar" id="botCfgSaveBar" hidden>
+              <button onclick="saveBotNewsConfig()" class="btn-primary text-xs font-bold px-5 py-2.5 rounded-xl"><i class="fa-solid fa-floppy-disk mr-1"></i>SIMPAN SETTING</button>
               <span id="botCredHint" class="text-[10px] text-slate-500"></span>
             </div>
           </div>
