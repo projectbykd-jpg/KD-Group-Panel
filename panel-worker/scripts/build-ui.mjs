@@ -8,6 +8,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import vm from "node:vm";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
@@ -149,8 +150,10 @@ const shim = `<script>
 function buildTailwind() {
 	const cli = resolve(root, "node_modules", "tailwindcss", "lib", "cli.js");
 	if (!existsSync(cli)) {
-		console.warn("WARNING: tailwindcss belum ter-install -> pakai Play CDN (lebih lambat). Jalankan `npm install`.");
-		return null;
+		// Dulu jatuh diam-diam ke Tailwind Play CDN (compiler runtime di browser
+		// -> panel berat). Sekarang build GAGAL supaya itu tidak pernah ter-deploy.
+		console.error("ERROR: tailwindcss belum ter-install. Jalankan `npm ci` dulu.");
+		process.exit(1);
 	}
 	const outCss = resolve(root, "public", "_tw.css");
 	mkdirSync(dirname(outCss), { recursive: true });
@@ -164,24 +167,34 @@ function buildTailwind() {
 const tailwindCss = buildTailwind();
 
 let out = indexHtml;
-if (tailwindCss) {
-	out = out.replace(/\s*<link rel="preconnect" href="https:\/\/cdn\.tailwindcss\.com">/, "");
-	out = out.replace(/\s*<script src="https:\/\/cdn\.tailwindcss\.com"><\/script>/, "");
-	out = out.replace(
-		/<\?!?=?\s*include\(\s*['"]Styles['"]\s*\)\s*;?\s*\?>/,
-		stylesHtml + `\n<style id="tw-base">\n${tailwindCss}\n</style>\n<style id="kd-professional-redesign">\n${redesignCss}\n</style>`,
-	);
-} else {
-	out = out.replace(
-		/<\?!?=?\s*include\(\s*['"]Styles['"]\s*\)\s*;?\s*\?>/,
-		stylesHtml + `\n<style id="kd-professional-redesign">\n${redesignCss}\n</style>`,
-	);
-}
-out = out.replace(/<\?!?=?\s*include\(\s*['"]Scripts['"]\s*\)\s*;?\s*\?>/, shim + "\n" + scriptsHtml + "\n" + fixesHtml + "\n" + liveResultFixHtml);
+// Tailwind di-inline SESUDAH Styles.html: kalau sebelum, CSS custom menang atas
+// utility Tailwind dan layout (mis. header) berantakan.
+out = out.replace(
+	/<\?!?=?\s*include\(\s*['"]Styles['"]\s*\)\s*;?\s*\?>/,
+	() => stylesHtml + `\n<style id="tw-base">\n${tailwindCss}\n</style>\n<style id="kd-professional-redesign">\n${redesignCss}\n</style>`,
+);
+out = out.replace(/<\?!?=?\s*include\(\s*['"]Scripts['"]\s*\)\s*;?\s*\?>/, () => shim + "\n" + scriptsHtml + "\n" + fixesHtml + "\n" + liveResultFixHtml);
 out = out.replace(/<\?!?=?[\s\S]*?\?>/g, "");
 
 if (/<\?/.test(out) || /include\(/.test(out)) {
-	console.warn("WARNING: sisa scriptlet Apps Script masih ada di output.");
+	console.error("ERROR: sisa scriptlet Apps Script masih ada di output.");
+	process.exit(1);
+}
+
+// Cek sintaks SEMUA <script> inline sebelum ditulis: satu koma/kurung yang
+// salah di Scripts.html dulu baru ketahuan sesudah deploy (panel blank).
+// Sekarang build langsung gagal dan menyebut baris yang rusak.
+let scriptNo = 0;
+for (const m of out.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)) {
+	scriptNo++;
+	try {
+		new vm.Script(m[1], { filename: `inline-script-${scriptNo}.js` });
+	} catch (e) {
+		const line = out.slice(0, m.index).split("\n").length;
+		console.error(`ERROR: sintaks JS rusak di <script> inline #${scriptNo} (public/index.html sekitar baris ${line}): ${e.message}`);
+		console.error(String(e.stack || "").split("\n").slice(0, 4).join("\n"));
+		process.exit(1);
+	}
 }
 
 const outDir = resolve(root, "public");
