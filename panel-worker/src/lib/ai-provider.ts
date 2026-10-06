@@ -76,13 +76,32 @@ export async function aiKeyId(key: string): Promise<string> {
 
 const splitKeys = (s: unknown) => String(s || "").split(/[,\n]+/).map((x) => x.trim()).filter(Boolean);
 
+/**
+ * Satu provider boleh punya BANYAK model, urut prioritas, dipisah koma
+ * ("deepseek-v4-flash, glm-5.3, kimi-k3"). Model pertama dipakai dulu; kalau
+ * gagal (jawaban kosong, lambat, error) model berikutnya di provider yang SAMA
+ * dicoba sebelum pindah ke provider lain.
+ */
+export function modelChain(model: string | AiProvider): string[] {
+	const raw = typeof model === "string" ? model : model.model;
+	const out: string[] = [];
+	for (const m of String(raw || "").split(/[,\n]/)) {
+		const t = m.trim().slice(0, 120);
+		if (t && !out.includes(t)) out.push(t);
+	}
+	return out.slice(0, 10);
+}
+
+/** Provider dgn satu model saja (untuk satu panggilan). */
+const withModel = (p: AiProvider, model: string): AiProvider => ({ ...p, model });
+
 function cleanProvider(p: Partial<AiProvider> & { id: string }): AiProvider {
 	return {
 		id: String(p.id),
 		name: String(p.name || "Provider").trim().slice(0, 60) || "Provider",
 		base_url: String(p.base_url || "").trim(),
 		key: String(p.key || "").trim(),
-		model: String(p.model || "").trim().slice(0, 120),
+		model: modelChain(String(p.model || "")).join(", ").slice(0, 600),
 		enabled: p.enabled !== false,
 		quota: Math.max(0, toInt(p.quota)),
 		activated: /^\d{4}-\d{2}-\d{2}$/.test(String(p.activated || "")) ? String(p.activated) : "",
@@ -470,6 +489,8 @@ export const AI_COOLDOWNS_KEY = "ai_cooldowns";
 type Cooldown = { sig: string; until: number; reason: string };
 const memCooldowns = new Map<string, Cooldown>();
 const sigOf = (p: AiProvider) => `${p.model}@${normalizeBaseUrl(p.base_url)}`;
+/** Kunci jeda: per provider + model (model lain di provider yang sama tetap dicoba). */
+const cdKey = (p: AiProvider) => `${p.id}|${p.model}`;
 
 /** Untuk tes: lupakan semua jeda di memori. */
 export function aiResetCooldowns(): void {
@@ -485,10 +506,10 @@ function storedCooldowns(cfg: Record<string, string>): Record<string, Cooldown> 
 	}
 }
 
-/** Jeda yang masih berlaku untuk provider ini, atau null. */
+/** Jeda yang masih berlaku untuk model ini (p.model = SATU model), atau null. */
 export function aiCooldown(cfg: Record<string, string>, p: AiProvider, now = Date.now()): Cooldown | null {
 	const sig = sigOf(p);
-	for (const c of [memCooldowns.get(p.id), storedCooldowns(cfg)[p.id]]) {
+	for (const c of [memCooldowns.get(cdKey(p)), storedCooldowns(cfg)[cdKey(p)]]) {
 		if (c && c.sig === sig && Number(c.until) > now) return c;
 	}
 	return null;
@@ -524,16 +545,21 @@ async function setCooldown(env: Env, cfg: Record<string, string>, p: AiProvider,
 	const ms = cooldownMsFor(err);
 	if (!ms) return;
 	const c: Cooldown = { sig: sigOf(p), until: Date.now() + ms, reason: err.slice(0, 160) };
-	memCooldowns.set(p.id, c);
-	await persistCooldowns(env, cfg, { ...storedCooldowns(cfg), [p.id]: c });
+	memCooldowns.set(cdKey(p), c);
+	await persistCooldowns(env, cfg, { ...storedCooldowns(cfg), [cdKey(p)]: c });
 }
 
-/** Hapus jeda provider (panggilan berhasil, atau pemilik menyimpan/menguji ulang). */
-export async function aiClearCooldown(env: Env, cfg: Record<string, string>, id: string): Promise<void> {
-	memCooldowns.delete(id);
+/**
+ * Hapus jeda: satu model (panggilan berhasil) atau semua model satu provider
+ * (pemilik menyimpan provider itu lagi).
+ */
+export async function aiClearCooldown(env: Env, cfg: Record<string, string>, id: string, model?: string): Promise<void> {
+	const hit = (k: string) => (model ? k === `${id}|${model}` : k === id || k.startsWith(id + "|"));
+	for (const k of [...memCooldowns.keys()]) if (hit(k)) memCooldowns.delete(k);
 	const stored = storedCooldowns(cfg);
-	if (!(id in stored)) return;
-	delete stored[id];
+	const keys = Object.keys(stored).filter(hit);
+	if (!keys.length) return;
+	for (const k of keys) delete stored[k];
 	await persistCooldowns(env, cfg, stored);
 }
 
@@ -553,9 +579,11 @@ export async function aiNextReadyInMs(env: Env, cfg: Record<string, string>): Pr
 	const now = Date.now();
 	let best: number | null = null;
 	for (const p of await aiReadyOrCoolingProviders(env, cfg)) {
-		const c = aiCooldown(cfg, p, now);
-		const wait = c ? Number(c.until) - now : 0;
-		if (best == null || wait < best) best = wait;
+		for (const m of modelChain(p)) {
+			const c = aiCooldown(cfg, withModel(p, m), now);
+			const wait = c ? Number(c.until) - now : 0;
+			if (best == null || wait < best) best = wait;
+		}
 	}
 	return best;
 }
@@ -592,6 +620,7 @@ export async function readChatStream(body: ReadableStream<Uint8Array>, onChunk: 
 	let model = "";
 	let usage: unknown = null;
 	let error: unknown = null;
+	let finish = "";
 	const handle = (line: string) => {
 		const t = line.trim();
 		if (!t.startsWith("data:")) return;
@@ -608,6 +637,7 @@ export async function readChatStream(body: ReadableStream<Uint8Array>, onChunk: 
 		if (o?.usage) usage = o.usage;
 		else if (o?.x_groq?.usage) usage = o.x_groq.usage; // Groq menaruhnya di sini
 		const ch = o?.choices?.[0];
+		if (ch?.finish_reason) finish = String(ch.finish_reason);
 		const piece = ch?.delta?.content ?? ch?.message?.content ?? "";
 		if (typeof piece === "string") content += piece;
 	};
@@ -624,7 +654,7 @@ export async function readChatStream(body: ReadableStream<Uint8Array>, onChunk: 
 	}
 	handle(buf + dec.decode());
 	if (error && !content) return { error };
-	return { model, choices: [{ message: { content } }], usage };
+	return { model, choices: [{ message: { content }, finish_reason: finish || null }], usage };
 }
 
 async function postChat(
@@ -725,9 +755,13 @@ const errText = (status: number, body: any) => {
 };
 
 /**
- * Satu panggilan ke SATU provider. Melempar error kalau gagal. Kalau model
- * yang diatur sudah tidak ada (404 / decommissioned), daftar /models provider
- * itu ditanya sekali, model pengganti dipakai & disimpan otomatis.
+ * Satu panggilan ke SATU provider dgn SATU model (p.model; kalau berisi
+ * daftar, model pertama). Melempar error kalau gagal.
+ * - Model sudah tidak ada (404 / decommissioned): daftar /models ditanya
+ *   sekali, pengganti dipakai & ditulis menggantikannya di daftar model.
+ * - Jawaban kosong karena model "berpikir" sampai batas token habis
+ *   (deepseek-v4-flash: content "" dgn completion_tokens = max_tokens):
+ *   diulang sekali dgn batas token 2x lipat.
  */
 export async function aiChatProvider(
 	env: Env,
@@ -737,14 +771,18 @@ export async function aiChatProvider(
 ): Promise<AiCallResult> {
 	const keyId = await aiKeyId(p.key);
 	const promptChars = opts.messages.map((m) => m.content).join("\n");
-	let model = p.model;
+	const configured = modelChain(p)[0] || p.model;
+	let model = configured;
+	let callOpts = opts;
 	const tried = new Set<string>();
-	for (let attempt = 0; attempt < 2; attempt++) {
+	let discovered = false;
+	let enlarged = false;
+	for (;;) {
 		tried.add(model);
 		const started = Date.now();
 		let res: { status: number; body: any };
 		try {
-			res = await postChat(p, model, opts.messages, opts);
+			res = await postChat(p, model, opts.messages, callOpts);
 		} catch (e) {
 			const err = "Gagal menghubungi server: " + (e instanceof Error ? e.message : String(e));
 			// Diputus karena waktu habis: server sudah menerima permintaan dan
@@ -753,13 +791,13 @@ export async function aiChatProvider(
 			const prompt = billed ? estimateTokens(promptChars) : 0;
 			const completion = billed ? Math.ceil(e.partialChars / 4) : 0;
 			await recordUsage(env, { keyId, provider: p.name, model, purpose: opts.purpose, prompt, completion, total: prompt + completion, estimated: billed, ok: false, err, ms: Date.now() - started });
-			await setCooldown(env, cfg, { ...p, model }, err);
+			await setCooldown(env, cfg, withModel(p, model), err);
 			throw new Error(err);
 		}
 		const ms = Date.now() - started;
 		const text = String(res.body?.choices?.[0]?.message?.content ?? "");
 		const usage = parseUsage(res.body);
-		if (res.status >= 200 && res.status < 300 && text) {
+		if (res.status >= 200 && res.status < 300 && text.trim()) {
 			const estimated = !usage;
 			const total = usage?.total ?? estimateTokens(promptChars) + estimateTokens(text);
 			const usedModel = String(res.body?.model || model);
@@ -768,31 +806,44 @@ export async function aiChatProvider(
 				prompt: usage?.prompt ?? estimateTokens(promptChars), completion: usage?.completion ?? estimateTokens(text),
 				total, estimated, ok: true, err: "", ms,
 			});
-			await aiClearCooldown(env, cfg, p.id);
-			if (model !== p.model) {
-				// Model pengganti berhasil -> simpan supaya panggilan berikutnya langsung pakai itu.
+			await aiClearCooldown(env, cfg, p.id, model);
+			if (model !== configured) {
+				// Model pengganti berhasil -> tulis menggantikan model lama di daftar.
 				const list = parseProviders(cfg) || [];
 				const idx = list.findIndex((x) => x.id === p.id);
 				if (idx >= 0) {
-					list[idx] = { ...list[idx], model };
+					const chain = modelChain(list[idx]).map((m) => (m === configured ? model : m));
+					list[idx] = { ...list[idx], model: modelChain(chain.join(",")).join(", ") };
 					await aiSaveProviders(env, cfg, list).catch(() => {});
 				}
 			}
 			return { text, providerId: p.id, providerName: p.name, model: usedModel, totalTokens: total, estimated, ms };
 		}
-		const err = errText(res.status, res.body);
+		const empty = res.status >= 200 && res.status < 300 && !res.body?.error;
+		const finish = String(res.body?.choices?.[0]?.finish_reason ?? "");
+		const limit = callOpts.maxTokens ?? 0;
+		const hitLimit = finish === "length" || (!!limit && (usage?.completion ?? 0) >= limit * 0.95);
+		const err = empty
+			? hitLimit
+				? `jawaban kosong: model ${model} memakai ${usage?.completion ?? limit} token untuk "berpikir" sampai batas habis, tanpa menulis jawaban`
+				: `jawaban kosong dari model ${model}`
+			: errText(res.status, res.body);
 		// Server kadang tetap menagih token walau gagal -> catat yang dilaporkan.
 		await recordUsage(env, {
 			keyId, provider: p.name, model, purpose: opts.purpose,
 			prompt: usage?.prompt ?? 0, completion: usage?.completion ?? 0, total: usage?.total ?? 0,
 			estimated: false, ok: false, err, ms,
 		});
-		if (attempt === 0 && isModelError(res.status, err)) {
+		if (empty && hitLimit && !enlarged && limit) {
+			enlarged = true;
+			callOpts = { ...callOpts, maxTokens: Math.min(32768, Math.max(4096, limit * 2)) };
+			continue;
+		}
+		if (!discovered && isModelError(res.status, err)) {
+			discovered = true;
 			try {
-				const lr = await fetch(normalizeBaseUrl(p.base_url) + "/models", { headers: { Authorization: `Bearer ${p.key}` } });
-				const lb: any = await lr.json();
-				const ids: string[] = Array.isArray(lb?.data) ? lb.data.map((m: any) => String(m?.id || "")) : [];
-				const next = pickWriterModel(ids, tried);
+				const ids = await aiListModels(p);
+				const next = pickWriterModel(ids, new Set([...tried, ...modelChain(p)]));
 				if (next) {
 					model = next;
 					continue;
@@ -801,10 +852,24 @@ export async function aiChatProvider(
 				/* tidak bisa menanyakan daftar model -> anggap gagal */
 			}
 		}
-		await setCooldown(env, cfg, { ...p, model }, err);
+		await setCooldown(env, cfg, withModel(p, model), err);
 		throw new Error(err);
 	}
-	throw new Error("Model tidak tersedia.");
+}
+
+/** Daftar id model dari GET {base}/models (kosong kalau provider tidak menyediakannya). */
+export async function aiListModels(p: Pick<AiProvider, "base_url" | "key">): Promise<string[]> {
+	const ctl = new AbortController();
+	const timer = setTimeout(() => ctl.abort(), 20_000);
+	try {
+		const r = await fetch(normalizeBaseUrl(p.base_url) + "/models", { headers: { Authorization: `Bearer ${p.key}` }, signal: ctl.signal });
+		const b: any = await r.json().catch(() => null);
+		if (!r.ok) throw new Error(errText(r.status, b));
+		const ids: string[] = Array.isArray(b?.data) ? b.data.map((m: any) => String(m?.id || "")).filter(Boolean) : [];
+		return [...new Set(ids)].sort((x, y) => x.localeCompare(y)).slice(0, 300);
+	} finally {
+		clearTimeout(timer);
+	}
 }
 
 /** Provider aktif (kuota & masa aktif OK), urut prioritas -- termasuk yang sedang dijeda. */
@@ -815,9 +880,9 @@ async function aiReadyOrCoolingProviders(env: Env, cfg: Record<string, string>):
 	return list.filter((p, i) => providerStatus(p, usage.get(keyIds[i]) ?? EMPTY_USAGE).usable);
 }
 
-/** Provider yang boleh dipakai sekarang (aktif & tidak sedang dijeda), urut prioritas. */
+/** Provider yang boleh dipakai sekarang (aktif & minimal satu modelnya tidak dijeda), urut prioritas. */
 export async function aiUsableProviders(env: Env, cfg: Record<string, string>): Promise<AiProvider[]> {
-	return (await aiReadyOrCoolingProviders(env, cfg)).filter((p) => !aiCooldown(cfg, p));
+	return (await aiReadyOrCoolingProviders(env, cfg)).filter((p) => modelChain(p).some((m) => !aiCooldown(cfg, withModel(p, m))));
 }
 
 /**
@@ -838,17 +903,22 @@ export async function aiGenerate<T>(
 	const errs: string[] = [];
 	let attempted = 0;
 	for (const p of providers) {
-		const cd = aiCooldown(cfg, p);
-		if (cd) {
-			errs.push(`${p.name}: dijeda ${Math.ceil((Number(cd.until) - Date.now()) / 1000)} dtk lagi (${cd.reason})`);
-			continue;
-		}
-		attempted++;
-		try {
-			const call = await aiChatProvider(env, cfg, p, opts);
-			return { value: accept(call.text), call };
-		} catch (e) {
-			errs.push(`${p.name}: ${e instanceof Error ? e.message : String(e)}`);
+		const chain = modelChain(p);
+		for (const m of chain) {
+			const pm = withModel(p, m);
+			const label = chain.length > 1 ? `${p.name}/${m}` : p.name;
+			const cd = aiCooldown(cfg, pm);
+			if (cd) {
+				errs.push(`${label}: dijeda ${Math.ceil((Number(cd.until) - Date.now()) / 1000)} dtk lagi (${cd.reason})`);
+				continue;
+			}
+			attempted++;
+			try {
+				const call = await aiChatProvider(env, cfg, pm, opts);
+				return { value: accept(call.text), call };
+			} catch (e) {
+				errs.push(`${label}: ${e instanceof Error ? e.message : String(e)}`);
+			}
 		}
 	}
 	// Semua provider sedang dijeda -> artikel tidak salah apa-apa, jangan dibakar.

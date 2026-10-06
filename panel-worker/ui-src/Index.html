@@ -1043,7 +1043,22 @@
                   <label class="cfg-field">Nama<input id="botAiName" class="cfg-input" placeholder="mis. DattioAI" maxlength="60"></label>
                   <label class="cfg-field">Base URL<input id="botAiBase" class="cfg-input" placeholder="https://.../v1" autocomplete="off" spellcheck="false"></label>
                   <label class="cfg-field">API key<input id="botAiKey" class="cfg-input" placeholder="sk-..." autocomplete="off" spellcheck="false"><span class="cfg-hint" id="botAiKeyHint">Disimpan di server, tidak pernah ditampilkan utuh lagi.</span></label>
-                  <label class="cfg-field">Model<input id="botAiModel" class="cfg-input" placeholder="mis. deepseek-v4-flash" list="botAiModelList" autocomplete="off" spellcheck="false"><datalist id="botAiModelList"></datalist></label>
+                </div>
+                <div class="cfg-field">
+                  <span>Model (urutan = prioritas)</span>
+                  <input type="hidden" id="botAiModel">
+                  <div id="botAiChain" class="ai-chain" aria-live="polite"></div>
+                  <div class="ai-chain-add">
+                    <input id="botAiModelAdd" class="cfg-input" placeholder="ketik nama model, mis. deepseek-v4-flash" list="botAiModelList" autocomplete="off" spellcheck="false" onkeydown="if(event.key==='Enter'){event.preventDefault();botAiChainAddTyped();}">
+                    <datalist id="botAiModelList"></datalist>
+                    <button type="button" onclick="botAiChainAddTyped()" class="btn-secondary text-xs font-bold px-3 rounded-xl"><i class="fa-solid fa-plus"></i></button>
+                    <button type="button" id="botAiFetchBtn" onclick="botAiFetchModels()" class="btn-secondary text-xs font-bold px-3 rounded-xl whitespace-nowrap"><i class="fa-solid fa-list mr-1"></i>Ambil daftar model</button>
+                  </div>
+                  <span class="cfg-hint">Bot memakai model teratas dulu. Kalau gagal (jawaban kosong, lambat, error), model berikutnya di provider ini dicoba, baru provider lain.</span>
+                  <div id="botAiPicker" class="ai-picker" hidden>
+                    <input id="botAiPickerSearch" class="cfg-input" placeholder="cari model…" oninput="renderBotAiPicker()" autocomplete="off" spellcheck="false">
+                    <div id="botAiPickerList" class="ai-picker-list"></div>
+                  </div>
                 </div>
                 <details class="ai-form-more">
                   <summary>Kuota &amp; masa aktif (opsional, untuk token berbayar)</summary>
