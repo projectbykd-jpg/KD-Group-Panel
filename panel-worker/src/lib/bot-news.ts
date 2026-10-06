@@ -1,7 +1,7 @@
 // Modul NEWS untuk Role BOT: tarik feed berita -> rewrite via Gemini ->
 // posting ke Blogger. Semua state di Turso (bot_kv / news_source / news_article).
 import { getTurso } from "./turso";
-import { aiGenerate, aiUsableProviders, AiUnavailableError, legacyProviders, parseProviders } from "./ai-provider";
+import { aiGenerate, aiNextReadyInMs, aiUsableProviders, AiUnavailableError, legacyProviders, parseProviders } from "./ai-provider";
 import { tsNow, tsNowIndonesianDate, tsPlusMinutes } from "./time";
 
 // Dipakai dropdown "Tambah Sumber" (panel) & filter kategori di endpoint publik
@@ -1189,7 +1189,7 @@ export async function fbDirectRun(env: Env): Promise<{ posted: number; message: 
 export async function newsProcessOne(
 	env: Env,
 	opts: { postToBlogger: boolean } = { postToBlogger: true },
-): Promise<{ done: boolean; title?: string; postUrl?: string; error?: string; siteOnly?: boolean }> {
+): Promise<{ done: boolean; title?: string; postUrl?: string; error?: string; siteOnly?: boolean; aiWait?: boolean }> {
 	await ensureNewsCategoryColumns(env);
 	const cfg = await botCfg(env);
 	// RANDOM PER-KATEGORI (bukan RANDOM mentah atas semua baris, dan bukan
@@ -1486,7 +1486,7 @@ export async function newsProcessOne(
 		// masa aktif lewat): artikel tidak salah apa-apa -> kembalikan ke antrean.
 		if (e instanceof AiUnavailableError) {
 			await getTurso(env).prepare(`UPDATE news_article SET status='new' WHERE id=? AND status='processing'`).bind(id).run();
-			return { done: false, error: msg };
+			return { done: false, error: msg, aiWait: true };
 		}
 		// "User location is not supported" = Cloudflare edge yg kebagian request ini
 		// kena geo-block Gemini, sifatnya per-titik-edge & sementara (edge lain masih
@@ -1590,14 +1590,20 @@ export async function newsPruneQueueDaily(env: Env): Promise<{ pruned: number; k
 
 // Sembuhkan artikel yang nyangkut di status='processing' (lihat catatan bug di
 // newsProcessOne: dulu geo-block/rate-limit Gemini bikin baris permanen
-// nyangkut karena tidak pernah dikembalikan ke 'new'). Ambang 3 menit JAUH di
+// nyangkut karena tidak pernah dikembalikan ke 'new'). Ambang (lihat cutoff di bawah) JAUH di
 // atas waktu proses 1 artikel yang sebenarnya (~8 detik, lihat catatan di
 // botNewsRun) -- jadi aman dari race dengan invocation LAIN yang mungkin
 // benar-benar sedang memproses baris itu (klaimnya baru), hanya menyembuhkan
 // yang klaimnya sudah lama & jelas tidak pernah selesai.
 async function recoverStuckProcessing(env: Env): Promise<number> {
 	await ensureNewsCategoryColumns(env);
-	const cutoff = tsPlusMinutes(-3);
+	// 20 menit, bukan 3: satu artikel sekarang bisa makan beberapa menit
+	// (teks sumber panjang, provider timeout 90 dtk lalu pindah ke provider
+	// lain) dan loop Blogger & situs berjalan bersamaan di GitHub -- batas 3
+	// menit bisa mengembalikan artikel yang MASIH dikerjakan ke antrean ->
+	// diproses dobel. 20 menit > batas job GitHub (15 menit), jadi klaim yang
+	// tersisa dari job yang dimatikan tetap disapu.
+	const cutoff = tsPlusMinutes(-20);
 	const r = await getTurso(env)
 		.prepare(`UPDATE news_article SET status='new' WHERE status='processing' AND claimed_at != '' AND claimed_at < ?`)
 		.bind(cutoff)
@@ -1646,7 +1652,12 @@ export async function botNewsRun(
 	// Tanpa AI provider aktif tidak ada yang bisa ditulis -> jangan sentuh
 	// antrean sama sekali (artikel tidak di-klaim, tidak ada yang dibakar).
 	if (!(await aiUsableProviders(env, cfg)).length) {
-		return { pulled: 0, posted: 0, siteOnly: 0, capped: false, message: "Tidak ada AI provider aktif -- tambah/aktifkan di BOT -> Setting -> AI Provider (cek kuota & masa aktif).", bloggerBlocked: "" };
+		const wait = await aiNextReadyInMs(env, cfg);
+		const message =
+			wait != null
+				? `Semua AI provider sedang dijeda (error sementara: timeout / rate limit) -- siap lagi dalam ${Math.ceil(wait / 1000)} dtk.`
+				: "Tidak ada AI provider aktif -- tambah/aktifkan di BOT -> Setting -> AI Provider (cek kuota & masa aktif).";
+		return { pulled: 0, posted: 0, siteOnly: 0, capped: false, message, bloggerBlocked: "" };
 	}
 	const countOverride = opts.count ? Math.max(1, Math.min(MAX_RUN_COUNT, Math.floor(opts.count))) : 0;
 	let perRun = mode === "site" ? 0 : countOverride || Math.max(1, Number(cfg.per_run || "2"));
@@ -1745,7 +1756,8 @@ export async function botNewsRun(
 		if (postedSoFar >= cap) break; // Blogger capped -> loop Blogger cukup di sini, bukan urusan loop situs di bawah.
 		const r = await newsProcessOne(env, { postToBlogger: true });
 		if (!r.done) {
-			if (r.error) bloggerBlocked = r.error; // izin Blogger mati di tengah jalan
+			if (r.aiWait) lastError = r.error || "";
+			else if (r.error) bloggerBlocked = r.error; // izin Blogger mati di tengah jalan
 			break; // tidak ada artikel 'new' / Blogger terputus
 		}
 		if (r.postUrl) {
@@ -1763,7 +1775,10 @@ export async function botNewsRun(
 	let siteOnly = 0;
 	for (let i = 0; i < sitePerRun; i++) {
 		const r = await newsProcessOne(env, { postToBlogger: false });
-		if (!r.done) break; // tidak ada artikel 'new' lagi
+		if (!r.done) {
+			if (r.error) lastError = r.error; // semua AI provider dijeda
+			break; // tidak ada artikel 'new' lagi
+		}
 		if (r.siteOnly) siteOnly++;
 		if (r.error) lastError = r.error;
 		if (r.error && TRANSIENT_ERROR_RE.test(r.error)) break;

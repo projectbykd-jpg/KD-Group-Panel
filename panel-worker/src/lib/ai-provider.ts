@@ -431,8 +431,101 @@ const isModelError = (status: number, msg: string) =>
  * Batas tunggu satu panggilan. Tanpa ini, server yang diam saja ditunggu
  * sampai 5 menit (batas bawaan Node) sebelum provider berikutnya dicoba --
  * terjadi pada DattioAI model "auto" (23:53 -> 23:58, "fetch failed").
+ * 90 dtk cukup untuk artikel panjang di model normal (Groq ~10-20 dtk).
  */
-export const AI_CALL_TIMEOUT_MS = 150_000;
+export const AI_CALL_TIMEOUT_MS = 90_000;
+
+// ---------------------------------------------------------------------------
+// Jeda provider yang bermasalah
+// ---------------------------------------------------------------------------
+// Dulu provider yang diam / kena rate limit dicoba ULANG di SETIAP artikel:
+// DattioAI "auto" yang tidak pernah membalas membuang 150 dtk per artikel,
+// jadi 2 artikel = 6 menit. Sekarang kegagalan sementara membuat provider itu
+// dilewati selama beberapa saat. Disimpan di bot_kv["ai_cooldowns"] supaya
+// run GitHub berikutnya (proses baru) juga ikut melewatinya. Jeda berlaku
+// untuk kombinasi model + base URL saat itu -- ganti model = jeda hilang.
+export const AI_COOLDOWNS_KEY = "ai_cooldowns";
+type Cooldown = { sig: string; until: number; reason: string };
+const memCooldowns = new Map<string, Cooldown>();
+const sigOf = (p: AiProvider) => `${p.model}@${normalizeBaseUrl(p.base_url)}`;
+
+/** Untuk tes: lupakan semua jeda di memori. */
+export function aiResetCooldowns(): void {
+	memCooldowns.clear();
+}
+
+function storedCooldowns(cfg: Record<string, string>): Record<string, Cooldown> {
+	try {
+		const o = JSON.parse(cfg[AI_COOLDOWNS_KEY] || "{}");
+		return o && typeof o === "object" && !Array.isArray(o) ? o : {};
+	} catch {
+		return {};
+	}
+}
+
+/** Jeda yang masih berlaku untuk provider ini, atau null. */
+export function aiCooldown(cfg: Record<string, string>, p: AiProvider, now = Date.now()): Cooldown | null {
+	const sig = sigOf(p);
+	for (const c of [memCooldowns.get(p.id), storedCooldowns(cfg)[p.id]]) {
+		if (c && c.sig === sig && Number(c.until) > now) return c;
+	}
+	return null;
+}
+
+/** Berapa lama (ms) jeda dipasang untuk error ini; 0 = jangan dijeda. */
+export function cooldownMsFor(err: string): number {
+	const MIN = 60_000;
+	if (/tidak membalas/i.test(err)) return 30 * MIN; // model diam (DattioAI "auto")
+	if (/Gagal menghubungi server/i.test(err)) return 5 * MIN;
+	if (/^HTTP 40[13]\b/.test(err)) return 30 * MIN; // key salah / dicabut
+	if (/^HTTP 429\b/.test(err)) {
+		if (/too large|max_tokens|context length/i.test(err)) return 0; // soal ukuran, bukan kecepatan
+		// Groq: "Please try again in 1h2m3.5s" / "in 7.5s" / "in 450ms"
+		const m = /try again in\s+(?:(\d+)h)?(?:(\d+)m(?!s))?(?:([\d.]+)s)?(?:([\d.]+)ms)?/i.exec(err);
+		const waitMs = m ? ((Number(m[1] || 0) * 60 + Number(m[2] || 0)) * 60 + Number(m[3] || 0)) * 1000 + Number(m[4] || 0) : 0;
+		return waitMs > 0 ? Math.min(60 * MIN, Math.max(5_000, Math.ceil(waitMs) + 2_000)) : 2 * MIN;
+	}
+	if (/^HTTP 5\d\d\b/.test(err)) return 2 * MIN;
+	return 0;
+}
+
+async function persistCooldowns(env: Env, cfg: Record<string, string>, map: Record<string, Cooldown>): Promise<void> {
+	const now = Date.now();
+	for (const [k, c] of Object.entries(map)) if (!(Number(c?.until) > now)) delete map[k];
+	const json = JSON.stringify(map);
+	if (json === (cfg[AI_COOLDOWNS_KEY] || "{}")) return;
+	cfg[AI_COOLDOWNS_KEY] = json;
+	await kvSet(env, { [AI_COOLDOWNS_KEY]: json }).catch(() => {});
+}
+
+async function setCooldown(env: Env, cfg: Record<string, string>, p: AiProvider, err: string): Promise<void> {
+	const ms = cooldownMsFor(err);
+	if (!ms) return;
+	const c: Cooldown = { sig: sigOf(p), until: Date.now() + ms, reason: err.slice(0, 160) };
+	memCooldowns.set(p.id, c);
+	await persistCooldowns(env, cfg, { ...storedCooldowns(cfg), [p.id]: c });
+}
+
+/** Hapus jeda provider (panggilan berhasil, atau pemilik menyimpan/menguji ulang). */
+export async function aiClearCooldown(env: Env, cfg: Record<string, string>, id: string): Promise<void> {
+	memCooldowns.delete(id);
+	const stored = storedCooldowns(cfg);
+	if (!(id in stored)) return;
+	delete stored[id];
+	await persistCooldowns(env, cfg, stored);
+}
+
+/** Jeda terdekat yang akan habis (ms dari sekarang) di antara provider aktif, atau null. */
+export async function aiNextReadyInMs(env: Env, cfg: Record<string, string>): Promise<number | null> {
+	const now = Date.now();
+	let best: number | null = null;
+	for (const p of await aiReadyOrCoolingProviders(env, cfg)) {
+		const c = aiCooldown(cfg, p, now);
+		const wait = c ? Number(c.until) - now : 0;
+		if (best == null || wait < best) best = wait;
+	}
+	return best;
+}
 
 /** Pesan jelas untuk error jaringan (Node cuma bilang "fetch failed"; detailnya di e.cause). */
 export function networkErrorText(e: unknown, timeoutMs: number): string {
@@ -531,6 +624,7 @@ export async function aiChatProvider(
 		} catch (e) {
 			const err = "Gagal menghubungi server: " + (e instanceof Error ? e.message : String(e));
 			await recordUsage(env, { keyId, provider: p.name, model, purpose: opts.purpose, prompt: 0, completion: 0, total: 0, estimated: false, ok: false, err, ms: Date.now() - started });
+			await setCooldown(env, cfg, { ...p, model }, err);
 			throw new Error(err);
 		}
 		const ms = Date.now() - started;
@@ -545,6 +639,7 @@ export async function aiChatProvider(
 				prompt: usage?.prompt ?? estimateTokens(promptChars), completion: usage?.completion ?? estimateTokens(text),
 				total, estimated, ok: true, err: "", ms,
 			});
+			await aiClearCooldown(env, cfg, p.id);
 			if (model !== p.model) {
 				// Model pengganti berhasil -> simpan supaya panggilan berikutnya langsung pakai itu.
 				const list = parseProviders(cfg) || [];
@@ -577,17 +672,23 @@ export async function aiChatProvider(
 				/* tidak bisa menanyakan daftar model -> anggap gagal */
 			}
 		}
+		await setCooldown(env, cfg, { ...p, model }, err);
 		throw new Error(err);
 	}
 	throw new Error("Model tidak tersedia.");
 }
 
-/** Provider yang boleh dipakai sekarang, urut prioritas, beserta status masing-masing. */
-export async function aiUsableProviders(env: Env, cfg: Record<string, string>): Promise<AiProvider[]> {
+/** Provider aktif (kuota & masa aktif OK), urut prioritas -- termasuk yang sedang dijeda. */
+async function aiReadyOrCoolingProviders(env: Env, cfg: Record<string, string>): Promise<AiProvider[]> {
 	const list = await aiLoadProviders(env, cfg);
 	const keyIds = await Promise.all(list.map((p) => (p.key ? aiKeyId(p.key) : Promise.resolve(""))));
 	const usage = await cachedUsage(env, keyIds);
 	return list.filter((p, i) => providerStatus(p, usage.get(keyIds[i]) ?? EMPTY_USAGE).usable);
+}
+
+/** Provider yang boleh dipakai sekarang (aktif & tidak sedang dijeda), urut prioritas. */
+export async function aiUsableProviders(env: Env, cfg: Record<string, string>): Promise<AiProvider[]> {
+	return (await aiReadyOrCoolingProviders(env, cfg)).filter((p) => !aiCooldown(cfg, p));
 }
 
 /**
@@ -601,12 +702,19 @@ export async function aiGenerate<T>(
 	opts: { messages: { role: string; content: string }[]; purpose: string; temperature?: number; maxTokens?: number; json?: boolean },
 	accept: (text: string) => T,
 ): Promise<{ value: T; call: AiCallResult }> {
-	const providers = await aiUsableProviders(env, cfg);
+	const providers = await aiReadyOrCoolingProviders(env, cfg);
 	if (!providers.length) {
 		throw new AiUnavailableError("Tidak ada AI provider yang aktif. Tambahkan / aktifkan di BOT → Setting → AI Provider (cek juga kuota & masa aktif).");
 	}
 	const errs: string[] = [];
+	let attempted = 0;
 	for (const p of providers) {
+		const cd = aiCooldown(cfg, p);
+		if (cd) {
+			errs.push(`${p.name}: dijeda ${Math.ceil((Number(cd.until) - Date.now()) / 1000)} dtk lagi (${cd.reason})`);
+			continue;
+		}
+		attempted++;
 		try {
 			const call = await aiChatProvider(env, cfg, p, opts);
 			return { value: accept(call.text), call };
@@ -614,5 +722,7 @@ export async function aiGenerate<T>(
 			errs.push(`${p.name}: ${e instanceof Error ? e.message : String(e)}`);
 		}
 	}
+	// Semua provider sedang dijeda -> artikel tidak salah apa-apa, jangan dibakar.
+	if (!attempted) throw new AiUnavailableError("Semua AI provider sedang dijeda: " + errs.join(" | "));
 	throw new Error(errs.join(" | "));
 }

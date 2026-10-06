@@ -4,8 +4,13 @@ const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: im
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
 import {
+	aiCooldown,
 	aiGenerate,
 	aiLoadProviders,
+	aiNextReadyInMs,
+	aiResetCooldowns,
+	AiUnavailableError,
+	cooldownMsFor,
 	legacyProviders,
 	maskKey,
 	normalizeBaseUrl,
@@ -48,6 +53,7 @@ const usageRows = () => turso.current!.raw.prepare(`SELECT provider, total_token
 beforeEach(() => {
 	turso.current = fakeTurso();
 	vi.unstubAllGlobals();
+	aiResetCooldowns();
 });
 
 describe("helper", () => {
@@ -379,5 +385,85 @@ describe("provider lambat / batas output", () => {
 		const r = await aiGenerate(env, await botCfg(env), { purpose: "t", messages: [{ role: "user", content: "x" }] }, (t) => t);
 		expect(r.call.providerName).toBe("B");
 		expect(usageRows()[0]).toMatchObject({ provider: "Lambat", ok: 0 });
+	});
+});
+
+describe("jeda provider yang bermasalah", () => {
+	const msgs = [{ role: "user", content: "x" }];
+	const abort = () => Object.assign(new Error("aborted"), { name: "AbortError" });
+
+	it("lama jeda per jenis error", () => {
+		expect(cooldownMsFor('Gagal menghubungi server: server tidak membalas dalam 90 detik (coba model yang lebih cepat, bukan "auto")')).toBe(30 * 60_000);
+		expect(cooldownMsFor("Gagal menghubungi server: fetch failed -- ECONNRESET")).toBe(5 * 60_000);
+		expect(cooldownMsFor("HTTP 429 Rate limit reached for model `qwen`. Please try again in 7.5s.")).toBe(9_500);
+		expect(cooldownMsFor("HTTP 429 Rate limit reached ... tokens per day (TPD). Please try again in 1h2m3s.")).toBe(60 * 60_000);
+		expect(cooldownMsFor("HTTP 429 Rate limit reached. Please try again in 4m30s.")).toBe(272_000);
+		expect(cooldownMsFor("HTTP 429 slow down")).toBe(2 * 60_000);
+		expect(cooldownMsFor("HTTP 429 Request too large for model on output tokens")).toBe(0);
+		expect(cooldownMsFor("HTTP 503 overloaded")).toBe(2 * 60_000);
+		expect(cooldownMsFor("HTTP 401 invalid api key")).toBe(30 * 60_000);
+		expect(cooldownMsFor("HTTP 400 bad request")).toBe(0);
+		expect(cooldownMsFor("artikel terlalu pendek")).toBe(0);
+	});
+
+	it("provider diam dilewati di artikel berikutnya -- juga oleh proses baru (run GitHub berikutnya)", async () => {
+		await botCfgSet(env, { ai_providers: JSON.stringify([prov({ name: "Diam" }), prov({ id: "b", name: "B", base_url: "https://b.test/v1" })]) });
+		const hosts: string[] = [];
+		vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+			hosts.push(new URL(String(input)).host);
+			if (String(input).startsWith("https://a.test")) throw abort();
+			return new Response(JSON.stringify(chatOk("dari B").body), { status: 200 });
+		});
+		await aiGenerate(env, await botCfg(env), { purpose: "t", messages: msgs }, (t) => t);
+		await aiGenerate(env, await botCfg(env), { purpose: "t", messages: msgs }, (t) => t);
+		expect(hosts).toEqual(["a.test", "b.test", "b.test"]);
+
+		aiResetCooldowns(); // proses baru: memori kosong, jeda dibaca dari bot_kv
+		const cfg = await botCfg(env);
+		expect(aiCooldown(cfg, prov({ name: "Diam" }))?.reason).toMatch(/tidak membalas/);
+		await aiGenerate(env, cfg, { purpose: "t", messages: msgs }, (t) => t);
+		expect(hosts).toEqual(["a.test", "b.test", "b.test", "b.test"]);
+	});
+
+	it("ganti model = jeda hilang; panggilan sukses menghapus jeda", async () => {
+		await botCfgSet(env, { ai_providers: JSON.stringify([prov({ model: "auto" })]) });
+		let fail = true;
+		mockFetch(() => (fail ? { status: 503, body: { error: { message: "busy" } } } : chatOk("ok")));
+		await expect(aiGenerate(env, await botCfg(env), { purpose: "t", messages: msgs }, (t) => t)).rejects.toThrow(/HTTP 503/);
+		expect(aiCooldown(await botCfg(env), prov({ model: "auto" }))).not.toBeNull();
+		expect(aiCooldown(await botCfg(env), prov({ model: "deepseek-v4-flash" }))).toBeNull();
+
+		await botCfgSet(env, { ai_providers: JSON.stringify([prov({ model: "deepseek-v4-flash" })]) });
+		fail = false;
+		const r = await aiGenerate(env, await botCfg(env), { purpose: "t", messages: msgs }, (t) => t);
+		expect(r.value).toBe("ok");
+		expect(JSON.parse((await botCfg(env)).ai_cooldowns || "{}")).toEqual({});
+	});
+
+	it("semua provider dijeda -> AiUnavailableError tanpa panggilan jaringan; waktu siap terdekat diketahui", async () => {
+		await botCfgSet(env, { ai_providers: JSON.stringify([prov()]) });
+		const calls = mockFetch(() => ({ status: 429, body: { error: { message: "Rate limit reached. Please try again in 20s." } } }));
+		await expect(aiGenerate(env, await botCfg(env), { purpose: "t", messages: msgs }, (t) => t)).rejects.toThrow(/HTTP 429/);
+		expect(calls.length).toBe(1);
+		const err = await aiGenerate(env, await botCfg(env), { purpose: "t", messages: msgs }, (t) => t).catch((e) => e);
+		expect(err).toBeInstanceOf(AiUnavailableError);
+		expect(err.message).toMatch(/dijeda/);
+		expect(calls.length).toBe(1);
+		const wait = await aiNextReadyInMs(env, await botCfg(env));
+		expect(wait).toBeGreaterThan(15_000);
+		expect(wait).toBeLessThanOrEqual(22_000);
+	});
+
+	it("simpan ulang provider di panel menghapus jedanya", async () => {
+		await botCfgSet(env, { ai_providers: JSON.stringify([prov()]) });
+		mockFetch(() => ({ status: 500, body: { error: { message: "down" } } }));
+		await aiGenerate(env, await botCfg(env), { purpose: "t", messages: msgs }, (t) => t).catch(() => {});
+		expect(aiCooldown(await botCfg(env), prov())).not.toBeNull();
+		const { env: e, db } = fakeEnv();
+		db.prepare(`INSERT INTO users (username, username_lc, password_hash, role) VALUES ('Bos','bos',?, 'ADMIN')`).run(await hashPassword("pw"));
+		const { sessionToken } = (await checkLogin(e, "Bos", "pw", "")) as { sessionToken: string };
+		const res: any = await botAiSave(e, sessionToken, { id: "a", name: "A" });
+		expect(res.providers[0].cooldown_until).toBe(0);
+		expect(aiCooldown(await botCfg(env), prov())).toBeNull();
 	});
 });

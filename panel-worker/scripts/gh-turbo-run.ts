@@ -16,6 +16,7 @@
 //
 // Cara pakai: `npx tsx scripts/gh-turbo-run.ts` dengan env TURSO_URL &
 // TURSO_TOKEN ter-set (lihat .github/workflows/news-turbo.yml).
+import { aiNextReadyInMs } from "../src/lib/ai-provider";
 import { botCfg, botCfgSet, botNewsRun } from "../src/lib/bot-news";
 
 const env = {
@@ -24,6 +25,12 @@ const env = {
 } as any;
 
 const MAX_ROUNDS = Number(process.env.MAX_ROUNDS || 12);
+// Rate limit per menit (Groq gratis: "try again in 7s") -> tunggu sebentar lalu
+// lanjut, jangan akhiri run dgn 0 artikel. Jeda yang lebih lama (provider
+// diam / limit harian) TIDAK ditunggu -- run berikutnya yang mencoba lagi.
+const MAX_WAIT_MS = 75_000;
+const MAX_WAITS = 4;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const runCountRaw = String(process.env.RUN_COUNT || "").trim();
 const runCount = runCountRaw ? Math.max(1, Math.floor(Number(runCountRaw))) : 0;
 // "Send ke" dropdown di panel -- both (default) = Blogger + Situs Sendiri,
@@ -61,6 +68,7 @@ async function runLoop(mode: "blogger" | "site"): Promise<number> {
 	// MAX_ROUNDS kalau FULL_DRAIN diminta lewat tombol panel).
 	const roundsAllowed = target != null ? MAX_ROUNDS : maxRoundsThisRun;
 	let total = 0;
+	let waits = 0;
 	for (let i = 1; i <= roundsAllowed; i++) {
 		const remaining = target != null ? target - total : null;
 		if (remaining != null && remaining <= 0) break;
@@ -72,6 +80,16 @@ async function runLoop(mode: "blogger" | "site"): Promise<number> {
 		console.log(`[${mode} ${tag}] got=${got} capped=${r.capped} :: ${r.message}`);
 		total += got;
 		if (mode === "blogger" && r.capped) break; // daily_cap Blogger tercapai
+		if (got === 0 && waits < MAX_WAITS) {
+			const wait = await aiNextReadyInMs(env, await botCfg(env));
+			if (wait != null && wait > 0 && wait <= MAX_WAIT_MS) {
+				waits++;
+				console.log(`[${mode}] AI provider dijeda ${Math.ceil(wait / 1000)} dtk (rate limit) -- tunggu lalu lanjut.`);
+				await sleep(wait + 500);
+				i--; // putaran yang cuma menunggu tidak dihitung
+				continue;
+			}
+		}
 		if (got === 0) break; // antrean 'new' habis ATAU macet di error yang sama terus
 	}
 	return total;
@@ -120,8 +138,13 @@ async function main() {
 		console.log(`[diag] Proses otomatis (interval ${intervalMin} menit) -- lanjut.`);
 	}
 
-	const posted = runTarget === "site" ? 0 : await runLoop("blogger");
-	const siteOnly = runTarget === "blogger" ? 0 : await runLoop("site");
+	// Blogger & situs sendiri jalan BERSAMAAN (dulu berurutan: situs baru mulai
+	// sesudah Blogger selesai). Aman: tiap artikel diklaim atomik
+	// (UPDATE ... WHERE status='new'), jadi tidak ada artikel yang diproses dobel.
+	const [posted, siteOnly] = await Promise.all([
+		runTarget === "site" ? 0 : runLoop("blogger"),
+		runTarget === "blogger" ? 0 : runLoop("site"),
+	]);
 	console.log(`\n=== SELESAI: ${posted} artikel ke Blogger, ${siteOnly} artikel ke situs sendiri ===`);
 	// Izin Blogger mati -> tandai jelas di halaman run GitHub (annotation
 	// kuning), supaya tidak tersembunyi di balik status "success".
