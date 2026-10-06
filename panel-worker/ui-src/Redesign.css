@@ -206,8 +206,7 @@ body { min-height: 100vh; }
   top: 0 !important;
   height: 100vh;
   max-height: 100vh !important;
-  overflow-y: auto !important;
-  overflow-x: hidden;
+  overflow: hidden !important;
   display: flex;
   flex-direction: column;
   background: var(--ui-surface) !important;
@@ -218,7 +217,8 @@ body { min-height: 100vh; }
   padding: 0 !important;
   z-index: 30;
 }
-.sidebar-inner { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.sidebar-inner { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: var(--ui-line-strong) transparent; }
+.sidebar-brand { position: sticky; top: 0; z-index: 1; background: var(--ui-surface); }
 .sidebar-brand {
   display: flex; align-items: center; gap: 12px; height: var(--ui-topbar-h);
   padding: 0 18px; border-bottom: 1px solid var(--ui-line); flex: 0 0 auto;
@@ -230,7 +230,7 @@ body { min-height: 100vh; }
 
 .app-sidebar .nav-groups {
   display: flex !important; flex-direction: column !important; gap: 2px !important;
-  padding: 14px 12px 16px !important; width: 100%; flex: 1;
+  padding: 14px 12px 16px !important; width: 100%; flex: 0 0 auto;
 }
 .nav-group { display: flex; flex-direction: column; margin-top: 10px; }
 .nav-group:first-child { margin-top: 0; }
@@ -1015,3 +1015,6 @@ table:has(> #activeSessionsBody) { min-width: 900px !important; }
 
 /* Opsi <select> sangat panjang (mis. nama aksi di log) tidak boleh melebarkan kolom grid / halaman */
 .activity-filter-control { min-width: 0; max-width: 100%; text-overflow: ellipsis; }
+
+/* Tabel user: tinggi dibatasi (62vh) -> HARUS bisa digulir vertikal, header tetap terlihat */
+.admin-users-table-wrap { overflow: auto !important; max-height: 62vh; scrollbar-width: thin; scrollbar-color: var(--ui-line-strong) transparent; }
