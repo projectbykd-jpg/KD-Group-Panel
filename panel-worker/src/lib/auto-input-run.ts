@@ -20,7 +20,7 @@
 // (per,nomor,sar,cmdhitung). Keduanya tanpa query string.
 // Ada yang meleset -> berhenti dan lapor, TIDAK mencoba "kira-kira".
 import { parsePasaranOptionsHtml, investIsLoginPage } from "./invest";
-import { adminBaseProblem, cookieHeader, normMarket, type AdminSession, type AutoInputPlan } from "./auto-input";
+import { adminBaseProblem, cookieHeader, normMarket, siteBrand, type AdminSession, type AutoInputPlan } from "./auto-input";
 
 export type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 type Plan = Extract<AutoInputPlan, { ok: true }>;
@@ -450,6 +450,13 @@ export async function runAutoInput(opts: {
 				"cek",
 			);
 		}
+		// Satu host bisa melayani beberapa website. Kalau sidebar menampilkan nama website ("SENJATOGEL.COM" --
+		// muncul bila cookie lengkap) dan BEDA dari website baris ini, berhenti: cookie salah tempat.
+		const shownBrand = htmlText(home).toUpperCase().match(/AGENT\s*\([^)]*\)\s*([A-Z0-9]{2,20}(?:TOGEL|TOTO))\.COM/)?.[1];
+		const wantBrand = siteBrand(sess.website);
+		if (shownBrand && wantBrand && shownBrand !== wantBrand) {
+			throw new Stop(`Cookie ini milik ${shownBrand}.COM (agen ${who}), bukan ${wantBrand} — tempel cookie admin ${wantBrand} di baris ${sess.website}.`, "cek");
+		}
 		const code = findPoolCode(home, plan.market);
 		if (!code) throw new Stop(`Pasaran "${plan.market}" tidak ditemukan (atau ganda) di dropdown website ini.`, "cek");
 
@@ -475,7 +482,7 @@ export async function runAutoInput(opts: {
 				ok: true,
 				stage: "cek",
 				period,
-				detail: `Uji kering OK: login sebagai (${who}), ${plan.market} (${code}) periode ${period}, angka ${used.join("/")} — validasi lolos, TIDAK ada yang dikirim.`,
+				detail: `Uji kering OK: login sebagai (${who})${shownBrand ? " di " + shownBrand + ".COM" : ""}, ${plan.market} (${code}) periode ${period}, angka ${used.join("/")} — validasi lolos, TIDAK ada yang dikirim.`,
 				preview: { code, post: "admin_angka13.php", fields: Object.fromEntries(payload), prev: page.prev },
 			};
 		}
@@ -519,7 +526,7 @@ export async function runAutoInput(opts: {
 			throw new Stop("Hitung dikirim tapi tombol Hitung periode ini masih ada — cek manual apakah sudah terhitung.", "hitung");
 		}
 		stage = "selesai";
-		return { ok: true, stage, period, detail: `Periode ${period} ${plan.market}: angka ${used.join("/")} masuk & dihitung.` };
+		return { ok: true, stage, period, detail: `Periode ${period} ${plan.market}: angka ${used.join("/")} masuk & dihitung (agen ${who}).` };
 	} catch (e) {
 		if (e instanceof Stop) return { ok: false, stage: e.stage, period, detail: e.message };
 		return {
