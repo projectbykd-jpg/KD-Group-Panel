@@ -5,7 +5,7 @@ vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
 import { autoInputAfterSend } from "../src/api/auto-input";
 import { parseCookieInput, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
-import { parseAngkaPage, parseHitungPage, runAutoInput, buildPayload, parseForms } from "../src/lib/auto-input-run";
+import { frameSources, parseAngkaPage, parseHitungPage, runAutoInput, buildPayload, parseForms } from "../src/lib/auto-input-run";
 import { processText } from "../src/lib/parser";
 import { fakeD1, fakeEnv } from "./helpers/fake-env";
 import type { UserProfile } from "../src/lib/db";
@@ -285,6 +285,21 @@ describe("URL admin hanya tiga host yang diizinkan", () => {
 		const r = await runAutoInput({ session: { ...sess, baseUrl: "https://agwl12.suksesbogil.com/" }, plan: plan(), fetchFn: async () => (hits++, new Response("")) });
 		expect(r).toMatchObject({ ok: false, stage: "cek" });
 		expect(hits).toBe(0);
+	});
+	it("index.php berupa FRAMESET (judul 'Administration'): sidebar & dropdown dibaca dari frame", async () => {
+		const m = mockSite();
+		const f = async (u: string, i?: RequestInit) => {
+			const path = new URL(u).pathname;
+			if (path === "/index.php") {
+				return new Response('<html><head><title>Administration</title></head><frameset cols="170,*"><frame src="menu.php" name="l"><frame src="/over.php?x=1" name="r"><frame src="https://evil.example/x.php"></frameset></html>');
+			}
+			if (path === "/menu.php") return mockSite().fetchFn("https://ag.suksesbogil.com/index.php", i);
+			if (path === "/over.php") return new Response("<html>OVERVIEW</html>");
+			return m.fetchFn(u, i);
+		};
+		const r = await runAutoInput({ session: sess, plan: plan(), dryRun: true, fetchFn: f });
+		expect(r.ok).toBe(true);
+		expect(frameSources('<frame src="a.php"><IFRAME src=\'/b.php?q=1\'><frame src="https://x.com/c.php"><frame src="javascript:void(0)">', "https://ag.suksesbogil.com/index.php")).toEqual(["a.php", "b.php?q=1"]);
 	});
 	it("halaman yang diterima server ikut dilaporkan (status, redirect, judul, isi) saat bukan halaman admin", async () => {
 		let n = 0;
