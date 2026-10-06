@@ -1015,3 +1015,6 @@ table:has(> #activeSessionsBody) { min-width: 900px !important; }
 
 /* Opsi <select> sangat panjang (mis. nama aksi di log) tidak boleh melebarkan kolom grid / halaman */
 .activity-filter-control { min-width: 0; max-width: 100%; text-overflow: ellipsis; }
+
+/* Tabel user: tinggi dibatasi (62vh) -> HARUS bisa digulir vertikal, header tetap terlihat */
+.admin-users-table-wrap { overflow: auto !important; max-height: 62vh; scrollbar-width: thin; scrollbar-color: var(--ui-line-strong) transparent; }
