@@ -427,22 +427,55 @@ const estimateTokens = (s: string) => Math.ceil(String(s || "").length / 4);
 const isModelError = (status: number, msg: string) =>
 	status === 404 || /model[^.]{0,80}(not[ _]found|does not exist|decommission|not supported|not available|blocked|invalid|unknown)/i.test(msg);
 
+/**
+ * Batas tunggu satu panggilan. Tanpa ini, server yang diam saja ditunggu
+ * sampai 5 menit (batas bawaan Node) sebelum provider berikutnya dicoba --
+ * terjadi pada DattioAI model "auto" (23:53 -> 23:58, "fetch failed").
+ */
+export const AI_CALL_TIMEOUT_MS = 150_000;
+
+/** Pesan jelas untuk error jaringan (Node cuma bilang "fetch failed"; detailnya di e.cause). */
+export function networkErrorText(e: unknown, timeoutMs: number): string {
+	if (e instanceof Error && (e.name === "AbortError" || e.name === "TimeoutError")) {
+		return `server tidak membalas dalam ${Math.round(timeoutMs / 1000)} detik (coba model yang lebih cepat, bukan "auto")`;
+	}
+	const cause = e instanceof Error ? (e as Error & { cause?: unknown }).cause : undefined;
+	const c = cause && typeof cause === "object" ? (cause as { code?: string; message?: string }) : {};
+	const base = e instanceof Error ? e.message : String(e);
+	return [base, c.code, c.message].filter(Boolean).join(" -- ");
+}
+
+const isTooLarge = (status: number, body: any) =>
+	status === 413 || ((status === 429 || status === 400) && /too large|max_tokens|maximum context|context length|reduce the length/i.test(JSON.stringify(body?.error ?? body ?? "")));
+
 async function postChat(
 	p: AiProvider,
 	model: string,
 	messages: { role: string; content: string }[],
-	opts: { temperature?: number; maxTokens?: number; json?: boolean },
+	opts: { temperature?: number; maxTokens?: number; json?: boolean; timeoutMs?: number },
 ): Promise<{ status: number; body: any }> {
-	const send = async (withJson: boolean) => {
+	const timeoutMs = opts.timeoutMs ?? AI_CALL_TIMEOUT_MS;
+	const send = async (withJson: boolean, maxTokens?: number) => {
 		const payload: Record<string, unknown> = { model, messages, temperature: opts.temperature ?? 0.8 };
-		if (opts.maxTokens) payload.max_tokens = opts.maxTokens;
+		if (maxTokens) payload.max_tokens = maxTokens;
 		if (withJson) payload.response_format = { type: "json_object" };
-		const r = await fetch(normalizeBaseUrl(p.base_url) + "/chat/completions", {
-			method: "POST",
-			headers: { "Content-Type": "application/json", Authorization: `Bearer ${p.key}` },
-			body: JSON.stringify(payload),
-		});
-		const raw = await r.text();
+		const ctl = new AbortController();
+		const timer = setTimeout(() => ctl.abort(), timeoutMs);
+		let r: Response;
+		let raw: string;
+		try {
+			r = await fetch(normalizeBaseUrl(p.base_url) + "/chat/completions", {
+				method: "POST",
+				headers: { "Content-Type": "application/json", Authorization: `Bearer ${p.key}` },
+				body: JSON.stringify(payload),
+				signal: ctl.signal,
+			});
+			raw = await r.text();
+		} catch (e) {
+			throw new Error(networkErrorText(e, timeoutMs));
+		} finally {
+			clearTimeout(timer);
+		}
 		let body: any;
 		try {
 			body = JSON.parse(raw);
@@ -451,12 +484,21 @@ async function postChat(
 		}
 		return { status: r.status, body };
 	};
-	const first = await send(!!opts.json);
+	let json = !!opts.json;
+	let maxTokens = opts.maxTokens;
+	let res = await send(json, maxTokens);
 	// Tidak semua provider mendukung response_format -> ulang tanpa (prompt sudah minta JSON).
-	if (opts.json && (first.status === 400 || first.status === 422) && /response_format|json/i.test(JSON.stringify(first.body?.error ?? first.body))) {
-		return send(false);
+	if (json && (res.status === 400 || res.status === 422) && /response_format|json/i.test(JSON.stringify(res.body?.error ?? res.body))) {
+		json = false;
+		res = await send(json, maxTokens);
 	}
-	return first;
+	// Batas output terlalu besar untuk paket akun (mis. Groq gratis: "Request too
+	// large ... on output tokens") -> ulang sekali dgn batas separuhnya.
+	if (maxTokens && maxTokens > 2048 && isTooLarge(res.status, res.body)) {
+		maxTokens = Math.max(2048, Math.floor(maxTokens / 2));
+		res = await send(json, maxTokens);
+	}
+	return res;
 }
 
 const errText = (status: number, body: any) => {

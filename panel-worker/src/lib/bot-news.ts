@@ -41,7 +41,7 @@ function newsCategoryLabel(cat: string): string {
 // biasa tetap sukses. Perlakukan sbg transient jg spy artikel ini dicoba lagi
 // (bukan macet error selamanya), bukan dianggap semua provider mati total.
 const TRANSIENT_ERROR_RE =
-	/location is not supported|rateLimitExceeded|RESOURCE_EXHAUSTED|resource has been exhausted|user-?Rate ?Limit|too many subrequests|failed to generate json|json_validate_failed|terlalu pendek|judul nyaris sama persis|"code":\s*429|HTTP 429|HTTP 5\d\d|Gagal menghubungi server/i;
+	/location is not supported|rateLimitExceeded|RESOURCE_EXHAUSTED|resource has been exhausted|user-?Rate ?Limit|too many subrequests|failed to generate json|json_validate_failed|terlalu pendek|judul nyaris sama persis|"code":\s*429|HTTP 429|HTTP 5\d\d|Gagal menghubungi server|tidak membalas/i;
 
 // Kolom category ditambahkan belakangan -- migrasi malas (lazy), sama seperti
 // fb_template_caption di bawah: dicoba sekali per cold-start isolate, aman
