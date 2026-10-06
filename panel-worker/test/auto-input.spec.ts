@@ -50,7 +50,7 @@ function mockSite(o: SiteOpts = {}) {
 	const st = { calc: false, posts: [] as { path: string; search: string; body: URLSearchParams; cookie: string }[], calcPosts: 0 };
 	const nextPeriod = () => rows[0].period + 1;
 	const opt = (n: number, sel: number) => Array.from({ length: n }, (_, i) => `<option value="${i + 1}"${i + 1 === sel ? " selected" : ""}>${i + 1}</option>`).join("");
-	const angka = () => `<html><body><div>HUGOTOGEL.COM</div>
+	const angka = () => `<html><body><div>Agent (fakeagent)</div>
 <select style="width:100%" onchange="gantipasar(this.value)"><option>Pilih Pasar</option>
 <option value="ARIZONA,p33190">ARIZONA</option><option value="${market},${code}">${market}</option>
 <option style="display:none;" id="paramp21545" value="pool-14-0-1-"></option></select>
@@ -250,7 +250,7 @@ describe("URL admin hanya tiga host yang diizinkan", () => {
 		expect(defaultAdminBase("HUGO")).toBe("https://ag.suksesbogil.com/");
 		expect(defaultAdminBase("SOHO")).toBe("https://agwl5.suksesbogil.com/");
 	});
-	it("website HUGO (kode singkat) lolos cek merek HUGOTOGEL.COM di halaman admin", async () => {
+	it("website HUGO (kode singkat) lolos", async () => {
 		const m = mockSite();
 		const r = await runAutoInput({ session: { ...sess, website: "HUGO" }, plan: plan(), dryRun: true, fetchFn: m.fetchFn });
 		expect(r.ok).toBe(true);
@@ -314,10 +314,18 @@ describe("URL admin hanya tiga host yang diizinkan", () => {
 		expect(r.detail).toMatch(/Akses Ditolak/);
 		expect(r.detail).toMatch(/IP anda tidak diizinkan/);
 	});
-	it("PHPSESSID milik website lain (halaman bukan HUGOTOGEL.COM) ditolak", async () => {
+	it("belum login (tidak ada sidebar 'Agent (...)') -> berhenti di tahap cek, tanpa menyentuh apa pun", async () => {
 		const m = mockSite();
-		const f = async (u: string, i?: RequestInit) => new Response((await (await m.fetchFn(u, i)).text()).replace("HUGOTOGEL.COM", "FOLATOTO.COM"));
-		expect(await runAutoInput({ session: sess, plan: plan(), fetchFn: f })).toMatchObject({ ok: false, stage: "cek" });
+		const f = async (u: string, i?: RequestInit) => new Response((await (await m.fetchFn(u, i)).text()).replace("Agent (fakeagent)", "Silakan login"));
+		const r = await runAutoInput({ session: sess, plan: plan(), fetchFn: f });
+		expect(r).toMatchObject({ ok: false, stage: "cek" });
+		expect(r.detail).toMatch(/tidak dianggap sedang login/);
+		expect(m.st.posts).toHaveLength(0);
+	});
+	it("login terdeteksi walau teks nama website (HUGOTOGEL.COM) tidak ada -- cookie hanya PHPSESSID", async () => {
+		const r = await runAutoInput({ session: sess, plan: plan(), dryRun: true, fetchFn: mockSite().fetchFn });
+		expect(r.ok).toBe(true);
+		expect(r.detail).toMatch(/login sebagai \(fakeagent\)/);
 	});
 });
 
