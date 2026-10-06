@@ -359,7 +359,7 @@ export async function runAutoInput(opts: {
 		// 1. kode pasaran
 		const home = await adminReq(f, sess, "index.php");
 		// Cookie & URL harus benar-benar milik website ini: header halaman admin memuat "<WEBSITE>.COM".
-		if (/^(HUGOTOGEL|FOLATOTO)$/.test(sess.website) && !htmlText(home).toUpperCase().includes(sess.website + ".COM")) {
+		if (/^(HUGOTOGEL|FOLATOTO|SOHOTOGEL)$/.test(sess.website) && !htmlText(home).toUpperCase().includes(sess.website + ".COM")) {
 			throw new Stop(`Halaman admin tidak menampilkan ${sess.website}.COM — URL atau PHPSESSID bukan milik ${sess.website}.`, "cek");
 		}
 		const code = findPoolCode(home, plan.market);
