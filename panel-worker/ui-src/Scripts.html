@@ -806,11 +806,11 @@
       const err = document.getElementById('login-err');
       if(!u || !p) { err.innerText = "Lengkapi data!"; return; }
       err.innerText = '';
-      btn.innerText = "MEMVERIFIKASI...";
+      btn.innerText = "Memverifikasi…";
       btn.disabled = true;
       google.script.run
         .withSuccessHandler(res => {
-          btn.innerText = "LOGIN";
+          btn.innerText = "Masuk";
           btn.disabled = false;
           if(res && res.success) {
             applyAuthenticatedSession(res, res.sessionToken);
@@ -820,7 +820,7 @@
           }
         })
         .withFailureHandler(error => {
-          btn.innerText = "LOGIN";
+          btn.innerText = "Masuk";
           btn.disabled = false;
           err.innerText = (error && error.message) || 'Tidak dapat menghubungi server.';
         })
@@ -844,7 +844,7 @@
       clearTimeout(inactivityTimer);
       document.getElementById('user').value = '';
       document.getElementById('pass').value = '';
-      document.getElementById('btnLogin').innerText = "LOGIN";
+      document.getElementById('btnLogin').innerText = "Masuk";
       document.getElementById('btnLogin').disabled = false;
       openLoginScreen('');
       toast("Berhasil Keluar Sesi");
@@ -3080,7 +3080,7 @@
     function updateClock() {
       const now = new Date();
       document.getElementById('live-clock').innerText = now.toTimeString().split(' ')[0];
-      document.getElementById('live-date').innerText = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' }).toUpperCase();
+      document.getElementById('live-date').innerText = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
     }
     setInterval(updateClock, 1000); updateClock();
     // Ringkasan header di-refresh oleh live-poll adaptif (startLivePolling),

@@ -48,56 +48,56 @@
   <div id="offline-banner" class="offline-banner" role="status" hidden><i class="fa-solid fa-wifi"></i>Tidak ada koneksi internet. Data &amp; pengiriman akan gagal sampai koneksi kembali.</div>
 
   <!-- LOGIN SCREEN -->
-  <div id="login-screen" class="w-full max-w-md glass-card rounded-[2.5rem] p-8 sm:p-10 flex flex-col gap-6 relative overflow-hidden border-t-2 border-cyan-500/60 shadow-2xl fade-in my-auto">
-    <div class="absolute -top-20 -right-20 w-48 h-48 bg-cyan-500/20 blur-[70px] rounded-full pointer-events-none"></div>
-    <div class="absolute -bottom-20 -left-20 w-48 h-48 bg-pink-500/15 blur-[70px] rounded-full pointer-events-none"></div>
-    
-    <div class="text-center relative z-10">
-      <!-- Logo baru punya latar TRANSPARAN (PNG alpha), jadi cukup object-contain
-           tanpa kotak/latar tambahan -- lambang bundar + teks di bawahnya tetap
-           utuh, tidak terpotong seperti kalau pakai object-cover. -->
-      <div class="w-24 h-24 mx-auto mb-5 flex items-center justify-center">
-        <img src="/logo.png" width="96" height="96" decoding="async" fetchpriority="high" alt="KD-Group" onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('span'),{className:'kd-logo-fallback',textContent:'KD'}))" class="w-full h-full object-contain drop-shadow-[0_0_15px_rgba(34,211,238,0.5)]">
+  <div id="login-screen" class="login-card w-full max-w-md flex flex-col gap-6 fade-in my-auto">
+    <div class="login-head">
+      <!-- Logo berlatar TRANSPARAN (PNG alpha): cukup object-contain, tanpa kotak tambahan. -->
+      <div class="login-logo">
+        <img src="/logo.png" width="72" height="72" decoding="async" fetchpriority="high" alt="KD-Group" onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('span'),{className:'kd-logo-fallback',textContent:'KD'}))">
       </div>
-      <h2 class="text-2xl font-extrabold neon-cyan tracking-tight">SECURE ACCESS</h2>
-      <p class="text-[11px] text-slate-400 font-bold tracking-[0.3em] mt-1.5">KD GROUP PANEL SYSTEM</p>
+      <h2 class="login-title">Masuk ke KD-Group Panel</h2>
+      <p class="login-sub">Gunakan akun operator yang diberikan admin.</p>
     </div>
-    
-    <div class="flex flex-col gap-4 relative z-10">
-      <div class="glass-inner rounded-2xl flex items-center px-4 py-3.5 border border-white/5 transition-all">
-        <i class="fas fa-user text-cyan-400 mr-3.5 text-sm"></i>
-        <input type="text" id="user" name="username" placeholder="Username" autocomplete="username" autocapitalize="none" spellcheck="false" aria-label="Username" class="bg-transparent outline-none w-full text-sm font-medium text-white placeholder-slate-500">
+
+    <div class="flex flex-col gap-4">
+      <div class="login-field">
+        <span class="login-label">Username</span>
+        <div class="glass-inner login-input">
+          <i class="fas fa-user"></i>
+          <input type="text" id="user" name="username" placeholder="Masukkan username" autocomplete="username" autocapitalize="none" spellcheck="false" aria-label="Username">
+        </div>
       </div>
-      <div class="glass-inner rounded-2xl flex items-center px-4 py-3.5 border border-white/5 transition-all">
-        <i class="fas fa-lock text-pink-400 mr-3.5 text-sm"></i>
-        <input type="password" id="pass" name="password" placeholder="Password" autocomplete="current-password" aria-label="Password" aria-describedby="caps-warn" class="bg-transparent outline-none w-full text-sm font-medium text-white placeholder-slate-500">
-        <button type="button" id="passToggle" onclick="togglePasswordVisibility()" class="login-eye" aria-label="Tampilkan password" aria-pressed="false"><i class="fa-solid fa-eye"></i></button>
+      <div class="login-field">
+        <span class="login-label">Password</span>
+        <div class="glass-inner login-input">
+          <i class="fas fa-lock"></i>
+          <input type="password" id="pass" name="password" placeholder="Masukkan password" autocomplete="current-password" aria-label="Password" aria-describedby="caps-warn">
+          <button type="button" id="passToggle" onclick="togglePasswordVisibility()" class="login-eye" aria-label="Tampilkan password" aria-pressed="false"><i class="fa-solid fa-eye"></i></button>
+        </div>
       </div>
       <p id="caps-warn" class="login-caps" hidden><i class="fa-solid fa-triangle-exclamation"></i> Caps Lock aktif</p>
-      <button onclick="handleLogin()" id="btnLogin" class="w-full py-4 bg-gradient-to-r from-cyan-400 via-cyan-500 to-blue-600 hover:from-cyan-300 hover:to-blue-500 rounded-2xl font-extrabold text-xs tracking-[0.25em] transition-all active:scale-95 shadow-lg shadow-cyan-500/30 text-slate-950 cursor-pointer">
-        LOGIN
-      </button>
+      <button onclick="handleLogin()" id="btnLogin" class="login-btn">Masuk</button>
     </div>
-    <p id="login-err" class="text-[11px] text-rose-400 text-center font-semibold min-h-4 relative z-10" role="alert" aria-live="assertive"></p>
+    <p id="login-err" class="login-err" role="alert" aria-live="assertive"></p>
+    <p class="login-foot">KD Group Panel · Design by KD</p>
   </div>
 
   <!-- MAIN WRAPPER -->
   <div id="app-container" class="w-full max-w-[1680px] flex flex-col lg:flex-row gap-5 items-start" style="display: none;">
     
     <!-- LEFT SIDEBAR -->
-    <div class="w-full lg:w-64 glass-card rounded-3xl p-4 sm:p-5 flex flex-row lg:flex-col justify-between shrink-0 z-30 lg:sticky lg:top-3 lg:self-start lg:max-h-[calc(100vh-1.5rem)] lg:overflow-y-auto sidebar-frozen">
-      <div class="flex flex-row lg:flex-col items-center lg:items-stretch gap-4 w-full">
-        <div class="flex items-center gap-3 px-1.5 pb-3.5 mb-1 border-b border-white/[0.06] w-full">
-          <div class="w-11 h-11 flex items-center justify-center shrink-0">
-            <img src="/logo.png" width="44" height="44" decoding="async" alt="KD-Group" onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('span'),{className:'kd-logo-fallback',textContent:'KD'}))" class="w-full h-full object-contain">
+    <aside class="app-sidebar sidebar-frozen" aria-label="Navigasi utama">
+      <div class="sidebar-inner">
+        <div class="sidebar-brand">
+          <div class="sidebar-brand-logo">
+            <img src="/logo.png" width="36" height="36" decoding="async" alt="KD-Group" onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('span'),{className:'kd-logo-fallback',textContent:'KD'}))">
           </div>
-          <div class="hidden lg:block overflow-hidden">
-            <h3 class="text-[13px] font-extrabold text-white tracking-wide truncate leading-tight">KD-GROUP</h3>
-            <p class="text-[9px] text-slate-400 font-bold tracking-[0.22em] mt-0.5">PANEL</p>
+          <div class="sidebar-brand-text">
+            <h3>KD-Group</h3>
+            <p>Panel operasional</p>
           </div>
         </div>
 
-        <div class="flex flex-col gap-1.5 w-full nav-groups">
+        <div class="nav-groups">
           <!-- DASHBOARD — standalone, selalu paling atas -->
           <button onclick="switchPage('home')" id="nav-home" class="sidebar-nav nav-active nav-solo w-full flex items-center justify-start gap-3 px-4 py-3 rounded-xl font-bold text-xs cursor-pointer">
             <i class="fa-solid fa-gauge-high text-cyan-400 text-sm shrink-0"></i><span class="tracking-wider">Dashboard</span>
@@ -201,7 +201,8 @@
           </div>
       </div>
       </div>
-    </div>
+      <div class="sidebar-credit">Design by KD</div>
+    </aside>
 
       <!-- MOBILE NAVIGATION -->
       <div id="mobile-nav-shell" class="mobile-nav-shell" aria-label="Navigasi mobile">
@@ -230,7 +231,7 @@
 
 
     <!-- RIGHT CONTENT AREA -->
-    <div class="flex-1 flex flex-col gap-5 min-w-0 w-full">
+    <div class="app-main">
       
       <!-- FLOATING TOAST: notifikasi ringan yang melayang, TIDAK memblokir aktivitas lain
            (tanpa backdrop, tanpa tombol, auto-hilang sendiri). Beda dengan modal konfirmasi
@@ -241,75 +242,60 @@
         <span id="toast-msg" class="floating-toast-msg"></span>
       </div>
 
-      <!-- HEADER CONTAINER (dibekukan saat scroll) -->
-      <div class="w-full glass-card rounded-3xl p-3 sm:p-4 relative overflow-hidden sticky top-2 z-40 header-frozen session-header">
-        <!-- BLOK 1: STATUS SESI -->
-        <div class="session-header-main">
-          <div class="session-kicker">STATUS SESI</div>
-          <div class="session-admin" id="session-admin-name">ADMIN</div>
-          <div class="session-credit">DESIGN BY KD</div>
+      <!-- TOP BAR (dibekukan saat scroll): judul halaman, website aktif, jam, akun, keluar -->
+      <header class="topbar header-frozen session-header">
+        <!-- BLOK 1: JUDUL HALAMAN (diisi otomatis dari menu aktif, lihat Fixes.html) -->
+        <div class="topbar-title-box">
+          <div id="topbar-crumb" class="topbar-crumb">KD-Group Panel</div>
+          <h1 id="topbar-title" class="topbar-title">Dashboard</h1>
         </div>
 
-        <!-- BLOK 2: LOGO WEBSITE — dinamis sesuai website user -->
+        <!-- BLOK 2: WEBSITE AKTIF — dinamis sesuai website user -->
         <div class="session-sites-box">
-          <div class="session-sites-title">WEBSITE AKTIF</div>
+          <div class="session-sites-title">Website aktif</div>
           <div class="session-sites" id="session-sites-name">-</div>
           <div class="session-logos" id="session-logos"></div>
         </div>
 
-        <!-- BLOK 3: WAKTU + KELUAR -->
+        <!-- BLOK 3: WAKTU + AKUN + KELUAR -->
         <div class="session-header-actions">
           <div class="session-clock-box">
-            <div class="session-clock-label">WAKTU SEKARANG</div>
+            <div class="session-clock-label">Waktu sekarang</div>
             <div id="live-clock" class="session-clock-value">00:00:00</div>
-            <div id="live-date" class="session-clock-date">LOADING...</div>
+            <div id="live-date" class="session-clock-date">Memuat…</div>
+          </div>
+          <div class="session-user">
+            <span class="session-user-avatar"><i class="fa-solid fa-user"></i></span>
+            <span class="session-user-text">
+              <span class="session-kicker">Sesi aktif</span>
+              <span class="session-admin" id="session-admin-name">ADMIN</span>
+            </span>
           </div>
           <button onclick="handleLogout()" class="session-logout-btn" title="Keluar">
-            <i class="fa-solid fa-power-off"></i>
+            <i class="fa-solid fa-right-from-bracket"></i>
             <span>Keluar</span>
           </button>
         </div>
-      </div>
+      </header>
 
       <!-- VIEW 1: DASHBOARD — OVERVIEW OPERASIONAL -->
       <div id="main-panel" class="flex flex-col gap-5 fade-in">
-        <section class="dashboard-hero glass-card rounded-[2rem] p-5 sm:p-7 relative overflow-hidden">
-          <div class="dashboard-hero-glow dashboard-hero-glow-a"></div>
-          <div class="dashboard-hero-glow dashboard-hero-glow-b"></div>
-          <div class="relative z-10 flex flex-col xl:flex-row xl:items-end justify-between gap-6">
-            <div class="min-w-0">
-              <div class="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1.5 text-[9px] font-extrabold tracking-[.18em] text-cyan-300">
-                <span class="dashboard-live-dot"></span> OPERATIONAL CONSOLE
-              </div>
-              <h1 class="mt-4 text-2xl sm:text-3xl lg:text-[2.1rem] font-black tracking-tight text-white">
-                Dashboard <span class="text-cyan-300">KD-GROUP</span>
-              </h1>
-              <p class="mt-2 max-w-2xl text-xs sm:text-sm leading-6 text-slate-400">
-                Ringkasan aktivitas panel, status pengiriman, dan akses cepat ke modul operasional.
-                Pantau kondisi sistem di satu layar sebelum masuk ke pekerjaan utama.
-              </p>
-              <div class="mt-5 flex flex-wrap items-center gap-2.5">
-                <span id="homeDashboardUser" class="dashboard-chip"><i class="fa-solid fa-user"></i>Memuat user…</span>
-                <span class="dashboard-chip"><i class="fa-solid fa-calendar-day"></i>Hari ini</span>
-                <span id="homeDashboardSync" class="dashboard-chip"><i class="fa-solid fa-rotate"></i>Sinkronisasi…</span>
-              </div>
+        <section class="dashboard-hero">
+          <div class="dashboard-hero-main">
+            <h2 class="dashboard-hero-title">Selamat datang di KD-Group</h2>
+            <p class="dashboard-hero-sub">Ringkasan aktivitas panel, status pengiriman, dan akses cepat ke modul operasional.</p>
+            <div class="dashboard-chips">
+              <span id="homeDashboardUser" class="dashboard-chip"><i class="fa-solid fa-user"></i>Memuat user…</span>
+              <span class="dashboard-chip"><i class="fa-solid fa-calendar-day"></i>Hari ini</span>
+              <span id="homeDashboardSync" class="dashboard-chip"><i class="fa-solid fa-rotate"></i>Sinkronisasi…</span>
             </div>
-            <div class="dashboard-hero-side glass-inner rounded-2xl p-4 min-w-0 xl:min-w-[260px]">
-              <div class="flex items-center justify-between gap-3">
-                <div>
-                  <div class="text-[9px] font-extrabold tracking-[.18em] text-slate-500">SYSTEM STATUS</div>
-                  <div class="mt-1 text-sm font-extrabold text-white">Panel Online</div>
-                </div>
-                <span class="dashboard-status-pill"><span class="dashboard-live-dot"></span>AKTIF</span>
-              </div>
-              <div class="mt-4 grid grid-cols-2 gap-2.5">
-                <div class="dashboard-mini-stat">
-                  <span>Pengiriman</span><b id="homeMiniSends">0</b>
-                </div>
-                <div class="dashboard-mini-stat">
-                  <span>Aktivitas</span><b id="homeMiniToday">0</b>
-                </div>
-              </div>
+          </div>
+          <div class="dashboard-hero-side">
+            <span class="dashboard-status-pill"><span class="dashboard-live-dot"></span>Panel online</span>
+            <!-- Angka ini dipakai JS (homeMiniSends/homeMiniToday); tampil di kartu statistik di bawah, jadi disembunyikan di sini. -->
+            <div class="dashboard-mini-grid" hidden>
+              <div class="dashboard-mini-stat"><span>Pengiriman</span><b id="homeMiniSends">0</b></div>
+              <div class="dashboard-mini-stat"><span>Aktivitas</span><b id="homeMiniToday">0</b></div>
             </div>
           </div>
         </section>
@@ -318,7 +304,7 @@
           <div class="home-stat-card glass-card rounded-2xl p-4">
             <div class="home-stat-icon success"><i class="fa-solid fa-circle-check"></i></div>
             <div class="min-w-0">
-              <div class="home-stat-label">BERHASIL</div>
+              <div class="home-stat-label">Berhasil</div>
               <div id="homeStatSuccess" class="home-stat-value" data-fx-count="0">0</div>
               <div class="home-stat-sub"><span class="dashboard-live-dot"></span>Pengiriman sukses</div>
             </div>
@@ -326,7 +312,7 @@
           <div class="home-stat-card glass-card rounded-2xl p-4">
             <div class="home-stat-icon danger"><i class="fa-solid fa-triangle-exclamation"></i></div>
             <div class="min-w-0">
-              <div class="home-stat-label">GAGAL</div>
+              <div class="home-stat-label">Gagal</div>
               <div id="homeStatFailed" class="home-stat-value" data-fx-count="0">0</div>
               <div class="home-stat-sub">Perlu diperiksa</div>
             </div>
@@ -334,7 +320,7 @@
           <div class="home-stat-card glass-card rounded-2xl p-4">
             <div class="home-stat-icon info"><i class="fa-solid fa-paper-plane"></i></div>
             <div class="min-w-0">
-              <div class="home-stat-label">PENGIRIMAN</div>
+              <div class="home-stat-label">Pengiriman</div>
               <div id="homeStatSends" class="home-stat-value" data-fx-count="0">0</div>
               <div class="home-stat-sub">Total proses kirim</div>
             </div>
@@ -342,7 +328,7 @@
           <div class="home-stat-card glass-card rounded-2xl p-4">
             <div class="home-stat-icon accent"><i class="fa-solid fa-chart-line"></i></div>
             <div class="min-w-0">
-              <div class="home-stat-label">AKTIVITAS</div>
+              <div class="home-stat-label">Aktivitas</div>
               <div id="homeStatToday" class="home-stat-value" data-fx-count="0">0</div>
               <div class="home-stat-sub">Aktivitas hari ini</div>
             </div>
@@ -353,8 +339,8 @@
           <div class="glass-card rounded-[1.8rem] p-5 xl:col-span-8">
             <div class="flex items-center justify-between gap-3 mb-4">
               <div>
-                <div class="text-[9px] font-extrabold tracking-[.18em] text-cyan-400">RECENT ACTIVITY</div>
-                <h2 class="mt-1 text-base sm:text-lg font-extrabold text-white">Aktivitas Terbaru</h2>
+                <h2 class="card-title">Aktivitas terbaru</h2>
+                <p class="card-sub">Riwayat pekerjaan akun Anda hari ini.</p>
               </div>
               <button onclick="switchPage('activity')" class="dashboard-link-btn">
                 Lihat semua <i class="fa-solid fa-arrow-right"></i>
@@ -366,8 +352,8 @@
           </div>
 
           <div class="glass-card rounded-[1.8rem] p-5 xl:col-span-4">
-            <div class="text-[9px] font-extrabold tracking-[.18em] text-fuchsia-300">QUICK ACCESS</div>
-            <h2 class="mt-1 text-base sm:text-lg font-extrabold text-white">Akses Cepat</h2>
+            <h2 class="card-title">Akses cepat</h2>
+            <p class="card-sub">Menu yang paling sering dipakai.</p>
             <div class="mt-4 grid gap-2.5">
               <button onclick="switchPage('result')" class="dashboard-action">
                 <span class="dashboard-action-icon result"><i class="fa-solid fa-trophy"></i></span>

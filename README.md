@@ -61,6 +61,13 @@ repo secret `CRON_KEY` yang sama. Cron Trigger Cloudflare tetap didaftarkan kala
 
 > Auto-post prediksi hanya jalan kalau **minimal 1 operator sedang login**.
 
+### Tampilan (UI)
+
+Satu file HTML dirakit `scripts/build-ui.mjs` dari `ui-src/` (Index + Styles + Scripts + Fixes).
+Semua gaya visual baru ada di **`ui-src/Redesign.css`** (Design System v2: token warna,
+shell sidebar + top bar, kartu, tabel, form, modal, responsif). Ubah warna/radius cukup
+di blok `:root` paling atas file itu. Aksen mengikuti brand website operator.
+
 ### Bindings (lihat `panel-worker/wrangler.jsonc`)
 - `DB` → D1 `day_database`
 - `SESS` → KV (sesi login + guard)

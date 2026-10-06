@@ -185,3 +185,47 @@
      table/card update and was a major source of CPU spikes and UI lag. */
 })();
 </script>
+
+<script>
+/* Top bar: judul + breadcrumb mengikuti menu yang aktif. MURNI tampilan -- hanya
+   MEMBACA class `nav-active` yang sudah diatur switchPage(), tidak mengubah
+   navigasi, hak akses, maupun data. Gagal diam-diam kalau elemennya tidak ada. */
+(function () {
+  function textOnly(el) {
+    if (!el) return '';
+    return Array.prototype.filter.call(el.childNodes, function (n) { return n.nodeType === 3; })
+      .map(function (n) { return n.textContent; }).join('').trim();
+  }
+  function updateTopbar() {
+    try {
+      var title = document.getElementById('topbar-title');
+      var crumb = document.getElementById('topbar-crumb');
+      if (!title) return;
+      var active = document.querySelector('.app-sidebar .sidebar-nav.nav-active');
+      var label = active ? textOnly(active.querySelector('span')) : '';
+      var group = '';
+      var g = active && active.closest('.nav-group');
+      if (g) group = textOnly(g.querySelector('.nav-group-head span'));
+      title.textContent = label || 'Dashboard';
+      if (crumb) crumb.textContent = group ? 'KD-Group · ' + group : 'KD-Group Panel';
+      var t = (label || 'Dashboard') + ' — KD-Group Panel';
+      if (document.title !== t) document.title = t;
+    } catch (e) { /* tampilan saja */ }
+  }
+  function wrap() {
+    var original = window.switchPage;
+    if (typeof original !== 'function' || original.__kdTopbarWrapped) return;
+    var wrapped = function () {
+      var out = original.apply(this, arguments);
+      updateTopbar();
+      return out;
+    };
+    wrapped.__kdTopbarWrapped = true;
+    // properti statis dipertahankan supaya pembungkus lain (perf) tetap mengenali fungsinya
+    Object.keys(original).forEach(function (k) { try { wrapped[k] = original[k]; } catch (e) {} });
+    window.switchPage = wrapped;
+  }
+  wrap();
+  document.addEventListener('DOMContentLoaded', function () { wrap(); updateTopbar(); }, { once: true });
+})();
+</script>
