@@ -285,25 +285,39 @@ describe("URL admin hanya tiga host yang diizinkan", () => {
 		const r = await runAutoInput({ session: { ...sess, website: "HUGO" }, plan: plan(), dryRun: true, fetchFn: m.fetchFn });
 		expect(r.ok).toBe(true);
 	});
-	it("tiga website pertama dikunci ke host-nya; website lain bebas di *.suksesbogil.com", () => {
+	it("tiap website dikunci ke server-nya sesuai daftar pemilik panel", () => {
 		const ok = (w: string, u: string) => adminBaseProblem(w, u);
-		expect(ok("HUGOTOGEL", "https://ag.suksesbogil.com/")).toBeNull();
-		expect(ok("FOLATOTO", "https://agwl12.suksesbogil.com/")).toBeNull();
-		expect(ok("SOHOTOGEL", "https://agwl5.suksesbogil.com/")).toBeNull();
-		expect(ok("HUGOTOGEL", "https://agwl12.suksesbogil.com/")).toMatch(/harus memakai/);
-		expect(ok("FOLATOTO", "https://agwl5.suksesbogil.com/")).toMatch(/harus memakai/);
-		expect(ok("SOHOTOGEL", "https://ag.suksesbogil.com/")).toMatch(/harus memakai/);
-		// satu host melayani beberapa website: SENJA / XO boleh di ag (sama dengan HUGO) atau host lain
-		expect(ok("SENJA", "https://ag.suksesbogil.com/")).toBeNull();
-		expect(ok("XO", "https://agwl7.suksesbogil.com/")).toBeNull();
-		expect(ok("XO", "https://agwl5.suksesbogil.com/")).toBeNull();
-		// tetap tertutup untuk domain lain / skema tidak aman
+		const AG = "https://ag.suksesbogil.com/", W5 = "https://agwl5.suksesbogil.com/", W12 = "https://agwl12.suksesbogil.com/";
+		for (const w of ["AXIS", "DODO", "XO", "SENJA", "HUGO", "RETRO"]) {
+			expect(ok(w, AG)).toBeNull();
+			expect(ok(w, W5)).toMatch(/harus memakai ag\.suksesbogil\.com/);
+			expect(ok(w, W12)).toMatch(/harus memakai/);
+		}
+		for (const w of ["LIMA", "SOHO"]) {
+			expect(ok(w, W5)).toBeNull();
+			expect(ok(w, AG)).toMatch(/harus memakai agwl5/);
+		}
+		for (const w of ["YEL", "FOLA"]) {
+			expect(ok(w, W12)).toBeNull();
+			expect(ok(w, AG)).toMatch(/harus memakai agwl12/);
+		}
+		// nama panjang & huruf kecil dikenali sama
+		expect(ok("HUGOTOGEL", AG)).toBeNull();
+		expect(ok("senjatogel", AG)).toBeNull();
+		expect(ok("FOLATOTO", W12)).toBeNull();
+		expect(ok("SOHOTOGEL", AG)).toMatch(/harus memakai agwl5/);
+		// kode yang belum ada di daftar (REMBO, HELEN, baru) bebas di *.suksesbogil.com
+		expect(ok("REMBO", "https://agwl9.suksesbogil.com/")).toBeNull();
+		// domain lain / skema tidak aman tetap ditolak, untuk semua
 		expect(ok("SENJA", "https://evil.example.com/")).toMatch(/bukan admin yang diizinkan/);
-		expect(ok("SENJA", "https://ag.suksesbogil.com.evil.com/")).toMatch(/bukan admin yang diizinkan/);
-		expect(ok("SENJA", "https://evilsuksesbogil.com/")).toMatch(/bukan admin yang diizinkan/);
+		expect(ok("REMBO", "https://ag.suksesbogil.com.evil.com/")).toMatch(/bukan admin yang diizinkan/);
+		expect(ok("REMBO", "https://evilsuksesbogil.com/")).toMatch(/bukan admin yang diizinkan/);
 		expect(ok("SENJA", "http://ag.suksesbogil.com/")).toMatch(/https/);
-		expect(defaultAdminBase("FOLATOTO")).toBe("https://agwl12.suksesbogil.com/");
-		expect(defaultAdminBase("SENJA")).toBe("");
+		// URL terisi otomatis
+		expect(defaultAdminBase("XO")).toBe(AG);
+		expect(defaultAdminBase("LIMA")).toBe(W5);
+		expect(defaultAdminBase("YEL")).toBe(W12);
+		expect(defaultAdminBase("REMBO")).toBe("");
 	});
 	it("cookie milik website lain di host yang sama ditolak bila nama website terbaca di sidebar", async () => {
 		const m = mockSite();

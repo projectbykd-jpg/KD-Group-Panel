@@ -190,37 +190,38 @@ export function sessionHint(stored: string): string {
 }
 
 /**
- * Admin hanya boleh di domain suksesbogil.com (subdomain mana pun: ag, agwl5, agwl12, ...), https saja.
- * Satu host BISA melayani beberapa website (tiap website punya akun agen sendiri), jadi host tidak
- * dipakai sebagai identitas website -- kecuali tiga website di bawah yang host-nya sudah pasti.
+ * Admin hanya boleh di domain suksesbogil.com (https). Satu host melayani BANYAK website (tiap website
+ * punya akun agen sendiri), jadi host menentukan "server" tempat website itu berada, bukan identitasnya;
+ * identitas dijaga lewat pengecekan nama website di sidebar (lihat runAutoInput).
  */
 export const ADMIN_DOMAIN = "suksesbogil.com";
-/**
- * Kode website di panel adalah kode SINGKAT (HUGO, FOLA, SOHO -- lihat sites.ts), nama
- * panjangnya cuma label. Keduanya dikenali. Website lain cukup memakai salah satu host
- * di atas yang BUKAN milik tiga website ini.
- */
-const SITE_ALIAS: Record<string, string> = {
-	HUGO: "HUGO", HUGOTOGEL: "HUGO",
-	FOLA: "FOLA", FOLATOTO: "FOLA",
-	SOHO: "SOHO", SOHOTOGEL: "SOHO",
-};
-const SITE_HOST: Record<string, string> = {
-	HUGO: "ag.suksesbogil.com",
-	FOLA: "agwl12.suksesbogil.com",
-	SOHO: "agwl5.suksesbogil.com",
-};
+
+/** Server (host) admin tiap website, dari daftar pemilik panel. Kode website di panel = kode singkat. */
+const SITE_HOST: Record<string, string> = {};
+for (const [host, codes] of Object.entries({
+	"ag.suksesbogil.com": ["AXIS", "DODO", "XO", "SENJA", "HUGO", "RETRO"],
+	"agwl5.suksesbogil.com": ["LIMA", "SOHO"],
+	"agwl12.suksesbogil.com": ["YEL", "FOLA"],
+})) {
+	for (const c of codes) SITE_HOST[c] = host;
+}
+
+/** "HUGOTOGEL" / "hugo" -> "HUGO" (kode singkat panel); null kalau tidak dikenal. */
+export function siteCode(website: string): string | null {
+	const w = String(website).trim().toUpperCase();
+	if (PREDICTION_SITE_NAMES[w]) return w;
+	return Object.keys(PREDICTION_SITE_NAMES).find((k) => PREDICTION_SITE_NAMES[k] === w) ?? (SITE_HOST[w] ? w : null);
+}
 
 /** Nama merek penuh ("SENJATOGEL") dari kode website panel ("SENJA"); null kalau tidak dikenal. */
 export function siteBrand(website: string): string | null {
-	const w = String(website).trim().toUpperCase();
-	const k = SITE_ALIAS[w] ?? w;
-	return PREDICTION_SITE_NAMES[k] ?? (Object.values(PREDICTION_SITE_NAMES).includes(w) ? w : null);
+	const k = siteCode(website);
+	return k ? (PREDICTION_SITE_NAMES[k] ?? null) : null;
 }
 
 export function defaultAdminBase(website: string): string {
-	const k = SITE_ALIAS[String(website).trim().toUpperCase()];
-	return k ? `https://${SITE_HOST[k]}/` : "";
+	const k = siteCode(website);
+	return k && SITE_HOST[k] ? `https://${SITE_HOST[k]}/` : "";
 }
 
 /** null = URL ini sah untuk website ini; selain itu alasan penolakan. */
@@ -237,7 +238,8 @@ export function adminBaseProblem(website: string, base: string): string | null {
 	if (host !== ADMIN_DOMAIN && !host.endsWith("." + ADMIN_DOMAIN)) {
 		return `host ${host} bukan admin yang diizinkan (hanya *.${ADMIN_DOMAIN})`;
 	}
-	const want = SITE_HOST[SITE_ALIAS[w] ?? ""];
+	const k = siteCode(w);
+	const want = k ? SITE_HOST[k] : undefined;
 	if (want && host !== want) return `${w} harus memakai ${want}, bukan ${host}`;
 	return null;
 }
