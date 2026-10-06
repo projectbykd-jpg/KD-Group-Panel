@@ -20,7 +20,7 @@
 // (per,nomor,sar,cmdhitung). Keduanya tanpa query string.
 // Ada yang meleset -> berhenti dan lapor, TIDAK mencoba "kira-kira".
 import { parsePasaranOptionsHtml, investIsLoginPage } from "./invest";
-import { adminBaseProblem, cookieHeader, normMarket, type AdminSession, type AutoInputPlan } from "./auto-input";
+import { adminBaseProblem, cookieHeader, normMarket, siteBrand, type AdminSession, type AutoInputPlan } from "./auto-input";
 
 export type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 type Plan = Extract<AutoInputPlan, { ok: true }>;
@@ -359,8 +359,9 @@ export async function runAutoInput(opts: {
 		// 1. kode pasaran
 		const home = await adminReq(f, sess, "index.php");
 		// Cookie & URL harus benar-benar milik website ini: header halaman admin memuat "<WEBSITE>.COM".
-		if (/^(HUGOTOGEL|FOLATOTO|SOHOTOGEL)$/.test(sess.website) && !htmlText(home).toUpperCase().includes(sess.website + ".COM")) {
-			throw new Stop(`Halaman admin tidak menampilkan ${sess.website}.COM — URL atau PHPSESSID bukan milik ${sess.website}.`, "cek");
+		const brand = siteBrand(sess.website);
+		if (brand && !htmlText(home).toUpperCase().includes(brand + ".COM")) {
+			throw new Stop(`Halaman admin tidak menampilkan ${brand}.COM — URL atau PHPSESSID bukan milik ${sess.website}.`, "cek");
 		}
 		const code = findPoolCode(home, plan.market);
 		if (!code) throw new Stop(`Pasaran "${plan.market}" tidak ditemukan (atau ganda) di dropdown website ini.`, "cek");
