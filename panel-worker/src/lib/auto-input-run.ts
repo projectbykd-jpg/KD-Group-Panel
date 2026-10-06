@@ -304,8 +304,11 @@ async function adminReq(
 	sess: AdminSession,
 	path: string,
 	init: { method?: "GET" | "POST"; body?: URLSearchParams; referer?: string } = {},
+	/** Diisi apa adanya (status akhir + rantai redirect) untuk diagnostik kalau halaman yang diterima aneh. */
+	meta?: { status: number; trail: string[] },
 ): Promise<string> {
 	let url = new URL(path, sess.baseUrl).toString();
+	if (meta) meta.trail = [new URL(url).pathname + new URL(url).search];
 	let method = init.method ?? "GET";
 	let body = init.body;
 	for (let hop = 0; hop < 4; hop++) {
@@ -324,11 +327,13 @@ async function adminReq(
 		const loc = res.headers.get("location");
 		if (res.status >= 300 && res.status < 400 && loc) {
 			url = new URL(loc, url).toString();
+			meta?.trail.push(res.status + " -> " + new URL(url).pathname + new URL(url).search);
 			method = "GET"; // 301/302/303 sesudah POST -> GET (perilaku browser)
 			body = undefined;
 			continue;
 		}
 		const text = await res.text();
+		if (meta) meta.status = res.status;
 		if (res.status >= 400) throw new Error(`HTTP ${res.status} dari ${new URL(url).pathname}`);
 		if (investIsLoginPage("", text)) throw new Stop("Sesi (PHPSESSID) sudah habis — ambil yang baru dari Chrome lalu simpan di menu Auto Prediksi.", "cek");
 		return text;
@@ -357,11 +362,19 @@ export async function runAutoInput(opts: {
 		if (badBase) throw new Stop(`URL admin ${sess.website} ditolak: ${badBase}.`, "cek");
 
 		// 1. kode pasaran
-		const home = await adminReq(f, sess, "index.php");
+		const homeMeta = { status: 0, trail: [] as string[] };
+		const home = await adminReq(f, sess, "index.php", {}, homeMeta);
 		// Cookie & URL harus benar-benar milik website ini: header halaman admin memuat "<WEBSITE>.COM".
 		const brand = siteBrand(sess.website);
 		if (brand && !htmlText(home).toUpperCase().includes(brand + ".COM")) {
-			throw new Stop(`Halaman admin tidak menampilkan ${brand}.COM — URL atau PHPSESSID bukan milik ${sess.website}.`, "cek");
+			// Tunjukkan APA yang diterima server (bukan halaman admin yang dilihat di Chrome) supaya penyebabnya terbaca.
+			const title = (home.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
+			const body = htmlText(home).slice(0, 220);
+			throw new Stop(
+				`Halaman admin tidak menampilkan ${brand}.COM — URL atau PHPSESSID bukan milik ${sess.website}, ATAU server tidak dianggap sedang login. ` +
+					`Yang diterima server: HTTP ${homeMeta.status} [${homeMeta.trail.join(" ")}] judul "${title}" isi "${body}"`,
+				"cek",
+			);
 		}
 		const code = findPoolCode(home, plan.market);
 		if (!code) throw new Stop(`Pasaran "${plan.market}" tidak ditemukan (atau ganda) di dropdown website ini.`, "cek");
