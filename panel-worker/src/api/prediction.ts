@@ -353,7 +353,7 @@ export async function adminGetAutoPostWebhook(env: Env, token: string, origin?: 
 		everyMinute: true,
 		message:
 			"Pasang di cron-job.org / GitHub Actions: panggil URL di atas dengan method GET tiap 1 menit. " +
-			"Router cek sendiri slot mana yang jatuh tempo (toleransi susulan 90 menit).",
+			"Router cek sendiri slot mana yang jatuh tempo (toleransi susulan 25 menit).",
 	};
 }
 

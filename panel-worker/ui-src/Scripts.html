@@ -212,18 +212,18 @@
     };
 
     const SITE_LOGO_PRESETS = {
-      HUGO:{single:'https://i.ibb.co/G3RXDFD2/image.png', pair:'https://i.ibb.co/DD78Pp4f/image.png'},
-      FOLA:{single:'https://i.ibb.co/yBSPW0jy/image.png', pair:'https://i.ibb.co/21NSfyWh/image.png'},
-      REMBO:{single:'https://i.ibb.co/YThZXph1/image.png', pair:'https://i.ibb.co/5WyKTYYS/image.png'},
-      HELEN:{single:'https://i.ibb.co/xKfhcn4r/image.png', pair:'https://i.ibb.co/nNZKFR9V/image.png'},
-      DODO:{single:'https://i.ibb.co/27thwb20/image.png', pair:'https://i.ibb.co/ks5N6pzT/image.png'},
-      AXIS:{single:'https://i.ibb.co/W4nzR7ML/image.png', pair:'https://i.ibb.co/hxbwwXXV/image.png'},
-      RETRO:{single:'https://i.ibb.co/Wv5kLpw4/image.png', pair:'https://i.ibb.co/pvtLKFfB/image.png'},
-      YEL:{single:'https://i.ibb.co/23tPFPV1/image.png', pair:'https://i.ibb.co/Rp4HpxW6/image.png'},
-      LIMA:{single:'https://i.ibb.co/1Y1HpTw6/image.png', pair:'https://i.ibb.co/35YCs8yY/image.png'},
-      SOHO:{single:'https://i.ibb.co/21Ky3q5Z/image.png', pair:'https://i.ibb.co/XryDCzbg/image.png'},
-      XO:{single:'https://i.ibb.co/VWpNSM4L/image.png', pair:'https://i.ibb.co/dJVtq78c/image.png'},
-      SENJA:{single:'https://i.ibb.co/8Zyy4fv/image.png', pair:'https://i.ibb.co/ZzNsTJC4/image.png'}
+      HUGO:{single:'/HUGO.png', pair:'/HUGO.png'},
+      FOLA:{single:'/FOLA.png', pair:'/FOLA.png'},
+      REMBO:{single:'/REMBO.png', pair:'/REMBO.png'},
+      HELEN:{single:'/HELEN.png', pair:'/HELEN.png'},
+      DODO:{single:'/DODO.png', pair:'/DODO.png'},
+      AXIS:{single:'/AXIS.png', pair:'/AXIS.png'},
+      RETRO:{single:'/RETRO.png', pair:'/RETRO.png'},
+      YEL:{single:'/YEL.png', pair:'/YEL.png'},
+      LIMA:{single:'/LIMA.png', pair:'/LIMA.png'},
+      SOHO:{single:'/SOHO.png', pair:'/SOHO.png'},
+      XO:{single:'/XO.png', pair:'/XO.png'},
+      SENJA:{single:'/SENJA.png', pair:'/SENJA.png'}
     };
 
     function normalizeThemeWebsite(value) {
@@ -806,11 +806,11 @@
       const err = document.getElementById('login-err');
       if(!u || !p) { err.innerText = "Lengkapi data!"; return; }
       err.innerText = '';
-      btn.innerText = "MEMVERIFIKASI...";
+      btn.innerText = "Memverifikasi…";
       btn.disabled = true;
       google.script.run
         .withSuccessHandler(res => {
-          btn.innerText = "LOGIN";
+          btn.innerText = "Masuk";
           btn.disabled = false;
           if(res && res.success) {
             applyAuthenticatedSession(res, res.sessionToken);
@@ -820,7 +820,7 @@
           }
         })
         .withFailureHandler(error => {
-          btn.innerText = "LOGIN";
+          btn.innerText = "Masuk";
           btn.disabled = false;
           err.innerText = (error && error.message) || 'Tidak dapat menghubungi server.';
         })
@@ -844,7 +844,7 @@
       clearTimeout(inactivityTimer);
       document.getElementById('user').value = '';
       document.getElementById('pass').value = '';
-      document.getElementById('btnLogin').innerText = "LOGIN";
+      document.getElementById('btnLogin').innerText = "Masuk";
       document.getElementById('btnLogin').disabled = false;
       openLoginScreen('');
       toast("Berhasil Keluar Sesi");
@@ -1508,6 +1508,16 @@
         <div class="overflow-x-auto"><table class="w-full text-[11px] text-slate-300 font-mono min-w-[560px]">
           <thead class="bg-slate-900/60 text-slate-400 text-[9px] uppercase sticky top-0" style="user-select:none"><tr>${head}</tr></thead>
           <tbody>${rowsHtml}</tbody></table></div>${st.footer || ''}${pager}`;
+      // Kepala kolom mengikuti perataan isinya (angka rata kanan, status di tengah).
+      const firstRow = body.querySelector('tbody tr');
+      if (firstRow && !firstRow.querySelector('.table-empty-cell')) {
+        const ths = body.querySelectorAll('thead th');
+        Array.from(firstRow.children).forEach((cell, i) => {
+          const th = ths[i]; if (!th) return;
+          const align = cell.classList.contains('text-right') ? 'text-right' : (cell.classList.contains('text-center') ? 'text-center' : '');
+          if (align) { th.classList.remove('text-left'); th.classList.add(align); }
+        });
+      }
       if (keepFocus) { const si = document.getElementById('lapSearch_' + id); if (si) { si.focus(); si.setSelectionRange(si.value.length, si.value.length); } }
       // Animasi baris HANYA saat tabel pertama kali dibuka — bukan tiap ketik
       // di search / ganti halaman (dulu bikin lag saat mengetik).
@@ -3080,7 +3090,7 @@
     function updateClock() {
       const now = new Date();
       document.getElementById('live-clock').innerText = now.toTimeString().split(' ')[0];
-      document.getElementById('live-date').innerText = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' }).toUpperCase();
+      document.getElementById('live-date').innerText = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
     }
     setInterval(updateClock, 1000); updateClock();
     // Ringkasan header di-refresh oleh live-poll adaptif (startLivePolling),
@@ -4662,7 +4672,7 @@
             + fld('Auto Posting Prediksi', r.url)
             + (r.urlInvest ? fld('Pump Scan INVEST', r.urlInvest) : '')
             + '<div style="margin-top:8px">Jam sesi (' + escapeHtml(r.timezone || 'WIB') + '): <b class="text-cyan-300">' + escapeHtml(times) + '</b></div>'
-            + '<div style="margin-top:4px;color:#64748b">Router memilih sendiri sesi yang jatuh tempo, susulan sampai 90 menit.</div>';
+            + '<div style="margin-top:4px;color:#64748b">Router memilih sendiri sesi yang jatuh tempo, susulan sampai 25 menit.</div>';
           try { navigator.clipboard.writeText(r.url); toast('URL cron auto-posting disalin'); } catch (e) {}
         })
         .withFailureHandler(e => {
@@ -4707,7 +4717,7 @@
         return;
       }
       body.innerHTML = rows.map(s => `
-            <tr class="activity-log-row">
+            <tr class="activity-log-row" data-role="${escapeHtml(s.role || '')}">
               <td class="p-3 font-extrabold text-white">${escapeHtml(s.username)}<div class="text-[9px] text-slate-500 font-normal">${escapeHtml(s.displayName || '')}</div></td>
               <td class="p-3"><span class="px-2 py-1 rounded-full bg-amber-500/10 text-amber-300 text-[9px] font-bold">${escapeHtml(s.role || '-')}</span></td>
               <td class="p-3 text-slate-300">${escapeHtml(s.websites || '-')}</td>

@@ -11,7 +11,6 @@ import {
 	INVEST_PAGE_SIZE,
 	INVEST_PASARAN,
 	INVEST_PERIODE_LOOKBACK,
-	InvestConfig,
 	InvestSessionExpired,
 	InvestSiteDown,
 	investFetch,
@@ -22,7 +21,6 @@ import {
 } from "./invest";
 
 const OFFSET_MS = 7 * 60 * 60 * 1000;
-const PUMP_FLAG = "invest:pump:running";
 // Anggaran pendek: pump sekarang dipanggil juga lewat ctx.waitUntil dari tiap
 // polling investGetStatus (tiap ~4 dtk), yang punya batas wall-clock ~30 dtk.
 // Scan maju sedikit-sedikit tapi terus-menerus selama halaman dibuka.
@@ -265,7 +263,6 @@ export async function investScanUser(env: Env, user: string, deadlineMs: number,
 		}
 		scannedThisTick++;
 		const marketBuffer: RawRow[] = [];
-		const fetchesBefore = fetches;
 		let aborted = false;
 		try {
 			let head0 = await doFetch("admin_invoice13.php?psr=" + encodeURIComponent(kode));

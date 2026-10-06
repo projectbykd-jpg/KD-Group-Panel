@@ -46,3 +46,28 @@ compiler runtime + MutationObserver-nya bikin Chrome berat tiap DOM rebuild. Sek
 `ui-src/tw.css`) lalu di-inline **SESUDAH** `Styles.html` — kalau ditaruh
 sebelum, custom CSS menang atas utility Tailwind dan layout (mis. header)
 berantakan.
+
+
+## Design System v2 (2026-10) — rombak total tampilan, logika TIDAK diubah
+
+Sumber kebenaran visual TUNGGAL: `ui-src/Redesign.css` (dimuat paling akhir, sesudah
+Styles.html + Tailwind). Lapisan lama "PROFESSIONAL AGENT CONSOLE V2" (±480 baris
+`!important` ber-ID) dan blok `body.theme-dynamic` (gradien latar + 2 blob blur fixed)
+di `Styles.html` SUDAH DIHAPUS -- jangan dikembalikan; itu yang bikin perang CSS.
+
+- Permukaan NETRAL solid (`--ui-bg/surface/surface-2/surface-3`), border 1px, tanpa
+  glow/neon/blur. Aksen = warna brand website operator (`--theme-primary` diisi
+  `applyWebsiteTheme()`), dipakai hanya untuk nav aktif, tombol primer, fokus, progress.
+- Shell: sidebar penuh-tinggi menempel kiri (sticky), top bar sticky solid (judul halaman
+  diisi dari menu aktif oleh skrip kecil di akhir `Fixes.html` -- hanya MEMBACA class
+  `nav-active`), konten maks 1480px. Scroll = dokumen (bukan kontainer dalam).
+- `display` `#app-container` dipaksa `flex !important` inline oleh JS -> tetap model flex.
+- Aturan elemen global memakai `:where()` (spesifisitas 0) supaya komponen bisa menimpa.
+- Halaman yang dibungkus satu kartu besar berisi judul: bungkus dilepas lewat
+  `.glass-card:has(> .page-head)` (jadi kartu tingkat pertama, bukan kotak-dalam-kotak).
+- Teks sekunder minimal AA (token `--ui-text-3` = #7f8da4). Teks di atas aksen gelap
+  (#06101c) -- sudah dicek ke 12 warna brand (rasio >= 5,1).
+- Tetap berlaku: tanpa `backdrop-filter` di elemen besar/sticky (modal boleh, kini
+  dimatikan juga), animasi pendek, popup minimalis.
+- Uji: jalankan wrangler lokal + Playwright (klik semua nav, CRUD user, parser Result,
+  filter, logout) -- 46 skenario lulus, nol error JS.

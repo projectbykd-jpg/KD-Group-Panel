@@ -3,7 +3,7 @@ name: Panel cron (fallback)
 # Cadangan kalau Cron Trigger bawaan Cloudflare tidak jalan.
 # GitHub Actions minimal 5 menit & kadang telat 5-15 menit, jadi untuk INVEST
 # yang butuh tiap menit tetap pakai cron-job.org. Ini cukup buat auto-post prediksi
-# (slot punya toleransi susulan 90 menit).
+# (slot punya toleransi susulan 25 menit).
 
 on:
   schedule:

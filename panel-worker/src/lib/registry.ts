@@ -5,6 +5,34 @@
 import { tsNow } from "./time";
 import { getTurso } from "./turso";
 
+// Tabel ini tidak ada di migration/turso_*.sql lama (dulu hanya di D1 lewat
+// 001_init.sql, lalu kodenya pindah ke Turso tanpa skemanya). Dibuat otomatis
+// supaya instalasi/Turso baru tidak gagal "no such table: sent_registry" di
+// fitur inti kirim result. No-op kalau sudah ada; dicek sekali per isolate.
+let tableReady = false;
+async function ensureTable(env: Env): Promise<void> {
+	if (tableReady) return;
+	const db = getTurso(env);
+	await db
+		.prepare(
+			`CREATE TABLE IF NOT EXISTS sent_registry (
+				hash     TEXT NOT NULL,
+				website  TEXT NOT NULL,
+				sent_at  TEXT NOT NULL DEFAULT '',
+				username TEXT NOT NULL DEFAULT '',
+				market   TEXT NOT NULL DEFAULT '',
+				telegram INTEGER NOT NULL DEFAULT 0,
+				linktree INTEGER NOT NULL DEFAULT 0,
+				panelz   INTEGER NOT NULL DEFAULT 0,
+				content  TEXT NOT NULL DEFAULT '',
+				PRIMARY KEY (hash, website)
+			)`,
+		)
+		.run();
+	await db.prepare(`CREATE INDEX IF NOT EXISTS ix_sent_registry_sent_at ON sent_registry(sent_at)`).run();
+	tableReady = true;
+}
+
 export interface RegEntry {
 	hash: string;
 	website: string;
@@ -22,6 +50,7 @@ export async function getRegistryEntry(
 	hash: string,
 ): Promise<RegEntry | null> {
 	const w = String(website ?? "").trim().toUpperCase();
+	await ensureTable(env);
 	const r = await getTurso(env).prepare(`SELECT * FROM sent_registry WHERE hash = ? AND website = ?`)
 		.bind(hash, w)
 		.first<Record<string, unknown>>();
@@ -48,6 +77,7 @@ export async function upsertRegistry(
 	content: string,
 ): Promise<void> {
 	const w = String(website ?? "").trim().toUpperCase();
+	await ensureTable(env);
 	await getTurso(env).prepare(
 		`INSERT INTO sent_registry
 		   (hash, website, sent_at, username, market, telegram, linktree, panelz, content)

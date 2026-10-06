@@ -4,7 +4,7 @@
 // - Scripts.html: <script>...</script>  (uses google.script.run)
 //
 // We inline Styles + Scripts and prepend a google.script.run -> fetch('/api') shim.
-import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -253,5 +253,9 @@ mkdirSync(outDir, { recursive: true });
 // Aset gambar milik panel (logo, favicon) disimpan di ui-src/ (public/ di-ignore
 // karena hasil build) lalu disalin ke sini -- tidak lagi bergantung ke i.ibb.co.
 for (const f of ["logo.png", "favicon.png"]) copyFileSync(resolve(root, "ui-src", f), resolve(outDir, f));
+// Logo website (HUGO.png, FOLA.png, ...) & gambar role BOT (BOT.svg/BOT.png): nama KODE huruf besar + .png/.svg.
+for (const f of readdirSync(resolve(root, "ui-src"))) {
+	if (/^[A-Z]{2,8}\.(png|svg)$/.test(f)) copyFileSync(resolve(root, "ui-src", f), resolve(outDir, f));
+}
 writeFileSync(resolve(outDir, "index.html"), out, "utf8");
 console.log("OK -> public/index.html (" + out.length + " bytes)");

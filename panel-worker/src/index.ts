@@ -109,6 +109,13 @@ import {
 
 type Handler = (env: Env, body: Record<string, unknown>) => Promise<unknown>;
 const s = (v: unknown) => String(v ?? "");
+/** ID baris dari frontend: harus bilangan bulat positif. Tanpa ini ID kosong/NaN
+ *  sampai ke driver database dan operator membaca pesan mentah ("Only finite numbers..."). */
+const rowId = (v: unknown): number => {
+	const n = Number(v);
+	if (!Number.isInteger(n) || n <= 0) throw new Error("ID tidak valid. Muat ulang halaman lalu coba lagi.");
+	return n;
+};
 
 function readCookie(request: Request, name: string): string {
 	const raw = request.headers.get("cookie") || "";
@@ -125,7 +132,6 @@ function readCookie(request: Request, name: string): string {
 	return "";
 }
 
-// Pangkas Activity Log sekali per hari WIB (dikunci lewat KV).
 // Pangkas Activity Log sekali per hari WIB (dikunci lewat KV).
 async function dailyPrune(env: Env): Promise<number | "skip"> {
 	await migrateKvSessionsOnce(env);
@@ -183,8 +189,8 @@ const ROUTES: Record<string, Handler> = {
 	autoInputSetEnabled: (env, b) => autoInputSetEnabled(env, s(b.token), !!b.enabled),
 	autoInputSaveSession: (env, b) => autoInputSaveSession(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
 	autoInputDeleteSession: (env, b) => autoInputDeleteSession(env, s(b.token), s(b.website)),
-	autoInputClearJob: (env, b) => autoInputClearJob(env, s(b.token), Number(b.jobId)),
-	autoInputRun: (env, b) => autoInputRun(env, s(b.token), Number(b.jobId)),
+	autoInputClearJob: (env, b) => autoInputClearJob(env, s(b.token), rowId(b.jobId)),
+	autoInputRun: (env, b) => autoInputRun(env, s(b.token), rowId(b.jobId)),
 	autoInputTest: (env, b) => autoInputTest(env, s(b.token), s(b.website), s(b.market)),
 
 	// prediksi
@@ -226,8 +232,8 @@ const ROUTES: Record<string, Handler> = {
 	// wd listed -- lihat src/lib/wd-listed.ts
 	wdListedSync: (env, b) => wdListedSync(env, s(b.token), b.rows),
 	wdListedGetList: (env, b) => wdListedGetList(env, s(b.token)),
-	wdListedCheck: (env, b) => wdListedCheck(env, s(b.token), Number(b.id)),
-	wdListedRemove: (env, b) => wdListedRemove(env, s(b.token), Number(b.id)),
+	wdListedCheck: (env, b) => wdListedCheck(env, s(b.token), rowId(b.id)),
+	wdListedRemove: (env, b) => wdListedRemove(env, s(b.token), rowId(b.id)),
 
 	// laporan harian
 	lapGetConfig: (env, b) => lapGetConfig(env, s(b.token)),
@@ -428,7 +434,9 @@ export default {
 				}
 				const idParam = url.searchParams.get("id");
 				if (idParam) {
-					const out = await publicNewsDetail(env, Number(idParam));
+					const id = Number(idParam);
+					if (!Number.isInteger(id) || id <= 0) return json({ success: false, message: "id tidak valid" }, 400);
+					const out = await publicNewsDetail(env, id);
 					return json(out, out.success ? 200 : 404);
 				}
 				const page = parseInt(url.searchParams.get("page") || "1", 10);

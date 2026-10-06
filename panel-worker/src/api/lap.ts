@@ -12,15 +12,13 @@ import {
 	LapCreds,
 	extractPureUsername,
 	lapLoadCreds,
-	lapLoadResults,
+	lapLoadResultsModules,
 	lapLoadResultsModulesRaw,
 	LAP_RESULT_MODULES,
 	lapSaveCreds,
 	lapSaveResults,
 	num,
 } from "../lib/lap";
-
-const MOZART_PAGE_CAP = 18; // per list (depo/wd)
 
 function credsForClient(c: LapCreds) {
 	return {
@@ -249,7 +247,9 @@ export async function lapMotionImport(
 	// otomatis tidak tersentuh/tidak ketimpa kosong.
 	const hasDepo = Array.isArray(depoPaidRows) || Array.isArray(depoCreateRows);
 	const hasWd = Array.isArray(wdRows);
-	const prevMeta = (((await lapLoadResults(env, s.username))._motionMeta as Rec[] | undefined)?.[0]?.summary as Rec | undefined) || {};
+	// Hanya modul _motionMeta yang dibutuhkan -- jangan muat SELURUH snapshot laporan
+	// user (Register/Check Koin/dst bisa beberapa MB) cuma untuk membaca ringkasannya.
+	const prevMeta = (((await lapLoadResultsModules(env, s.username, ["_motionMeta"]))._motionMeta as Rec[] | undefined)?.[0]?.summary as Rec | undefined) || {};
 	const summary = {
 		totalTransaksiPaid: hasDepo ? totalTransaksiPaid : Number(prevMeta.totalTransaksiPaid || 0),
 		totalNominalPaidAt: hasDepo ? totalNominalPaidAt : Number(prevMeta.totalNominalPaidAt || 0),
@@ -685,11 +685,30 @@ export async function lapAdminStatus(env: Env, token: string, jobId: string) {
 	return out;
 }
 
+// Key job dikirim ke repo scraper (PUBLIK) lewat input workflow_dispatch dan
+// tercetak di log Actions, jadi harus diperlakukan sebagai BOCOR begitu job
+// jalan. Pengaman: key hanya berlaku selama job masih hidup. Setelah 'done'
+// tidak ada lagi yang bisa menarik kredensial user lewat job itu.
+//   - 'pending' / 'running' : berlaku (selama belum lewat JOB_KEY_MAX_AGE_MIN)
+//   - 'error'               : berlaku sebentar saja -- workflow mengulang scraper
+//                             s/d 3x dalam hitungan detik sesudah lapor gagal
+//   - 'done'                : mati
+const JOB_KEY_MAX_AGE_MIN = 360;
+const JOB_KEY_RETRY_AFTER_ERROR_MIN = 10;
+
+function jobKeyAlive(row: { status: string; created_at: string; updated_at: string }): boolean {
+	const status = String(row.status);
+	if (String(row.created_at) < tsPlusMinutes(-JOB_KEY_MAX_AGE_MIN)) return false;
+	if (status === "pending" || status === "running") return true;
+	if (status === "error") return String(row.updated_at) >= tsPlusMinutes(-JOB_KEY_RETRY_AFTER_ERROR_MIN);
+	return false;
+}
+
 /** Dipanggil oleh GitHub Actions (auth: job key, bukan sesi). */
 export async function lapJobStart(env: Env, jobId: string, key: string) {
-	const row = await getTurso(env).prepare(`SELECT username, status, params FROM lap_job WHERE id = ?`)
+	const row = await getTurso(env).prepare(`SELECT username, status, params, created_at, updated_at FROM lap_job WHERE id = ?`)
 		.bind(jobId)
-		.first<{ username: string; status: string; params: string }>();
+		.first<{ username: string; status: string; params: string; created_at: string; updated_at: string }>();
 	if (!row) return { success: false, message: "job tidak ada" };
 	let p: { kind?: string; startDate?: string; endDate?: string; key?: string } = {};
 	try {
@@ -698,6 +717,7 @@ export async function lapJobStart(env: Env, jobId: string, key: string) {
 		/* ignore */
 	}
 	if (!p.key || !constEq(p.key, String(key ?? ""))) return { success: false, message: "key salah" };
+	if (!jobKeyAlive(row)) return { success: false, message: "job sudah selesai / kedaluwarsa" };
 	await getTurso(env).prepare(`UPDATE lap_job SET status='running', message='Scraping...', updated_at=? WHERE id=?`)
 		.bind(tsNow(), jobId)
 		.run();
@@ -722,9 +742,9 @@ export async function lapJobResult(
 	data: Record<string, unknown[]>,
 	errors: Record<string, string>,
 ) {
-	const row = await getTurso(env).prepare(`SELECT username, params FROM lap_job WHERE id = ?`)
+	const row = await getTurso(env).prepare(`SELECT username, status, params, created_at FROM lap_job WHERE id = ?`)
 		.bind(jobId)
-		.first<{ username: string; params: string }>();
+		.first<{ username: string; status: string; params: string; created_at: string }>();
 	if (!row) return { success: false, message: "job tidak ada" };
 	let p: { key?: string } = {};
 	try {
@@ -733,6 +753,12 @@ export async function lapJobResult(
 		/* ignore */
 	}
 	if (!p.key || !constEq(p.key, String(key ?? ""))) return { success: false, message: "key salah" };
+	// Hasil yang sudah diterima tidak boleh ditimpa (key bisa bocor lewat log
+	// publik). Pengiriman ulang dari scraper (balasan pertama hilang di jalan)
+	// dijawab sukses supaya scraper tidak mengulang scrape.
+	if (row.status === "done") return { success: true, message: "hasil sudah diterima" };
+	if (row.status !== "pending" && row.status !== "running") return { success: false, message: "job sudah ditutup" };
+	if (String(row.created_at) < tsPlusMinutes(-JOB_KEY_MAX_AGE_MIN)) return { success: false, message: "job sudah kedaluwarsa" };
 
 	if (ok && data && typeof data === "object") {
 		const save: Record<string, unknown[]> = {};
@@ -766,24 +792,3 @@ type Rec = Record<string, unknown> & {
 	total_sum?: unknown;
 	total_amount?: unknown;
 };
-function mozartFindRows(json: unknown): Rec[] {
-	if (Array.isArray(json)) return json as Rec[];
-	let best: Rec[] = [];
-	for (const k of Object.keys((json as Rec) || {})) {
-		const v = (json as Rec)[k];
-		if (Array.isArray(v) && v.length >= best.length && (v.length === 0 || typeof v[0] === "object")) {
-			best = v as Rec[];
-		} else if (v && typeof v === "object" && !Array.isArray(v)) {
-			const nested = mozartFindRows(v);
-			if (nested.length > best.length) best = nested;
-		}
-	}
-	return best;
-}
-function pick(obj: Rec, keys: string[], fallback: unknown): unknown {
-	for (const k of keys) {
-		const v = obj[k];
-		if (v !== undefined && v !== null && String(v).trim() !== "") return v;
-	}
-	return fallback;
-}
