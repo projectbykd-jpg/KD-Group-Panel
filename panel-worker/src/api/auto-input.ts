@@ -8,6 +8,7 @@ import type { Processed } from "../lib/parser";
 import type { UserProfile } from "../lib/db";
 import {
 	clearRetryable,
+	defaultAdminBase,
 	deleteSession,
 	finishJob,
 	getEnabled,
@@ -48,7 +49,7 @@ export async function autoInputGetState(env: Env, token: string) {
 			const x = sessions.find((e) => e.website === w);
 			return {
 				website: w,
-				baseUrl: x?.baseUrl ?? "",
+				baseUrl: x?.baseUrl || defaultAdminBase(w),
 				hasSession: !!x?.phpsessid,
 				hint: x?.phpsessid ? "••••" + x.phpsessid.slice(-4) : "",
 			};

@@ -16,7 +16,7 @@
 //     & angka yang sama; sesudahnya tombol Hitung HARUS sudah hilang.
 // Ada yang meleset -> berhenti dan lapor, TIDAK mencoba "kira-kira".
 import { parsePasaranOptionsHtml, investIsLoginPage } from "./invest";
-import { normMarket, type AdminSession, type AutoInputPlan } from "./auto-input";
+import { adminBaseProblem, normMarket, type AdminSession, type AutoInputPlan } from "./auto-input";
 
 export type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 type Plan = Extract<AutoInputPlan, { ok: true }>;
@@ -348,8 +348,16 @@ export async function runAutoInput(opts: {
 	let stage: RunOutcome["stage"] = "cek";
 	let period = "";
 	try {
+		// 0. URL tersimpan harus tetap salah satu dari tiga admin yang diizinkan & cocok dengan websitenya.
+		const badBase = adminBaseProblem(sess.website, sess.baseUrl);
+		if (badBase) throw new Stop(`URL admin ${sess.website} ditolak: ${badBase}.`, "cek");
+
 		// 1. kode pasaran
 		const home = await adminReq(f, sess, "index.php");
+		// Cookie & URL harus benar-benar milik website ini: header halaman admin memuat "<WEBSITE>.COM".
+		if (/^(HUGOTOGEL|FOLATOTO)$/.test(sess.website) && !htmlText(home).toUpperCase().includes(sess.website + ".COM")) {
+			throw new Stop(`Halaman admin tidak menampilkan ${sess.website}.COM — URL atau PHPSESSID bukan milik ${sess.website}.`, "cek");
+		}
 		const code = findPoolCode(home, plan.market);
 		if (!code) throw new Stop(`Pasaran "${plan.market}" tidak ditemukan (atau ganda) di dropdown website ini.`, "cek");
 

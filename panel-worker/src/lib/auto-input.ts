@@ -155,13 +155,42 @@ export function parsePhpSessId(raw: string): string {
 	return v;
 }
 
+/** Hanya tiga admin ini yang boleh disentuh (sekaligus mencegah panel dipakai menembak host lain). */
+export const ADMIN_HOSTS = ["ag.suksesbogil.com", "agwl12.suksesbogil.com", "agwl5.suksesbogil.com"] as const;
+/** Website yang host-nya sudah pasti. Website lain (mis. yang memakai agwl5) cukup salah satu host di atas. */
+const SITE_HOST: Record<string, string> = { HUGOTOGEL: "ag.suksesbogil.com", FOLATOTO: "agwl12.suksesbogil.com" };
+
+export function defaultAdminBase(website: string): string {
+	const h = SITE_HOST[String(website).trim().toUpperCase()];
+	return h ? `https://${h}/` : "";
+}
+
+/** null = URL ini sah untuk website ini; selain itu alasan penolakan. */
+export function adminBaseProblem(website: string, base: string): string | null {
+	const w = String(website).trim().toUpperCase();
+	let host = "";
+	try {
+		const u = new URL(base);
+		if (u.protocol !== "https:") return "harus https";
+		host = u.hostname.toLowerCase();
+	} catch {
+		return "bukan URL yang valid";
+	}
+	if (!(ADMIN_HOSTS as readonly string[]).includes(host)) {
+		return `host ${host} bukan salah satu admin yang diizinkan (${ADMIN_HOSTS.join(", ")})`;
+	}
+	const want = SITE_HOST[w];
+	if (want && host !== want) return `${w} harus memakai ${want}, bukan ${host}`;
+	if (!want && Object.values(SITE_HOST).includes(host)) return `${host} milik website lain, bukan ${w}`;
+	return null;
+}
+
 export function normalizeAdminBase(raw: string): string {
 	let s = String(raw ?? "").trim().split("#")[0].split("?")[0];
 	if (!s) return "";
 	if (!/^https?:\/\//i.test(s)) s = "https://" + s;
 	try {
 		const u = new URL(s);
-		if (u.protocol !== "https:") return "";
 		return u.origin + "/";
 	} catch {
 		return "";
@@ -190,8 +219,9 @@ export async function getSession(env: Env, username: string, website: string): P
 export async function saveSession(env: Env, username: string, website: string, baseUrl: string, phpsessidRaw: string): Promise<void> {
 	await ensureAutoInputTables(env);
 	const w = String(website).trim().toUpperCase();
-	const base = normalizeAdminBase(baseUrl);
-	if (!base) throw new Error(`URL admin ${w} tidak valid (harus https://..., mis. https://ag.suksesbogil.com/).`);
+	const base = normalizeAdminBase(baseUrl) || defaultAdminBase(w);
+	const bad = base ? adminBaseProblem(w, base) : "kosong";
+	if (bad) throw new Error(`URL admin ${w} ditolak: ${bad}.`);
 	const old = await getSession(env, username, w);
 	let sid = old?.phpsessid ?? "";
 	if (String(phpsessidRaw ?? "").trim()) {

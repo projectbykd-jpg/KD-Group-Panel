@@ -4,7 +4,7 @@ const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: im
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
 import { autoInputAfterSend } from "../src/api/auto-input";
-import { clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
+import { adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
 import { parseAngkaPage, parseHitungPage, runAutoInput, buildPayload, parseForms } from "../src/lib/auto-input-run";
 import { processText } from "../src/lib/parser";
 import { fakeD1, fakeEnv } from "./helpers/fake-env";
@@ -49,7 +49,7 @@ function mockSite(o: SiteOpts = {}) {
 	const st = { calc: false, posts: [] as { path: string; body: URLSearchParams }[], calcPosts: 0 };
 	const nextPeriod = () => rows[0].period + 1;
 	const opt = (n: number, sel: number) => Array.from({ length: n }, (_, i) => `<option value="${i + 1}"${i + 1 === sel ? " selected" : ""}>${i + 1}</option>`).join("");
-	const angka = () => `<html><body>
+	const angka = () => `<html><body><div>HUGOTOGEL.COM</div>
 <select style="width:100%" onchange="gantipasar(this.value)"><option>Pilih Pasar</option>
 <option value="ARIZONA,p33190">ARIZONA</option><option value="${market},${code}">${market}</option>
 <option style="display:none;" id="paramp21545" value="pool-14-0-1-"></option></select>
@@ -206,6 +206,42 @@ describe("runAutoInput", () => {
 	});
 });
 
+describe("URL admin hanya tiga host yang diizinkan", () => {
+	it("cocokkan website dengan host-nya", () => {
+		const ok = (w: string, u: string) => adminBaseProblem(w, u);
+		expect(ok("HUGOTOGEL", "https://ag.suksesbogil.com/")).toBeNull();
+		expect(ok("FOLATOTO", "https://agwl12.suksesbogil.com/")).toBeNull();
+		expect(ok("WEBKETIGA", "https://agwl5.suksesbogil.com/")).toBeNull();
+		expect(ok("HUGOTOGEL", "https://agwl12.suksesbogil.com/")).toMatch(/harus memakai/);
+		expect(ok("FOLATOTO", "https://agwl5.suksesbogil.com/")).toMatch(/harus memakai/);
+		expect(ok("WEBKETIGA", "https://ag.suksesbogil.com/")).toMatch(/milik website lain/);
+		expect(ok("HUGOTOGEL", "https://evil.example.com/")).toMatch(/bukan salah satu/);
+		expect(ok("HUGOTOGEL", "https://ag.suksesbogil.com.evil.com/")).toMatch(/bukan salah satu/);
+		expect(ok("HUGOTOGEL", "http://ag.suksesbogil.com/")).toMatch(/https/);
+		expect(defaultAdminBase("FOLATOTO")).toBe("https://agwl12.suksesbogil.com/");
+	});
+	it("saveSession menolak host salah & mengisi default kalau URL kosong", async () => {
+		turso.current = fakeD1([]);
+		resetAutoInputTablesFlag();
+		const env = fakeEnv().env;
+		await expect(saveSession(env, "Op", "HUGOTOGEL", "https://agwl12.suksesbogil.com", SID1)).rejects.toThrow(/harus memakai/);
+		await expect(saveSession(env, "Op", "HUGOTOGEL", "https://evil.example.com", SID1)).rejects.toThrow(/bukan salah satu/);
+		await saveSession(env, "Op", "FOLATOTO", "", SID2);
+		expect((await getSessions(env, "Op"))[0].baseUrl).toBe("https://agwl12.suksesbogil.com/");
+	});
+	it("URL tersimpan yang melenceng ditolak saat dijalankan (tidak ada request sama sekali)", async () => {
+		let hits = 0;
+		const r = await runAutoInput({ session: { ...sess, baseUrl: "https://agwl12.suksesbogil.com/" }, plan: plan(), fetchFn: async () => (hits++, new Response("")) });
+		expect(r).toMatchObject({ ok: false, stage: "cek" });
+		expect(hits).toBe(0);
+	});
+	it("PHPSESSID milik website lain (halaman bukan HUGOTOGEL.COM) ditolak", async () => {
+		const m = mockSite();
+		const f = async (u: string, i?: RequestInit) => new Response((await (await m.fetchFn(u, i)).text()).replace("HUGOTOGEL.COM", "FOLATOTO.COM"));
+		expect(await runAutoInput({ session: sess, plan: plan(), fetchFn: f })).toMatchObject({ ok: false, stage: "cek" });
+	});
+});
+
 describe("autoInputAfterSend (DB)", () => {
 	let env: Env;
 	const profile = { username: "Op", role: "OPERATOR", websites: ["HUGOTOGEL", "FOLATOTO"], menus: null } as unknown as UserProfile;
@@ -279,7 +315,7 @@ describe("autoInputAfterSend (DB)", () => {
 			["FOLATOTO", "https://agwl12.suksesbogil.com/", SID2],
 			["HUGOTOGEL", "https://ag.suksesbogil.com/", SID1],
 		]);
-		await expect(saveSession(env, "Op", "X", "http://a.com", SID2)).rejects.toThrow(/URL admin/);
-		await expect(saveSession(env, "Op", "X", "https://a.com", "bad")).rejects.toThrow(/PHPSESSID/);
+		await expect(saveSession(env, "Op", "X", "http://ag.suksesbogil.com", SID2)).rejects.toThrow(/https/);
+		await expect(saveSession(env, "Op", "X", "https://agwl5.suksesbogil.com", "bad")).rejects.toThrow(/PHPSESSID/);
 	});
 });
