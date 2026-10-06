@@ -5,6 +5,8 @@ import { getTurso } from "../lib/turso";
 import {
 	AI_DEFAULT_VALID_DAYS,
 	aiChatProvider,
+	aiClearCooldown,
+	aiCooldown,
 	aiKeyId,
 	aiLastErrors,
 	aiLoadProviders,
@@ -374,7 +376,8 @@ async function aiListPayload(env: Env, cfg: Record<string, string>) {
 	const providers = list.map((p, i) => {
 		const u = usage.get(keyIds[i]) ?? empty;
 		const st = providerStatus(p, u);
-		if (st.usable && !firstUsable) firstUsable = p.id;
+		const cd = st.usable ? aiCooldown(cfg, p) : null;
+		if (st.usable && !cd && !firstUsable) firstUsable = p.id;
 		const err = lastErr.get(keyIds[i]) || "";
 		return {
 			id: p.id,
@@ -397,6 +400,9 @@ async function aiListPayload(env: Env, cfg: Record<string, string>) {
 			// Error terakhir hanya relevan kalau sesudahnya belum ada panggilan sukses.
 			last_error: err && u.lastErrAt >= u.lastAt ? err : "",
 			last_error_at: err && u.lastErrAt >= u.lastAt ? u.lastErrAt : "",
+			// Sedang dilewati bot sesudah timeout / rate limit (lihat ai-provider.ts).
+			cooldown_until: cd ? Number(cd.until) : 0,
+			cooldown_reason: cd ? cd.reason : "",
 		};
 	});
 	const totals = providers.reduce(
@@ -442,6 +448,8 @@ export async function botAiSave(env: Env, token: string, data: Record<string, un
 	if (prev) list[idx] = next;
 	else list.push(next);
 	await aiSaveProviders(env, cfg, list);
+	// Pemilik baru saja membetulkan provider ini -> langsung boleh dicoba lagi.
+	await aiClearCooldown(env, cfg, next.id);
 	await logActivity(env, s.username, "BOT AI PROVIDER", (prev ? "Ubah" : "Tambah") + " provider: " + next.name + " (" + next.model + ")", "BERHASIL", next.base_url);
 	return aiListPayload(env, cfg);
 }

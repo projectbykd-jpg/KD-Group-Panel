@@ -5523,6 +5523,7 @@ Tindakan ini tidak dapat dibatalkan.`,
           const expiry = p.expiresAt ? (p.expired ? 'Masa aktif habis ' + shortDate(p.expiresAt) : 'Aktif s/d ' + shortDate(p.expiresAt) + ' · ' + p.daysLeft + ' hari lagi') : 'Tanpa masa aktif';
           const warn = p.warn ? `<div class="ai-note ai-note-warn"><i class="fa-solid fa-triangle-exclamation"></i>${escapeHtml(p.warn)}</div>` : '';
           const err = p.last_error ? `<div class="ai-note ai-note-bad"><i class="fa-solid fa-circle-exclamation"></i>Gagal terakhir ${escapeHtml(String(p.last_error_at).slice(5, 16))}: ${escapeHtml(p.last_error)}</div>` : '';
+          const cd = p.cooldown_until ? `<div class="ai-note ai-note-warn"><i class="fa-solid fa-hourglass-half"></i>Dilewati bot sampai ${escapeHtml(new Date(p.cooldown_until).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }))} karena error sementara. Ganti model / klik Tes kalau sudah beres.</div>` : '';
           return `<div class="ai-card${using ? ' is-using' : ''}${p.usable ? '' : ' is-off'}">
             <div class="ai-card-head">
               <span class="ai-rank">${i + 1}</span>
@@ -5534,7 +5535,7 @@ Tindakan ini tidak dapat dibatalkan.`,
             </div>
             ${aiQuotaLine(p)}
             <div class="ai-facts"><span><i class="fa-regular fa-calendar"></i>${escapeHtml(expiry)}</span><span><i class="fa-solid fa-sun"></i>Hari ini ${fmtTok(p.today_tokens)} token · ${fmtTok(p.today_calls)}x</span><span><i class="fa-solid fa-signal"></i>${fmtTok(p.calls)} panggilan${p.failed ? ' · ' + fmtTok(p.failed) + ' gagal' : ''}${p.estimated_calls ? ' · ≈' + fmtTok(p.estimated_calls) + ' perkiraan' : ''}</span></div>
-            ${warn}${err}
+            ${warn}${cd}${err}
             <div class="ai-actions">
               <button type="button" onclick="botAiMove(${jsArg(p.id)},-1)" ${i === 0 ? 'disabled' : ''} title="Naikkan prioritas" aria-label="Naikkan prioritas"><i class="fa-solid fa-arrow-up"></i></button>
               <button type="button" onclick="botAiMove(${jsArg(p.id)},1)" ${i === list.length - 1 ? 'disabled' : ''} title="Turunkan prioritas" aria-label="Turunkan prioritas"><i class="fa-solid fa-arrow-down"></i></button>
