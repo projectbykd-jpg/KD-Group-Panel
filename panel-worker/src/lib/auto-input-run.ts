@@ -20,7 +20,7 @@
 // (per,nomor,sar,cmdhitung). Keduanya tanpa query string.
 // Ada yang meleset -> berhenti dan lapor, TIDAK mencoba "kira-kira".
 import { parsePasaranOptionsHtml, investIsLoginPage } from "./invest";
-import { adminBaseProblem, cookieHeader, normMarket, siteBrand, type AdminSession, type AutoInputPlan } from "./auto-input";
+import { adminBaseProblem, cookieHeader, normMarket, type AdminSession, type AutoInputPlan } from "./auto-input";
 
 export type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 type Plan = Extract<AutoInputPlan, { ok: true }>;
@@ -396,14 +396,16 @@ export async function runAutoInput(opts: {
 				if (e instanceof Stop) throw e;
 			}
 		}
-		// Cookie & URL harus benar-benar milik website ini: header halaman admin memuat "<WEBSITE>.COM".
-		const brand = siteBrand(sess.website);
-		if (brand && !htmlText(home).toUpperCase().includes(brand + ".COM")) {
-			// Tunjukkan APA yang diterima server supaya penyebabnya terbaca.
+		// Sudah login? Sidebar admin menampilkan "Agent (<nama agen>)". Nama WEBSITE ("HUGOTOGEL.COM") sengaja
+		// TIDAK dijadikan syarat: tulisan itu dirender dari cookie "<agen>=HUGOTOGEL.COM" yang tidak ikut
+		// kalau yang disimpan cuma PHPSESSID. Salah-website tidak mungkin: host dikunci per website
+		// (adminBaseProblem) dan PHPSESSID hanya sah di host penerbitnya.
+		const who = htmlText(home).match(/Agent\s*\(([^)\s]{2,40})\)/i)?.[1];
+		if (!who) {
 			const title = (index.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
 			const body = htmlText(home).slice(0, 220);
 			throw new Stop(
-				`Halaman admin tidak menampilkan ${brand}.COM — URL atau PHPSESSID bukan milik ${sess.website}, ATAU server tidak dianggap sedang login. ` +
+				`Server tidak dianggap sedang login di ${sess.website} (sidebar "Agent (...)" tidak ada) — PHPSESSID salah/habis, atau kurang cookie lain. ` +
 					`Yang diterima server: HTTP ${homeMeta.status} [${homeMeta.trail.join(" ")}] frame [${frames.join(", ") || "tidak ada"}] judul "${title}" isi "${body}"`,
 				"cek",
 			);
@@ -433,7 +435,7 @@ export async function runAutoInput(opts: {
 				ok: true,
 				stage: "cek",
 				period,
-				detail: `Uji kering OK: ${plan.market} (${code}) periode ${period}, angka ${used.join("/")} — validasi lolos, TIDAK ada yang dikirim.`,
+				detail: `Uji kering OK: login sebagai (${who}), ${plan.market} (${code}) periode ${period}, angka ${used.join("/")} — validasi lolos, TIDAK ada yang dikirim.`,
 				preview: { code, post: "admin_angka13.php", fields: Object.fromEntries(payload), prev: page.prev },
 			};
 		}
