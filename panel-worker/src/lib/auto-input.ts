@@ -190,8 +190,12 @@ export function sessionHint(stored: string): string {
 
 /** Hanya tiga admin ini yang boleh disentuh (sekaligus mencegah panel dipakai menembak host lain). */
 export const ADMIN_HOSTS = ["ag.suksesbogil.com", "agwl12.suksesbogil.com", "agwl5.suksesbogil.com"] as const;
-/** Website yang host-nya sudah pasti. Website lain (mis. yang memakai agwl5) cukup salah satu host di atas. */
-const SITE_HOST: Record<string, string> = { HUGOTOGEL: "ag.suksesbogil.com", FOLATOTO: "agwl12.suksesbogil.com" };
+/** Website yang host-nya sudah pasti. Website lain cukup salah satu host di atas yang BUKAN milik website di sini. */
+const SITE_HOST: Record<string, string> = {
+	HUGOTOGEL: "ag.suksesbogil.com",
+	FOLATOTO: "agwl12.suksesbogil.com",
+	SOHOTOGEL: "agwl5.suksesbogil.com",
+};
 
 export function defaultAdminBase(website: string): string {
 	const h = SITE_HOST[String(website).trim().toUpperCase()];

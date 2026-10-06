@@ -244,7 +244,10 @@ describe("URL admin hanya tiga host yang diizinkan", () => {
 		const ok = (w: string, u: string) => adminBaseProblem(w, u);
 		expect(ok("HUGOTOGEL", "https://ag.suksesbogil.com/")).toBeNull();
 		expect(ok("FOLATOTO", "https://agwl12.suksesbogil.com/")).toBeNull();
-		expect(ok("WEBKETIGA", "https://agwl5.suksesbogil.com/")).toBeNull();
+		expect(ok("SOHOTOGEL", "https://agwl5.suksesbogil.com/")).toBeNull();
+		expect(ok("SOHOTOGEL", "https://ag.suksesbogil.com/")).toMatch(/harus memakai/);
+		expect(ok("HUGOTOGEL", "https://agwl5.suksesbogil.com/")).toMatch(/harus memakai/);
+		expect(ok("WEBLAIN", "https://agwl5.suksesbogil.com/")).toMatch(/milik website lain/);
 		expect(ok("HUGOTOGEL", "https://agwl12.suksesbogil.com/")).toMatch(/harus memakai/);
 		expect(ok("FOLATOTO", "https://agwl5.suksesbogil.com/")).toMatch(/harus memakai/);
 		expect(ok("WEBKETIGA", "https://ag.suksesbogil.com/")).toMatch(/milik website lain/);
@@ -349,6 +352,6 @@ describe("autoInputAfterSend (DB)", () => {
 			["HUGOTOGEL", "https://ag.suksesbogil.com/", "PHPSESSID=" + SID1],
 		]);
 		await expect(saveSession(env, "Op", "X", "http://ag.suksesbogil.com", SID2)).rejects.toThrow(/https/);
-		await expect(saveSession(env, "Op", "X", "https://agwl5.suksesbogil.com", "bad")).rejects.toThrow(/PHPSESSID/);
+		await expect(saveSession(env, "Op", "SOHOTOGEL", "https://agwl5.suksesbogil.com", "bad")).rejects.toThrow(/PHPSESSID/);
 	});
 });
