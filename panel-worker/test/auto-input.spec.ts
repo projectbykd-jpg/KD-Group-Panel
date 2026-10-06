@@ -286,6 +286,19 @@ describe("URL admin hanya tiga host yang diizinkan", () => {
 		expect(r).toMatchObject({ ok: false, stage: "cek" });
 		expect(hits).toBe(0);
 	});
+	it("halaman yang diterima server ikut dilaporkan (status, redirect, judul, isi) saat bukan halaman admin", async () => {
+		let n = 0;
+		const f = async (u: string) =>
+			n++ === 0
+				? new Response("", { status: 302, headers: { location: "main.php?x=1" } })
+				: new Response("<html><head><title>Akses Ditolak</title></head><body>IP anda tidak diizinkan</body></html>");
+		const r = await runAutoInput({ session: sess, plan: plan(), dryRun: true, fetchFn: f });
+		expect(r).toMatchObject({ ok: false, stage: "cek" });
+		expect(r.detail).toMatch(/HTTP 200/);
+		expect(r.detail).toMatch(/302 -> \/main\.php\?x=1/);
+		expect(r.detail).toMatch(/Akses Ditolak/);
+		expect(r.detail).toMatch(/IP anda tidak diizinkan/);
+	});
 	it("PHPSESSID milik website lain (halaman bukan HUGOTOGEL.COM) ditolak", async () => {
 		const m = mockSite();
 		const f = async (u: string, i?: RequestInit) => new Response((await (await m.fetchFn(u, i)).text()).replace("HUGOTOGEL.COM", "FOLATOTO.COM"));
