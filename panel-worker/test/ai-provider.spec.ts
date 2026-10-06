@@ -533,7 +533,8 @@ describe("jeda provider yang bermasalah", () => {
 		fail = false;
 		const r = await aiGenerate(env, await botCfg(env), { purpose: "t", messages: msgs }, (t) => t);
 		expect(r.value).toBe("ok");
-		expect(JSON.parse((await botCfg(env)).ai_cooldowns || "{}")).toEqual({});
+		// Jeda tersimpan per provider+model: model yang berhasil tidak dijeda.
+		expect(Object.keys(JSON.parse((await botCfg(env)).ai_cooldowns || "{}"))).not.toContain("a|deepseek-v4-flash");
 	});
 
 	it("semua provider dijeda -> AiUnavailableError tanpa panggilan jaringan; waktu siap terdekat diketahui", async () => {
@@ -572,5 +573,90 @@ describe("jeda provider yang bermasalah", () => {
 		const res: any = await botAiSave(e, sessionToken, { id: "a", name: "A" });
 		expect(res.providers[0].cooldown_until).toBe(0);
 		expect(aiCooldown(await botCfg(env), prov())).toBeNull();
+	});
+});
+
+describe("banyak model per provider (urutan cadangan)", () => {
+	const msgs = [{ role: "user", content: "tulis" }];
+
+	it("modelChain: pisah koma/baris, buang duplikat & spasi", async () => {
+		const { modelChain } = await import("../src/lib/ai-provider");
+		expect(modelChain(" deepseek-v4-flash, glm-5.3 ,\nkimi-k3,glm-5.3,, ")).toEqual(["deepseek-v4-flash", "glm-5.3", "kimi-k3"]);
+		expect(modelChain("")).toEqual([]);
+	});
+
+	it("model pertama gagal -> model berikutnya di provider SAMA dicoba sebelum provider lain", async () => {
+		await botCfgSet(env, { ai_providers: JSON.stringify([prov({ name: "Dattio", model: "m1, m2" }), prov({ id: "b", name: "B", base_url: "https://b.test/v1" })]) });
+		const calls = mockFetch((url, body) => (body.model === "m1" ? { status: 503, body: { error: { message: "busy" } } } : chatOk("dari " + body.model)));
+		const r = await aiGenerate(env, await botCfg(env), { purpose: "t", messages: msgs }, (t) => t);
+		expect(r.value).toBe("dari m2");
+		expect(calls.map((c) => [new URL(c.url).host, c.body.model])).toEqual([["a.test", "m1"], ["a.test", "m2"]]);
+		// m1 dijeda, m2 tidak -> provider tetap dianggap bisa dipakai
+		const { aiUsableProviders } = await import("../src/lib/ai-provider");
+		expect((await aiUsableProviders(env, await botCfg(env))).map((p) => p.id)).toEqual(["a", "b"]);
+		const calls2 = mockFetch((_u, body) => chatOk("dari " + body.model));
+		await aiGenerate(env, await botCfg(env), { purpose: "t", messages: msgs }, (t) => t);
+		expect(calls2.map((c) => c.body.model)).toEqual(["m2"]); // m1 masih dijeda, langsung m2
+	});
+
+	it("jawaban kosong karena model 'berpikir' sampai batas -> ulang 2x batas token; masih kosong -> model berikutnya", async () => {
+		await botCfgSet(env, { ai_providers: JSON.stringify([prov({ name: "Dattio", model: "thinker, writer" })]) });
+		const sent: [string, number][] = [];
+		mockFetch((_u, body) => {
+			sent.push([body.model, body.max_tokens]);
+			if (body.model === "thinker") return { body: { model: "thinker", choices: [{ message: { content: "" }, finish_reason: "length" }], usage: { prompt_tokens: 2016, completion_tokens: body.max_tokens, total_tokens: 2016 + body.max_tokens } } };
+			return chatOk("artikel");
+		});
+		const r = await aiGenerate(env, await botCfg(env), { purpose: "t", messages: msgs, maxTokens: 8192 }, (t) => t);
+		expect(r.value).toBe("artikel");
+		expect(sent).toEqual([["thinker", 8192], ["thinker", 16384], ["writer", 8192]]);
+		const rows = turso.current!.raw.prepare(`SELECT model, ok, total_tokens, err FROM ai_usage ORDER BY id`).all() as Record<string, unknown>[];
+		expect(rows[0]).toMatchObject({ model: "thinker", ok: 0, total_tokens: 2016 + 8192 }); // token yg ditagih tetap tercatat
+		expect(String(rows[0].err)).toMatch(/memakai 8192 token untuk "berpikir"/);
+	});
+
+	it("ulang dgn batas lebih besar berhasil -> dipakai", async () => {
+		await botCfgSet(env, { ai_providers: JSON.stringify([prov({ model: "thinker" })]) });
+		mockFetch((_u, body) =>
+			body.max_tokens <= 400
+				? { body: { choices: [{ message: { content: "" }, finish_reason: "length" }], usage: { prompt_tokens: 10, completion_tokens: 400, total_tokens: 410 } } }
+				: chatOk("caption"),
+		);
+		const r = await aiGenerate(env, await botCfg(env), { purpose: "t", messages: msgs, maxTokens: 400 }, (t) => t);
+		expect(r.value).toBe("caption");
+	});
+
+	it("model hilang (404) diganti hanya di posisinya, cadangan lain tetap", async () => {
+		await botCfgSet(env, { ai_providers: JSON.stringify([prov({ model: "lama, cadangan" })]) });
+		mockFetch((url, body) => {
+			if (url.endsWith("/models")) return { body: { data: [{ id: "baru" }, { id: "cadangan" }, { id: "lama-embed" }] } };
+			return body.model === "lama" ? { status: 404, body: { error: { message: "The model `lama` does not exist" } } } : chatOk("ok");
+		});
+		await aiGenerate(env, await botCfg(env), { purpose: "t", messages: msgs }, (t) => t);
+		expect(JSON.parse((await botCfg(env)).ai_providers)[0].model).toBe("baru, cadangan");
+	});
+
+	it("panel: simpan banyak model, daftar model, tes semua model sekaligus", async () => {
+		const { botAiModels, botAiTest } = await import("../src/api/bot");
+		const { env: e, db } = fakeEnv();
+		db.prepare(`INSERT INTO users (username, username_lc, password_hash, role) VALUES ('Bos','bos',?, 'ADMIN')`).run(await hashPassword("pw"));
+		const { sessionToken: t } = (await checkLogin(e, "Bos", "pw", "")) as { sessionToken: string };
+		mockFetch((url, body) => {
+			if (url.endsWith("/models")) return { body: { data: [{ id: "deepseek-v4-flash" }, { id: "glm-5.3" }, { id: "text-embedding-3" }] } };
+			return body.model === "glm-5.3" ? { status: 500, body: { error: { message: "down" } } } : chatOk("OK", 30);
+		});
+		const saved = await botAiSave(e, t, { name: "Dattio", base_url: "https://a.test/v1", key: "sk-aaaaaaaaaaaaaaaa", model: "deepseek-v4-flash,glm-5.3, deepseek-v4-flash" });
+		expect(saved.providers[0]).toMatchObject({ model: "deepseek-v4-flash, glm-5.3", models: ["deepseek-v4-flash", "glm-5.3"] });
+		const id = saved.providers[0].id;
+
+		const listed = await botAiModels(e, t, { id });
+		expect(listed.models).toEqual(["deepseek-v4-flash", "glm-5.3"]); // embedding disembunyikan
+		await expect(botAiModels(e, t, { base_url: "https://a.test/v1" })).rejects.toThrow(/API key/);
+
+		const res: any = await botAiTest(e, t, { id });
+		expect(res.ok).toBe(true);
+		expect(res.results.map((r: any) => [r.model, r.ok])).toEqual([["deepseek-v4-flash", true], ["glm-5.3", false]]);
+		expect(res.list.providers[0].cooling_models.map((c: any) => c.model)).toEqual(["glm-5.3"]);
+		expect(res.list.providers[0].cooldown_until).toBe(0); // masih ada model yang jalan
 	});
 });

@@ -97,6 +97,7 @@ const ARG_MAP = {
 	botAiReorder: ["token", "data"],
 	botAiTopUp: ["token", "data"],
 	botAiTest: ["token", "data"],
+	botAiModels: ["token", "data"],
 	livechatListSessions: ["token"],
 	livechatSetBotEnabled: ["token", "sessionKey", "enabled"],
 	livechatListTemplates: ["token"],

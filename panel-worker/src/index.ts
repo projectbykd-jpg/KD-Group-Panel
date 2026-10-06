@@ -70,6 +70,7 @@ import {
 	botAiReorder,
 	botAiTopUp,
 	botAiTest,
+	botAiModels,
 	botFbRunNow,
 	botFbTemplateGenerate,
 	botNewsAddSource,
@@ -258,6 +259,7 @@ const ROUTES: Record<string, Handler> = {
 	botAiReorder: (env, b) => botAiReorder(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
 	botAiTopUp: (env, b) => botAiTopUp(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
 	botAiTest: (env, b) => botAiTest(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
+	botAiModels: (env, b) => botAiModels(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
 
 	// Live Chat Auto-Reply — sisi panel (sesi login ADMIN/OPERATOR)
 	livechatListSessions: (env, b) => livechatListSessions(env, s(b.token)),

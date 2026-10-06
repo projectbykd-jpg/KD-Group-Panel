@@ -7,6 +7,8 @@ import {
 	aiChatProvider,
 	aiClearCooldown,
 	aiCooldown,
+	aiListModels,
+	modelChain,
 	aiKeyId,
 	aiLastErrors,
 	aiLoadProviders,
@@ -376,14 +378,17 @@ async function aiListPayload(env: Env, cfg: Record<string, string>) {
 	const providers = list.map((p, i) => {
 		const u = usage.get(keyIds[i]) ?? empty;
 		const st = providerStatus(p, u);
-		const cd = st.usable ? aiCooldown(cfg, p) : null;
-		if (st.usable && !cd && !firstUsable) firstUsable = p.id;
+		const models = modelChain(p);
+		const cds = st.usable ? models.map((m) => ({ model: m, cd: aiCooldown(cfg, { ...p, model: m }) })).filter((x) => x.cd) : [];
+		const allCooling = models.length > 0 && cds.length === models.length;
+		if (st.usable && !allCooling && !firstUsable) firstUsable = p.id;
 		const err = lastErr.get(keyIds[i]) || "";
 		return {
 			id: p.id,
 			name: p.name,
 			base_url: p.base_url,
 			model: p.model,
+			models,
 			enabled: p.enabled,
 			key_mask: maskKey(p.key),
 			has_key: !!p.key,
@@ -401,8 +406,10 @@ async function aiListPayload(env: Env, cfg: Record<string, string>) {
 			last_error: err && u.lastErrAt >= u.lastAt ? err : "",
 			last_error_at: err && u.lastErrAt >= u.lastAt ? u.lastErrAt : "",
 			// Sedang dilewati bot sesudah timeout / rate limit (lihat ai-provider.ts).
-			cooldown_until: cd ? Number(cd.until) : 0,
-			cooldown_reason: cd ? cd.reason : "",
+			// cooldown_until > 0 hanya kalau SEMUA model provider ini sedang dijeda.
+			cooldown_until: allCooling ? Math.min(...cds.map((x) => Number(x.cd!.until))) : 0,
+			cooldown_reason: allCooling ? cds[0].cd!.reason : "",
+			cooling_models: cds.map((x) => ({ model: x.model, until: Number(x.cd!.until), reason: x.cd!.reason })),
 		};
 	});
 	const totals = providers.reduce(
@@ -429,8 +436,8 @@ export async function botAiSave(env: Env, token: string, data: Record<string, un
 	const key = String(data.key ?? "").trim();
 	if (!prev && !key) throw new Error("API key wajib diisi untuk provider baru.");
 	if (/\s/.test(key)) throw new Error("API key tidak boleh mengandung spasi.");
-	const model = String(data.model ?? prev?.model ?? "").trim();
-	if (!model) throw new Error("Model wajib diisi (mis. deepseek-v4-flash, llama-3.3-70b-versatile).");
+	const model = modelChain(String(data.model ?? prev?.model ?? "")).join(", ");
+	if (!model) throw new Error("Model wajib diisi (mis. deepseek-v4-flash, llama-3.3-70b-versatile). Boleh beberapa, pisahkan koma.");
 	const next: AiProvider = {
 		id: prev?.id || "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
 		name: String(data.name ?? prev?.name ?? "").trim() || "Provider",
@@ -508,41 +515,70 @@ export async function botAiTest(env: Env, token: string, data: Record<string, un
 	const list = await aiLoadProviders(env, cfg);
 	const p = list.find((x) => x.id === String(data.id ?? ""));
 	if (!p) throw new Error("Provider tidak ditemukan.");
+	const chain = modelChain(p);
 	let models: string[] = [];
 	try {
-		const r = await fetch(normalizeBaseUrl(p.base_url) + "/models", { headers: { Authorization: `Bearer ${p.key}` } });
-		const b: any = await r.json();
-		if (Array.isArray(b?.data)) models = b.data.map((m: any) => String(m?.id || "")).filter(Boolean).slice(0, 80);
+		models = await aiListModels(p);
 	} catch {
 		/* tidak semua provider punya /models */
 	}
+	// Semua model di daftar dites BERSAMAAN (bukan satu-satu) -- pemilik
+	// langsung tahu model mana yang hidup, lambat, atau selalu kosong.
+	const results = await Promise.all(
+		chain.map(async (model) => {
+			try {
+				const res = await aiChatProvider(env, cfg, { ...p, model }, {
+					purpose: "test",
+					messages: [{ role: "user", content: "Balas persis satu kata: OK" }],
+					temperature: 0,
+					maxTokens: 1024,
+					firstByteMs: 60_000,
+					totalMs: 120_000,
+				});
+				return { model, ok: true, reply: res.text.trim().slice(0, 80), tokens: res.totalTokens, estimated: res.estimated, ms: res.ms, message: "", listed: !models.length || models.includes(model) };
+			} catch (e) {
+				return { model, ok: false, reply: "", tokens: 0, estimated: false, ms: 0, message: e instanceof Error ? e.message : String(e), listed: !models.length || models.includes(model) };
+			}
+		}),
+	);
+	const first = results.find((r) => r.ok);
+	const missing = results.filter((r) => !r.listed).map((r) => r.model);
+	return {
+		success: true,
+		ok: !!first,
+		results,
+		reply: first?.reply ?? "",
+		model: first?.model ?? "",
+		tokens: first?.tokens ?? 0,
+		estimated: first?.estimated ?? false,
+		ms: first?.ms ?? 0,
+		message: first ? "" : results.map((r) => `${r.model}: ${r.message}`).join(" | "),
+		models,
+		suggested: missing.length ? pickWriterModel(models, new Set(chain)) : "",
+		list: await aiListPayload(env, cfg),
+	};
+}
+
+/**
+ * Daftar model dari provider (GET /models) untuk dipilih di form. Provider
+ * yang sudah tersimpan cukup kirim id (key tidak pernah dikirim balik ke
+ * browser); provider baru kirim base_url + key dari form.
+ */
+export async function botAiModels(env: Env, token: string, data: Record<string, unknown>) {
+	await gate(env, token);
+	const cfg = await botCfg(env);
+	const saved = (await aiLoadProviders(env, cfg)).find((x) => x.id === String(data.id ?? ""));
+	const base_url = normalizeBaseUrl(String(data.base_url ?? "") || saved?.base_url || "");
+	const key = String(data.key ?? "").trim() || saved?.key || "";
+	if (!/^https:\/\//i.test(base_url)) throw new Error("Isi Base URL (https://...) dulu.");
+	if (!key) throw new Error("Isi API key dulu.");
+	let models: string[];
 	try {
-		const res = await aiChatProvider(env, cfg, p, {
-			purpose: "test",
-			messages: [{ role: "user", content: "Balas persis satu kata: OK" }],
-			temperature: 0,
-			maxTokens: 20,
-		});
-		return {
-			success: true,
-			ok: true,
-			reply: res.text.trim().slice(0, 80),
-			model: res.model,
-			tokens: res.totalTokens,
-			estimated: res.estimated,
-			ms: res.ms,
-			models,
-			suggested: models.length && !models.includes(p.model) ? pickWriterModel(models, new Set()) : "",
-			list: await aiListPayload(env, cfg),
-		};
+		models = await aiListModels({ base_url, key });
 	} catch (e) {
-		return {
-			success: true,
-			ok: false,
-			message: e instanceof Error ? e.message : String(e),
-			models,
-			suggested: models.length && !models.includes(p.model) ? pickWriterModel(models, new Set()) : "",
-			list: await aiListPayload(env, cfg),
-		};
+		throw new Error("Gagal mengambil daftar model: " + (e instanceof Error ? e.message : String(e)));
 	}
+	if (!models.length) throw new Error("Provider ini tidak memberi daftar model (/models kosong). Ketik nama model manual.");
+	const bad = /whisper|tts|audio|guard|moderation|embed|rerank|transcri|dall-e|image-gen/i;
+	return { success: true, models: models.filter((m) => !bad.test(m)), hidden: models.filter((m) => bad.test(m)).length };
 }

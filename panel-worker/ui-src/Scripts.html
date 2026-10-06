@@ -5510,7 +5510,7 @@ Tindakan ini tidak dapat dibatalkan.`,
       const sum = document.getElementById('botAiSummary');
       if (sum) {
         sum.innerHTML = `
-          <div class="ai-stat"><span>Dipakai sekarang</span><b>${active ? escapeHtml(active.name) : '—'}</b><em>${active ? escapeHtml(active.model) : 'tidak ada provider aktif'}</em></div>
+          <div class="ai-stat"><span>Dipakai sekarang</span><b>${active ? escapeHtml(active.name) : '—'}</b><em>${active ? escapeHtml(botAiModelsOf(active)[0] || '') + (botAiModelsOf(active).length > 1 ? ' +' + (botAiModelsOf(active).length - 1) + ' cadangan' : '') : 'tidak ada provider aktif'}</em></div>
           <div class="ai-stat"><span>Token hari ini</span><b>${fmtTokShort(res.totals && res.totals.today)}</b><em>${fmtTok(res.totals && res.totals.today)} token</em></div>
           <div class="ai-stat"><span>Total terpakai</span><b>${fmtTokShort(res.totals && res.totals.used)}</b><em>${fmtTok(res.totals && res.totals.calls)} panggilan</em></div>
           <div class="ai-stat"><span>Provider aktif</span><b>${list.filter(p => p.usable).length} / ${list.length}</b><em>${active && active.quota > 0 ? 'sisa ' + fmtTokShort(active.remaining) + ' token' : 'urutan = prioritas'}</em></div>`;
@@ -5523,19 +5523,20 @@ Tindakan ini tidak dapat dibatalkan.`,
           const expiry = p.expiresAt ? (p.expired ? 'Masa aktif habis ' + shortDate(p.expiresAt) : 'Aktif s/d ' + shortDate(p.expiresAt) + ' · ' + p.daysLeft + ' hari lagi') : 'Tanpa masa aktif';
           const warn = p.warn ? `<div class="ai-note ai-note-warn"><i class="fa-solid fa-triangle-exclamation"></i>${escapeHtml(p.warn)}</div>` : '';
           const err = p.last_error ? `<div class="ai-note ai-note-bad"><i class="fa-solid fa-circle-exclamation"></i>Gagal terakhir ${escapeHtml(String(p.last_error_at).slice(5, 16))}: ${escapeHtml(p.last_error)}</div>` : '';
+          const coolingSome = !p.cooldown_until && p.cooling_models && p.cooling_models.length ? `<div class="ai-note ai-note-warn"><i class="fa-solid fa-hourglass-half"></i>Dilewati sementara: ${p.cooling_models.map(c => escapeHtml(c.model) + ' (s/d ' + escapeHtml(new Date(c.until).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })) + ')').join(', ')} — bot memakai model berikutnya.</div>` : '';
           const cd = p.cooldown_until ? `<div class="ai-note ai-note-warn"><i class="fa-solid fa-hourglass-half"></i>Dilewati bot sampai ${escapeHtml(new Date(p.cooldown_until).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }))} karena error sementara. Ganti model / klik Tes kalau sudah beres.</div>` : '';
           return `<div class="ai-card${using ? ' is-using' : ''}${p.usable ? '' : ' is-off'}">
             <div class="ai-card-head">
               <span class="ai-rank">${i + 1}</span>
               <div class="min-w-0 flex-1">
                 <div class="ai-name">${escapeHtml(p.name)} ${using ? '<span class="ai-using"><i class="fa-solid fa-bolt"></i>Dipakai sekarang</span>' : ''}</div>
-                <div class="ai-sub"><code>${escapeHtml(p.model)}</code> · ${escapeHtml(hostOf(p.base_url))} · key <code>${escapeHtml(p.key_mask || '-')}</code></div>
+                <div class="ai-sub">${botAiModelsOf(p).map(m => '<code>' + escapeHtml(m) + '</code>').join(' → ')} · ${escapeHtml(hostOf(p.base_url))} · key <code>${escapeHtml(p.key_mask || '-')}</code></div>
               </div>
               <span class="ai-pill ai-pill-${st[1]}">${st[0]}</span>
             </div>
             ${aiQuotaLine(p)}
             <div class="ai-facts"><span><i class="fa-regular fa-calendar"></i>${escapeHtml(expiry)}</span><span><i class="fa-solid fa-sun"></i>Hari ini ${fmtTok(p.today_tokens)} token · ${fmtTok(p.today_calls)}x</span><span><i class="fa-solid fa-signal"></i>${fmtTok(p.calls)} panggilan${p.failed ? ' · ' + fmtTok(p.failed) + ' gagal' : ''}${p.estimated_calls ? ' · ≈' + fmtTok(p.estimated_calls) + ' perkiraan' : ''}</span></div>
-            ${warn}${cd}${err}
+            ${warn}${cd}${coolingSome}${err}
             <div class="ai-actions">
               <button type="button" onclick="botAiMove(${jsArg(p.id)},-1)" ${i === 0 ? 'disabled' : ''} title="Naikkan prioritas" aria-label="Naikkan prioritas"><i class="fa-solid fa-arrow-up"></i></button>
               <button type="button" onclick="botAiMove(${jsArg(p.id)},1)" ${i === list.length - 1 ? 'disabled' : ''} title="Turunkan prioritas" aria-label="Turunkan prioritas"><i class="fa-solid fa-arrow-down"></i></button>
@@ -5576,7 +5577,7 @@ Tindakan ini tidak dapat dibatalkan.`,
       card.innerHTML = `
         <div class="ai-dash-icon"><i class="fa-solid fa-microchip"></i></div>
         <div class="min-w-0 flex-1">
-          <div class="ai-dash-title">${active ? 'AI: ' + escapeHtml(active.name) + ' <code>' + escapeHtml(active.model) + '</code>' : 'Tidak ada AI provider aktif — bot tidak bisa menulis artikel'}</div>
+          <div class="ai-dash-title">${active ? 'AI: ' + escapeHtml(active.name) + ' <code>' + escapeHtml(botAiModelsOf(active)[0] || '') + '</code>' + (botAiModelsOf(active).length > 1 ? ' <span class="text-[11px] text-slate-400">+' + (botAiModelsOf(active).length - 1) + ' model cadangan</span>' : '') : 'Tidak ada AI provider aktif — bot tidak bisa menulis artikel'}</div>
           <div class="ai-dash-sub">Hari ini <b>${fmtTok(res.totals && res.totals.today)}</b> token · total <b>${fmtTok(res.totals && res.totals.used)}</b>${active && active.quota > 0 ? ' · sisa kuota <b>' + fmtTok(active.remaining) + '</b>' : ''}${active && active.expiresAt ? ' · aktif s/d ' + shortDate(active.expiresAt) : ''}${warnP ? ' · <span class="text-amber-300">' + escapeHtml(warnP.name + ': ' + warnP.warn) + '</span>' : ''}</div>
           ${active && active.quota > 0 ? `<div class="ai-meter ai-meter-${active.pctUsed >= 90 ? 'bad' : active.pctUsed >= 70 ? 'warn' : 'ok'} mt-2"><span style="width:${Math.min(100, active.pctUsed)}%"></span></div>` : ''}
         </div>
@@ -5596,6 +5597,94 @@ Tindakan ini tidak dapat dibatalkan.`,
         [method](currentSessionToken, data);
     }
 
+    function botAiModelsOf(p) {
+      if (!p) return [];
+      return p.models && p.models.length ? p.models : String(p.model || '').split(',').map(x => x.trim()).filter(Boolean);
+    }
+    let botAiPickerModels = [];
+    function botAiChainGet() {
+      const el = document.getElementById('botAiModel');
+      return String(el ? el.value : '').split(',').map(x => x.trim()).filter(Boolean);
+    }
+    function botAiChainSet(list) {
+      const out = [];
+      list.forEach(m => { m = String(m || '').trim(); if (m && !out.includes(m)) out.push(m); });
+      document.getElementById('botAiModel').value = out.slice(0, 10).join(', ');
+      renderBotAiChain();
+      renderBotAiPicker();
+    }
+    function botAiChainAddTyped() {
+      const el = document.getElementById('botAiModelAdd');
+      const add = String(el.value || '').split(',').map(x => x.trim()).filter(Boolean);
+      if (!add.length) return;
+      const cur = botAiChainGet();
+      if (cur.length + add.filter(m => !cur.includes(m)).length > 10) { toast('Maksimal 10 model per provider'); return; }
+      botAiChainSet(cur.concat(add));
+      el.value = '';
+    }
+    function botAiChainMove(i, dir) {
+      const cur = botAiChainGet();
+      const j = i + dir;
+      if (j < 0 || j >= cur.length) return;
+      [cur[i], cur[j]] = [cur[j], cur[i]];
+      botAiChainSet(cur);
+    }
+    function botAiChainRemove(i) {
+      const cur = botAiChainGet();
+      cur.splice(i, 1);
+      botAiChainSet(cur);
+    }
+    function botAiChainToggle(m) {
+      const cur = botAiChainGet();
+      const i = cur.indexOf(m);
+      if (i >= 0) cur.splice(i, 1);
+      else if (cur.length >= 10) { toast('Maksimal 10 model per provider'); return; }
+      else cur.push(m);
+      botAiChainSet(cur);
+    }
+    function renderBotAiChain() {
+      const box = document.getElementById('botAiChain');
+      if (!box) return;
+      const cur = botAiChainGet();
+      box.innerHTML = cur.length ? cur.map((m, i) => `<div class="ai-chain-item">
+          <b>${i + 1}</b><code title="${escapeHtml(m)}">${escapeHtml(m)}</code>
+          <button type="button" onclick="botAiChainMove(${i},-1)" ${i === 0 ? 'disabled' : ''} title="Naikkan" aria-label="Naikkan"><i class="fa-solid fa-arrow-up"></i></button>
+          <button type="button" onclick="botAiChainMove(${i},1)" ${i === cur.length - 1 ? 'disabled' : ''} title="Turunkan" aria-label="Turunkan"><i class="fa-solid fa-arrow-down"></i></button>
+          <button type="button" onclick="botAiChainRemove(${i})" title="Hapus" aria-label="Hapus model"><i class="fa-solid fa-xmark"></i></button>
+        </div>`).join('') : '<div class="ai-chain-empty">Belum ada model. Ketik nama model, atau klik "Ambil daftar model".</div>';
+    }
+    function renderBotAiPicker() {
+      const list = document.getElementById('botAiPickerList');
+      if (!list || !botAiPickerModels.length) return;
+      const q = String((document.getElementById('botAiPickerSearch') || {}).value || '').trim().toLowerCase();
+      const cur = botAiChainGet();
+      const shown = botAiPickerModels.filter(m => !q || m.toLowerCase().includes(q));
+      list.innerHTML = shown.length
+        ? shown.map(m => `<button type="button" class="${cur.includes(m) ? 'is-on' : ''}" onclick="botAiChainToggle(${jsArg(m)})" title="${escapeHtml(m)}">${cur.includes(m) ? '<i class="fa-solid fa-check mr-1"></i>' : ''}${escapeHtml(m)}</button>`).join('')
+        : '<span class="text-[11px] text-slate-400">Tidak ada model yang cocok.</span>';
+    }
+    function botAiFetchModels() {
+      const g = id => String((document.getElementById(id) || {}).value || '').trim();
+      const data = { id: g('botAiId'), base_url: g('botAiBase'), key: g('botAiKey') };
+      if (!data.base_url) { toast('Isi Base URL dulu'); return; }
+      if (!data.id && !data.key) { toast('Isi API key dulu'); return; }
+      const btn = document.getElementById('botAiFetchBtn');
+      if (btn) btn.disabled = true;
+      google.script.run
+        .withSuccessHandler(res => {
+          if (btn) btn.disabled = false;
+          if (apiFailed(res)) { toast(apiMessage(res, 'Gagal mengambil daftar model')); return; }
+          botAiPickerModels = res.models || [];
+          const dl = document.getElementById('botAiModelList');
+          if (dl) dl.innerHTML = botAiPickerModels.map(m => `<option value="${escapeHtml(m)}">`).join('');
+          const picker = document.getElementById('botAiPicker');
+          if (picker) picker.hidden = false;
+          renderBotAiPicker();
+          toast(botAiPickerModels.length + ' model ditemukan — klik untuk menambah ke urutan');
+        })
+        .withFailureHandler(e => { if (btn) btn.disabled = false; toast((e && e.message) || String(e)); })
+        .botAiModels(currentSessionToken, data);
+    }
     function botAiOpenForm(id) {
       const p = id && botAiData ? (botAiData.providers || []).find(x => x.id === id) : null;
       const form = document.getElementById('botAiForm');
@@ -5605,7 +5694,12 @@ Tindakan ini tidak dapat dibatalkan.`,
       v('botAiName', p ? p.name : '');
       v('botAiBase', p ? p.base_url : '');
       v('botAiKey', '');
-      v('botAiModel', p ? p.model : '');
+      v('botAiModel', p ? botAiModelsOf(p).join(', ') : '');
+      v('botAiModelAdd', '');
+      botAiPickerModels = [];
+      const picker = document.getElementById('botAiPicker');
+      if (picker) picker.hidden = true;
+      renderBotAiChain();
       v('botAiQuota', p && p.quota ? p.quota : '');
       v('botAiActivated', p ? p.activated : '');
       v('botAiDays', p && p.valid_days ? p.valid_days : '');
@@ -5617,7 +5711,7 @@ Tindakan ini tidak dapat dibatalkan.`,
       if (more) more.open = !!(p && (p.quota || p.valid_days));
       form.hidden = false;
       form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      document.getElementById(p ? 'botAiModel' : 'botAiName').focus();
+      document.getElementById(p ? 'botAiModelAdd' : 'botAiName').focus();
     }
     function botAiCloseForm() { const f = document.getElementById('botAiForm'); if (f) f.hidden = true; }
     function botAiPreset(key) {
@@ -5625,7 +5719,7 @@ Tindakan ini tidak dapat dibatalkan.`,
       if (!pr) return;
       document.getElementById('botAiName').value = pr.name;
       document.getElementById('botAiBase').value = pr.base;
-      if (pr.model) document.getElementById('botAiModel').value = pr.model;
+      if (pr.model && !botAiChainGet().length) botAiChainSet([pr.model]);
       if (pr.days) {
         document.getElementById('botAiDays').value = pr.days;
         if (!document.getElementById('botAiActivated').value) document.getElementById('botAiActivated').value = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
@@ -5637,7 +5731,9 @@ Tindakan ini tidak dapat dibatalkan.`,
     function botAiSubmit() {
       const g = id => { const el = document.getElementById(id); return el ? (el.type === 'checkbox' ? (el.checked ? '1' : '0') : String(el.value || '').trim()) : ''; };
       const data = { id: g('botAiId'), name: g('botAiName'), base_url: g('botAiBase'), key: g('botAiKey'), model: g('botAiModel'), quota: g('botAiQuota'), activated: g('botAiActivated'), valid_days: g('botAiDays'), used_adjust: g('botAiAdjust'), enabled: g('botAiEnabled') };
-      if (!data.base_url || !data.model || (!data.id && !data.key)) { toast('Isi Base URL, API key, dan model'); return; }
+      const typed = g('botAiModelAdd');
+      if (typed) { botAiChainAddTyped(); data.model = g('botAiModel'); }
+      if (!data.base_url || !data.model || (!data.id && !data.key)) { toast('Isi Base URL, API key, dan minimal satu model'); return; }
       const btn = document.getElementById('botAiSaveBtn');
       if (btn) btn.disabled = true;
       google.script.run
@@ -5655,7 +5751,7 @@ Tindakan ini tidak dapat dibatalkan.`,
     async function botAiDelete(id) {
       const p = (botAiData && botAiData.providers || []).find(x => x.id === id);
       if (!p) return;
-      const ok = await confirmCenter({ type: 'danger', title: 'Hapus provider?', message: `"${p.name}" (${p.model}) dihapus dari daftar dan API key-nya tidak dipakai lagi. Riwayat pemakaian token tetap tersimpan.`, confirmText: 'YA, HAPUS' });
+      const ok = await confirmCenter({ type: 'danger', title: 'Hapus provider?', message: `"${p.name}" (${botAiModelsOf(p).join(', ')}) dihapus dari daftar dan API key-nya tidak dipakai lagi. Riwayat pemakaian token tetap tersimpan.`, confirmText: 'YA, HAPUS' });
       if (ok) botAiCall('botAiDelete', { id }, 'Provider dihapus');
     }
     function botAiMove(id, dir) {
@@ -5689,11 +5785,15 @@ Tindakan ini tidak dapat dibatalkan.`,
           if (res.list) applyBotAi(res.list);
           const dl = document.getElementById('botAiModelList');
           if (dl && res.models && res.models.length) dl.innerHTML = res.models.map(m => `<option value="${escapeHtml(m)}">`).join('');
-          const hint = res.suggested ? `\nModel "${p && p.model}" tidak ada di daftar provider ini. Coba: ${res.suggested}` : '';
-          notifyCenter(res.ok
-            ? `Balasan: "${res.reply}" · ${res.model} · ${fmtTok(res.tokens)} token${res.estimated ? ' (perkiraan)' : ''} · ${res.ms} ms` + (res.models && res.models.length ? `\n${res.models.length} model tersedia (muncul sebagai pilihan saat mengisi Model).` : '') + hint
-            : (res.message || 'Tes gagal') + hint,
-            res.ok ? 'success' : 'danger', res.ok ? 'Koneksi OK' : 'Koneksi gagal');
+          const lines = (res.results || []).map(r => (r.ok
+            ? `✅ ${r.model} — ${(r.ms / 1000).toFixed(1)} dtk · ${fmtTok(r.tokens)} token${r.estimated ? ' (perkiraan)' : ''}`
+            : `❌ ${r.model} — ${r.message}`) + (r.listed ? '' : ' (tidak ada di daftar model provider)'));
+          const okCount = (res.results || []).filter(r => r.ok).length;
+          const hint = res.suggested ? `\nSaran model lain dari provider ini: ${res.suggested}` : '';
+          notifyCenter((lines.join('\n') || res.message || 'Tes gagal') + hint
+            + (res.models && res.models.length ? `\n\n${res.models.length} model tersedia — buka Edit → "Ambil daftar model" untuk menambah cadangan.` : ''),
+            res.ok ? (okCount === (res.results || []).length ? 'info' : 'warning') : 'danger',
+            res.ok ? `${okCount}/${(res.results || []).length} model OK` : 'Semua model gagal');
         })
         .withFailureHandler(e => toast((e && e.message) || String(e)))
         .botAiTest(currentSessionToken, { id });
