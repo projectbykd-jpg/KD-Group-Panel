@@ -341,6 +341,28 @@ async function adminReq(
 	throw new Error("Terlalu banyak redirect.");
 }
 
+/**
+ * index.php admin berupa FRAMESET (halamannya hanya berjudul "Administration"); sidebar
+ * dengan nama website & dropdown pasaran ada di frame. Ambil alamat frame same-origin.
+ */
+export function frameSources(html: string, pageUrl: string): string[] {
+	const out: string[] = [];
+	const base = new URL(pageUrl);
+	for (const m of html.matchAll(/<i?frame\b[^>]*?\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {
+		const raw = decodeEntities(m[1] ?? m[2] ?? m[3] ?? "").trim();
+		if (!raw || /^(javascript|about|data|mailto):/i.test(raw)) continue;
+		try {
+			const u = new URL(raw, base);
+			if (u.origin !== base.origin) continue;
+			const rel = u.pathname.replace(/^\//, "") + u.search;
+			if (!out.includes(rel)) out.push(rel);
+		} catch {
+			/* abaikan */
+		}
+	}
+	return out.slice(0, 5);
+}
+
 // ---------------------------------------------------------------------------
 // Alur utama
 // ---------------------------------------------------------------------------
@@ -363,16 +385,26 @@ export async function runAutoInput(opts: {
 
 		// 1. kode pasaran
 		const homeMeta = { status: 0, trail: [] as string[] };
-		const home = await adminReq(f, sess, "index.php", {}, homeMeta);
+		const index = await adminReq(f, sess, "index.php", {}, homeMeta);
+		// Frame (sidebar, dropdown pasaran) dibaca juga; gagal-baca satu frame tidak menghentikan (sesi habis tetap berhenti).
+		const frames = frameSources(index, new URL("index.php", sess.baseUrl).toString());
+		let home = index;
+		for (const src of frames) {
+			try {
+				home += "\n" + (await adminReq(f, sess, src, { referer: new URL("index.php", sess.baseUrl).toString() }));
+			} catch (e) {
+				if (e instanceof Stop) throw e;
+			}
+		}
 		// Cookie & URL harus benar-benar milik website ini: header halaman admin memuat "<WEBSITE>.COM".
 		const brand = siteBrand(sess.website);
 		if (brand && !htmlText(home).toUpperCase().includes(brand + ".COM")) {
-			// Tunjukkan APA yang diterima server (bukan halaman admin yang dilihat di Chrome) supaya penyebabnya terbaca.
-			const title = (home.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
+			// Tunjukkan APA yang diterima server supaya penyebabnya terbaca.
+			const title = (index.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
 			const body = htmlText(home).slice(0, 220);
 			throw new Stop(
 				`Halaman admin tidak menampilkan ${brand}.COM — URL atau PHPSESSID bukan milik ${sess.website}, ATAU server tidak dianggap sedang login. ` +
-					`Yang diterima server: HTTP ${homeMeta.status} [${homeMeta.trail.join(" ")}] judul "${title}" isi "${body}"`,
+					`Yang diterima server: HTTP ${homeMeta.status} [${homeMeta.trail.join(" ")}] frame [${frames.join(", ") || "tidak ada"}] judul "${title}" isi "${body}"`,
 				"cek",
 			);
 		}
