@@ -13,10 +13,14 @@
 //   * kolom angka kosong & jumlahnya <= jumlah prize di teks;
 //   * sesudah Kirim: baris teratas tabel HARUS periode baru dgn angka yang sama;
 //   * sebelum Hitung: halaman Hitung HARUS menunjukkan periode, pasaran, kode pasaran
-//     & angka yang sama; sesudahnya tombol Hitung HARUS sudah hilang.
+//     & angka yang sama (juga field tersembunyi per / nomor / sar); sesudahnya tombol
+//     Hitung HARUS sudah hilang.
+// Bentuk request mengikuti request ASLI browser (DevTools): Kirim = POST admin_angka13.php
+// (tgl,bln,thn,periode,angka[,angka2,angka3],psr); Hitung = POST admin_hitungtimte.php
+// (per,nomor,sar,cmdhitung). Keduanya tanpa query string.
 // Ada yang meleset -> berhenti dan lapor, TIDAK mencoba "kira-kira".
 import { parsePasaranOptionsHtml, investIsLoginPage } from "./invest";
-import { adminBaseProblem, normMarket, type AdminSession, type AutoInputPlan } from "./auto-input";
+import { adminBaseProblem, cookieHeader, normMarket, type AdminSession, type AutoInputPlan } from "./auto-input";
 
 export type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 type Plan = Extract<AutoInputPlan, { ok: true }>;
@@ -306,7 +310,7 @@ async function adminReq(
 	let body = init.body;
 	for (let hop = 0; hop < 4; hop++) {
 		const headers: Record<string, string> = {
-			Cookie: "PHPSESSID=" + sess.phpsessid,
+			Cookie: cookieHeader(sess.phpsessid),
 			"User-Agent": UA,
 			Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 			"Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8",
@@ -370,34 +374,35 @@ export async function runAutoInput(opts: {
 		const fill: Record<string, string> = {};
 		page.prizeFields.forEach((n, i) => (fill[n] = used[i]));
 
+		// Persis seperti request asli browser: field form + psr (hidden), TANPA nilai tombol.
+		const kirimBody = () => {
+			const b = buildPayload(page.form, fill);
+			if (!b.has("psr")) b.set("psr", code);
+			return b;
+		};
+
 		if (opts.dryRun) {
-			const payload = buildPayload(page.form, fill);
+			const payload = kirimBody();
 			return {
 				ok: true,
 				stage: "cek",
 				period,
 				detail: `Uji kering OK: ${plan.market} (${code}) periode ${period}, angka ${used.join("/")} — validasi lolos, TIDAK ada yang dikirim.`,
-				preview: { code, action: page.form.action || angkaPath, method: page.form.method, fields: Object.fromEntries(payload), prev: page.prev },
+				preview: { code, post: "admin_angka13.php", fields: Object.fromEntries(payload), prev: page.prev },
 			};
 		}
 
 		// 3. Kirim -- dari sini admin DISENTUH.
 		await opts.onStage?.("kirim", period);
 		stage = "kirim";
-		const action = page.form.action ? new URL(page.form.action, new URL(angkaPath, sess.baseUrl)).pathname.replace(/^\//, "") + new URL(page.form.action, new URL(angkaPath, sess.baseUrl)).search : angkaPath;
-		const kirimBtn = page.form.inputs.find(isKirim)!;
 		const verifyEntered = async () => {
 			const t = parseResultTable(await adminReq(f, sess, angkaPath));
 			const top = t && topRow(t);
 			return !!top && top.period === page.period && used.every((n, i) => top.numbers[i] === n);
 		};
-		let entered = false;
-		// Percobaan 1: seperti submit biasa. Percobaan 2 (hanya kalau yang pertama TERBUKTI tidak masuk): sertakan nilai tombol.
-		for (const withBtn of [false, true]) {
-			await adminReq(f, sess, action, { method: "POST", body: buildPayload(page.form, fill, withBtn ? kirimBtn : undefined), referer: new URL(angkaPath, sess.baseUrl).toString() });
-			if ((entered = await verifyEntered())) break;
-		}
-		if (!entered) throw new Stop("Form Nomor Keluar sudah dikirim tapi angka TIDAK muncul di tabel — cek manual.", "kirim");
+		// Satu kali saja (tidak ada percobaan ulang): request asli browser POST ke admin_angka13.php tanpa query.
+		await adminReq(f, sess, "admin_angka13.php", { method: "POST", body: kirimBody(), referer: new URL(angkaPath, sess.baseUrl).toString() });
+		if (!(await verifyEntered())) throw new Stop("Form Nomor Keluar sudah dikirim tapi angka TIDAK muncul di tabel — cek manual.", "kirim");
 
 		// 4. Hitung -- validasi ulang dari halamannya sendiri.
 		await opts.onStage?.("hitung", period);
@@ -405,15 +410,19 @@ export async function runAutoInput(opts: {
 		const hitungPath = `admin_hitungtimte.php?psr=${code}`;
 		const hp = parseHitungPage(await adminReq(f, sess, hitungPath));
 		if (!hp) throw new Stop("Angka sudah MASUK, tapi halaman Hitung tidak dikenali — tekan Hitung manual.", "hitung");
+		// Field tersembunyi form Hitung (per / nomor / sar pada request asli) harus cocok juga.
+		const hv = (n: string) => hp.form.inputs.find((i) => i.name === n)?.value;
 		const bad =
 			hp.period !== page.period ? `periode ${hp.period} ≠ ${page.period}`
 			: squash(hp.market) !== squash(plan.market) ? `pasaran ${hp.market} ≠ ${plan.market}`
 			: hp.code !== code ? `kode ${hp.code} ≠ ${code}`
-			: used.some((n, i) => hp.numbers[i] !== n) ? `angka ${hp.numbers.join("/")} ≠ ${used.join("/")}`
+			: !hp.numbers.length || hp.numbers.some((n, i) => i < used.length && n !== used[i]) ? `angka ${hp.numbers.join("/") || "-"} ≠ ${used.join("/")}`
+			: hv("per") !== undefined && hv("per") !== period ? `field per ${hv("per")} ≠ ${period}`
+			: hv("nomor") !== undefined && hv("nomor") !== used[0] ? `field nomor ${hv("nomor")} ≠ ${used[0]}`
+			: hv("sar") !== undefined && hv("sar") !== code ? `field sar ${hv("sar")} ≠ ${code}`
 			: "";
 		if (bad) throw new Stop(`Angka sudah MASUK, tapi halaman Hitung tidak cocok (${bad}) — Hitung TIDAK dijalankan, cek manual.`, "hitung");
-		const hAction = hp.form.action ? new URL(hp.form.action, new URL(hitungPath, sess.baseUrl)) : new URL(hitungPath, sess.baseUrl);
-		await adminReq(f, sess, hAction.pathname.replace(/^\//, "") + hAction.search, {
+		await adminReq(f, sess, "admin_hitungtimte.php", {
 			method: "POST",
 			body: buildPayload(hp.form, {}, hp.button),
 			referer: new URL(hitungPath, sess.baseUrl).toString(),

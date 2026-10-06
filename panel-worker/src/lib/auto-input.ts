@@ -151,8 +151,41 @@ export interface AdminSession {
 export function parsePhpSessId(raw: string): string {
 	const s = String(raw ?? "").trim();
 	const m = s.match(/PHPSESSID\s*=\s*([A-Za-z0-9,-]{10,})/i);
-	const v = m ? m[1] : /^[A-Za-z0-9,-]{10,}$/.test(s) ? s : "";
-	return v;
+	return m ? m[1] : /^[A-Za-z0-9,-]{10,}$/.test(s) ? s : "";
+}
+
+/**
+ * Cookie yang dikirim browser ke admin BUKAN cuma PHPSESSID (juga lastuser,
+ * <agen>=<WEBSITE>.COM, <agen>koderedis -- terlihat di request asli). Operator boleh
+ * menempel SATU token PHPSESSID, atau seluruh isi header Cookie; yang disimpan adalah
+ * "nama=nilai; nama=nilai" bersih. Karakter selain yang wajar ditolak (anti header injection).
+ */
+export function parseCookieInput(raw: string): string {
+	const s = String(raw ?? "").trim().replace(/^cookie\s*:\s*/i, "");
+	if (!s) return "";
+	const bare = parsePhpSessId(s);
+	if (bare && !s.includes(";") && !/PHPSESSID/i.test(s)) return "PHPSESSID=" + bare;
+	const pairs: string[] = [];
+	for (const part of s.split(";")) {
+		const t = part.trim();
+		if (!t) continue;
+		if (!/^[A-Za-z0-9_.-]{1,64}=[A-Za-z0-9_.,%+\-]{0,200}$/.test(t)) return "";
+		pairs.push(t);
+	}
+	const sid = pairs.find((p) => /^PHPSESSID=/i.test(p));
+	if (!sid || !parsePhpSessId(sid)) return "";
+	return pairs.join("; ");
+}
+
+/** Nilai header Cookie dari yang tersimpan (data lama hanya berisi token polos). */
+export function cookieHeader(stored: string): string {
+	return stored.includes("=") ? stored : "PHPSESSID=" + stored;
+}
+
+/** 4 karakter terakhir PHPSESSID untuk ditampilkan (tidak pernah nilai penuh). */
+export function sessionHint(stored: string): string {
+	const sid = parsePhpSessId(cookieHeader(stored));
+	return sid ? "••••" + sid.slice(-4) : "";
 }
 
 /** Hanya tiga admin ini yang boleh disentuh (sekaligus mencegah panel dipakai menembak host lain). */
@@ -225,8 +258,8 @@ export async function saveSession(env: Env, username: string, website: string, b
 	const old = await getSession(env, username, w);
 	let sid = old?.phpsessid ?? "";
 	if (String(phpsessidRaw ?? "").trim()) {
-		sid = parsePhpSessId(phpsessidRaw);
-		if (!sid) throw new Error(`PHPSESSID ${w} tidak valid — tempel persis seperti "PHPSESSID=xxxx" dari Chrome.`);
+		sid = parseCookieInput(phpsessidRaw);
+		if (!sid) throw new Error(`Cookie ${w} tidak valid — tempel "PHPSESSID=xxxx" (atau seluruh isi header Cookie) dari Chrome.`);
 	}
 	await getTurso(env)
 		.prepare(

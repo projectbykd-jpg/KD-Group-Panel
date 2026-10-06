@@ -4,7 +4,7 @@ const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: im
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
 import { autoInputAfterSend } from "../src/api/auto-input";
-import { adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
+import { parseCookieInput, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
 import { parseAngkaPage, parseHitungPage, runAutoInput, buildPayload, parseForms } from "../src/lib/auto-input-run";
 import { processText } from "../src/lib/parser";
 import { fakeD1, fakeEnv } from "./helpers/fake-env";
@@ -40,13 +40,14 @@ interface SiteOpts {
 	formPeriod?: number; // periode yang tampil di form (default: terakhir + 1)
 	lastDate?: string;
 	expired?: boolean;
+	hitungNomorField?: string; // nilai hidden field `nomor` di form Hitung (default: angka pertama)
 }
 function mockSite(o: SiteOpts = {}) {
 	const market = o.market ?? "FLORIDAEVE";
 	const code = "p21545";
 	const cols = o.prizeCols ?? 1;
 	const rows = [{ period: o.lastPeriod ?? 1629, date: o.lastDate ?? "05-10-2026 08:52:09", nums: ["7283", "1111", "2222"].slice(0, cols) }];
-	const st = { calc: false, posts: [] as { path: string; body: URLSearchParams }[], calcPosts: 0 };
+	const st = { calc: false, posts: [] as { path: string; search: string; body: URLSearchParams; cookie: string }[], calcPosts: 0 };
 	const nextPeriod = () => rows[0].period + 1;
 	const opt = (n: number, sel: number) => Array.from({ length: n }, (_, i) => `<option value="${i + 1}"${i + 1 === sel ? " selected" : ""}>${i + 1}</option>`).join("");
 	const angka = () => `<html><body><div>HUGOTOGEL.COM</div>
@@ -58,8 +59,8 @@ function mockSite(o: SiteOpts = {}) {
 <select name="tgl">${opt(31, o.formDay ?? 6)}</select><select name="bln">${opt(12, 10)}</select>
 <select name="thn"><option value="2025">2025</option><option value="2026" selected>2026</option></select>
 Periode <input type="text" name="periode" value="${o.formPeriod ?? nextPeriod()}">
-Nomor Keluar ${Array.from({ length: cols }, (_, i) => `<input type="text" name="${cols === 1 ? "angka" : "prize" + (i + 1)}" maxlength="4" value="${o.prefilled ? "1234" : ""}">`).join("")}
-<input type="hidden" name="tok" value="abc123">
+Nomor Keluar ${Array.from({ length: cols }, (_, i) => `<input type="text" name="${i === 0 ? "angka" : "angka" + (i + 1)}" maxlength="4" value="${o.prefilled ? "1234" : ""}">`).join("")}
+<input type="hidden" name="psr" value="${code}">
 <input name="cmdsend" type="button" onclick="return myFunction('${market}');" value="&nbsp;Kirim&nbsp;">
 <input type="submit" name="cmdhapus" value="Hapus"></form>
 <h3>Daftar  Nomor ${market}</h3><table><tr><th>No</th><th>Tanggal</th><th>Hari</th><th>Periode</th>${Array.from({ length: cols }, (_, i) => `<th>Nomor Keluar ${i + 1}</th>`).join("")}<th>Hitung</th></tr>
@@ -67,8 +68,8 @@ ${rows.map((r, i) => `<tr><td>${i + 1}</td><td><input value="${r.date}"><input t
 </table></body></html>`;
 	const hitung = () =>
 		`<html><body><select onchange="gantipasar(this.value)"><option value="${market},${code}">${market}</option></select>
-(vldaa) TOTO Periode : ${rows[0].period} - ${market} - (${code}) Terdapat Invoice Pemenang : 0 Nomor Keluar : ${o.hitungShows ?? rows[0].nums.join(" ")}
-${st.calc ? "" : `<form method="post" action="admin_hitungtimte.php?psr=${code}"><input type="hidden" name="per" value="${rows[0].period}"><input type="submit" name="cmdhitung" id="xxx" onclick="hilang()" value="Hitung Periode : ${rows[0].period} - ${market}"></form>`}</body></html>`;
+(vldaa) TOTO Periode : ${rows[0].period} - ${market} - (${code}) Terdapat Invoice Pemenang : 0 Nomor Keluar : ${o.hitungShows ?? rows[0].nums[0]}
+${st.calc ? "" : `<form method="post" action="admin_hitungtimte.php?psr=${code}"><input type="hidden" name="per" value="${rows[0].period}"><input type="hidden" name="nomor" value="${o.hitungNomorField ?? rows[0].nums[0]}"><input type="hidden" name="sar" value="${code}"><input type="submit" name="cmdhitung" id="xxx" onclick="hilang()" value="Hitung Periode : ${rows[0].period} - ${market}"></form>`}</body></html>`;
 	const fetchFn = async (url: string, init?: RequestInit) => {
 		const path = new URL(url).pathname.replace(/^\//, "");
 		const html = (b: string, status = 200) => new Response(b, { status });
@@ -79,9 +80,9 @@ ${st.calc ? "" : `<form method="post" action="admin_hitungtimte.php?psr=${code}"
 		if (path === "index.php") return html(angka());
 		if (path === "admin_angka13.php") {
 			if (isPost) {
-				st.posts.push({ path, body });
+				st.posts.push({ path, search: new URL(url).search, body, cookie: String((init!.headers as Record<string, string>).Cookie) });
 				if (!o.ignoreKirimPost && body.get("periode") === String(nextPeriod())) {
-					const nums = Array.from({ length: cols }, (_, i) => body.get(cols === 1 ? "angka" : "prize" + (i + 1)) ?? "");
+					const nums = Array.from({ length: cols }, (_, i) => body.get(i === 0 ? "angka" : "angka" + (i + 1)) ?? "");
 					rows.unshift({ period: nextPeriod(), date: "06-10-2026 21:00:00", nums });
 				}
 			}
@@ -89,7 +90,7 @@ ${st.calc ? "" : `<form method="post" action="admin_hitungtimte.php?psr=${code}"
 		}
 		if (path === "admin_hitungtimte.php") {
 			if (isPost) {
-				st.posts.push({ path, body });
+				st.posts.push({ path, search: new URL(url).search, body, cookie: String((init!.headers as Record<string, string>).Cookie) });
 				st.calcPosts++;
 				st.calc = true;
 				return new Response("", { status: 302, headers: { location: "admin_hitungtimte.php?psr=" + code } });
@@ -108,6 +109,13 @@ describe("pembantu murni", () => {
 		expect(parsePhpSessId(`a=1; PHPSESSID=${SID2}; x=2`)).toBe(SID2);
 		expect(parsePhpSessId(SID1)).toBe(SID1);
 		expect(parsePhpSessId("rusak")).toBe("");
+		expect(parseCookieInput(SID1)).toBe("PHPSESSID=" + SID1);
+		expect(parseCookieInput(`Cookie: PHPSESSID=${SID1}; lastuser=fakeagent; fakeagent=HUGOTOGEL.COM; fakeagentkoderedis=952`)).toBe(
+			`PHPSESSID=${SID1}; lastuser=fakeagent; fakeagent=HUGOTOGEL.COM; fakeagentkoderedis=952`,
+		);
+		expect(parseCookieInput("lastuser=a; b=c")).toBe(""); // tanpa PHPSESSID
+		expect(parseCookieInput(`PHPSESSID=${SID1}; x=1\r\nHost: evil`)).toBe(""); // header injection
+		expect(parseCookieInput(`PHPSESSID=${SID1}; x=<script>`)).toBe("");
 		expect(parsePhpSessId("PHPSESSID=<script>")).toBe("");
 	});
 	it("parseResultDate: Inggris & Indonesia, tanggal ngawur ditolak", () => {
@@ -150,7 +158,7 @@ describe("parseAngkaPage", () => {
 		const t = RAW.replace("Prize 1 : 9808", "Prize 1 : 9808\nPrize 2 : 1234\nPrize 3 : 5678");
 		const p = planAutoInput(t, processText(t));
 		if (!p.ok) throw new Error(p.reason);
-		expect(parseAngkaPage(await html({ prizeCols: 3 }), p).prizeFields).toEqual(["prize1", "prize2", "prize3"]);
+		expect(parseAngkaPage(await html({ prizeCols: 3 }), p).prizeFields).toEqual(["angka", "angka2", "angka3"]);
 	});
 });
 
@@ -160,7 +168,7 @@ describe("runAutoInput", () => {
 		const r = await runAutoInput({ session: sess, plan: plan(), dryRun: true, fetchFn: m.fetchFn });
 		expect(r.ok).toBe(true);
 		expect(m.st.posts).toHaveLength(0);
-		expect(r.preview).toMatchObject({ code: "p21545", fields: { angka: "9808", periode: "1630", tok: "abc123" } });
+		expect(r.preview).toMatchObject({ code: "p21545", post: "admin_angka13.php", fields: { angka: "9808", periode: "1630", psr: "p21545" } });
 	});
 	it("alur penuh: Kirim -> verifikasi -> Hitung; payload membawa field tersembunyi & TIDAK membawa Hapus", async () => {
 		const m = mockSite();
@@ -168,17 +176,42 @@ describe("runAutoInput", () => {
 		const r = await runAutoInput({ session: sess, plan: plan(), fetchFn: m.fetchFn, onStage: async (s) => void stages.push(s) });
 		expect(r).toMatchObject({ ok: true, stage: "selesai", period: "1630" });
 		expect(stages).toEqual(["kirim", "hitung"]);
-		expect(Object.fromEntries(m.st.posts[0].body)).toEqual({ tgl: "6", bln: "10", thn: "2026", periode: "1630", angka: "9808", tok: "abc123" });
+		// Persis request asli browser: POST tanpa query, field form + psr, tanpa nilai tombol Kirim.
+		expect(m.st.posts[0]).toMatchObject({ path: "admin_angka13.php", search: "" });
+		expect(Object.fromEntries(m.st.posts[0].body)).toEqual({ tgl: "6", bln: "10", thn: "2026", periode: "1630", angka: "9808", psr: "p21545" });
+		expect(m.st.posts[1]).toMatchObject({ path: "admin_hitungtimte.php", search: "" });
+		expect(Object.fromEntries(m.st.posts[1].body)).toEqual({ per: "1630", nomor: "9808", sar: "p21545", cmdhitung: "Hitung Periode : 1630 - FLORIDAEVE" });
 		expect(m.st.calcPosts).toBe(1);
-		expect(m.st.posts[1].body.get("cmdhitung")).toContain("Hitung Periode");
 	});
-	it("Kirim tak berefek -> coba sekali lagi dgn tombol, lalu berhenti di tahap kirim, Hitung TIDAK dijalankan", async () => {
+	it("Kirim tak berefek -> berhenti di tahap kirim TANPA kirim ulang, Hitung TIDAK dijalankan", async () => {
 		const m = mockSite({ ignoreKirimPost: true });
 		const r = await runAutoInput({ session: sess, plan: plan(), fetchFn: m.fetchFn });
 		expect(r).toMatchObject({ ok: false, stage: "kirim" });
-		expect(m.st.posts).toHaveLength(2);
-		expect(m.st.posts[1].body.get("cmdsend")).toBeTruthy();
+		expect(m.st.posts).toHaveLength(1);
 		expect(m.st.calcPosts).toBe(0);
+	});
+	it("3 prize (BERLIN): angka/angka2/angka3; Hitung cukup menunjukkan angka pertama (field nomor)", async () => {
+		const t = RAW.replace("Prize 1 : 9808", "Prize 1 : 4480\nPrize 2 : 2896\nPrize 3 : 6109");
+		const p = planAutoInput(t, processText(t));
+		if (!p.ok) throw new Error(p.reason);
+		const m = mockSite({ prizeCols: 3 });
+		const r = await runAutoInput({ session: sess, plan: p, fetchFn: m.fetchFn });
+		expect(r).toMatchObject({ ok: true, stage: "selesai" });
+		expect(Object.fromEntries(m.st.posts[0].body)).toMatchObject({ angka: "4480", angka2: "2896", angka3: "6109", periode: "1630", psr: "p21545" });
+		expect(m.st.posts[1].body.get("nomor")).toBe("4480");
+	});
+	it("field tersembunyi form Hitung tidak cocok (nomor) -> Hitung TIDAK dijalankan", async () => {
+		const m = mockSite({ hitungNomorField: "1111" });
+		const r = await runAutoInput({ session: sess, plan: plan(), fetchFn: m.fetchFn });
+		expect(r).toMatchObject({ ok: false, stage: "hitung" });
+		expect(r.detail).toMatch(/field nomor/);
+		expect(m.st.calcPosts).toBe(0);
+	});
+	it("seluruh cookie tersimpan dikirim apa adanya (bukan cuma PHPSESSID)", async () => {
+		const m = mockSite();
+		const full = `PHPSESSID=${SID1}; lastuser=fakeagent; fakeagent=HUGOTOGEL.COM; fakeagentkoderedis=123`;
+		await runAutoInput({ session: { ...sess, phpsessid: full }, plan: plan(), fetchFn: m.fetchFn });
+		expect(m.st.posts[0].cookie).toBe(full);
 	});
 	it("halaman Hitung menampilkan angka lain -> Hitung TIDAK dijalankan", async () => {
 		const m = mockSite({ hitungShows: "1111" });
@@ -312,8 +345,8 @@ describe("autoInputAfterSend (DB)", () => {
 		await saveSession(env, "Op", "HUGOTOGEL", "https://ag.suksesbogil.com/index.php", "");
 		const s = await getSessions(env, "Op");
 		expect(s.map((x) => [x.website, x.baseUrl, x.phpsessid])).toEqual([
-			["FOLATOTO", "https://agwl12.suksesbogil.com/", SID2],
-			["HUGOTOGEL", "https://ag.suksesbogil.com/", SID1],
+			["FOLATOTO", "https://agwl12.suksesbogil.com/", "PHPSESSID=" + SID2],
+			["HUGOTOGEL", "https://ag.suksesbogil.com/", "PHPSESSID=" + SID1],
 		]);
 		await expect(saveSession(env, "Op", "X", "http://ag.suksesbogil.com", SID2)).rejects.toThrow(/https/);
 		await expect(saveSession(env, "Op", "X", "https://agwl5.suksesbogil.com", "bad")).rejects.toThrow(/PHPSESSID/);

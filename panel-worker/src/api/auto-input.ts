@@ -17,6 +17,7 @@ import {
 	listJobs,
 	planAutoInput,
 	saveSession,
+	sessionHint,
 	setEnabled,
 	setStage,
 	startJob,
@@ -51,7 +52,7 @@ export async function autoInputGetState(env: Env, token: string) {
 				website: w,
 				baseUrl: x?.baseUrl || defaultAdminBase(w),
 				hasSession: !!x?.phpsessid,
-				hint: x?.phpsessid ? "••••" + x.phpsessid.slice(-4) : "",
+				hint: x?.phpsessid ? sessionHint(x.phpsessid) : "",
 			};
 		}),
 		jobs,
