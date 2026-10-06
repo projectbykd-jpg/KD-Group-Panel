@@ -14,6 +14,7 @@ export const MENU_ITEMS = [
 	{ key: "result", label: "Result", group: "Utama" },
 	{ key: "prediction", label: "Prediksi", group: "Utama" },
 	{ key: "invest", label: "AutoCheck Invest", group: "Utama" },
+	{ key: "auto-input", label: "Auto Prediksi", group: "Utama" },
 	{ key: "lap-admin", label: "Lap Admin", group: "Laporan Harian" },
 	{ key: "lap-motion", label: "Lap Motion", group: "Laporan Harian" },
 	{ key: "pga-pending", label: "PGA Pending", group: "Laporan Harian" },

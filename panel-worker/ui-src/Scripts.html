@@ -900,12 +900,13 @@
     const LAP_PAGES = ['lap-admin','lap-motion','lap-mozart','lap-setting'];
     const BOT_PAGES = ['bot-dashboard','bot-sources','bot-history','bot-fbdirect','bot-config'];
     const LIVECHAT_PAGES = ['livechat-sessions','livechat-templates'];
-    const NAV_KEYS = ['home','result','prediction','activity','admin','invest','pga-pending'].concat(LAP_PAGES).concat(BOT_PAGES).concat(LIVECHAT_PAGES);
+    const NAV_KEYS = ['home','result','prediction','activity','admin','invest','auto-input','pga-pending'].concat(LAP_PAGES).concat(BOT_PAGES).concat(LIVECHAT_PAGES);
     const HEADER_KICKER = {
     home: 'STATUS SESI',
     result: 'STATUS SESI',
     prediction: 'STATUS SESI',
     invest: 'STATUS SESI',
+    'auto-input': 'STATUS SESI',
     'pga-pending': 'STATUS SESI',
     activity: 'STATUS SESI',
     admin: 'STATUS SESI',
@@ -1085,12 +1086,12 @@
       }
       const pages = {
         home:'main-panel', result:'result-page', prediction:'prediction-page', activity:'activity-page',
-        admin:'admin-page', invest:'invest-page', 'pga-pending':'pga-pending-page',
+        admin:'admin-page', invest:'invest-page', 'auto-input':'auto-input-page', 'pga-pending':'pga-pending-page',
         'lap-admin':'lap-page', 'lap-motion':'lap-page', 'lap-mozart':'lap-page', 'lap-setting':'lap-page',
         'bot-dashboard':'bot-page', 'bot-sources':'bot-page', 'bot-history':'bot-page', 'bot-fbdirect':'bot-page', 'bot-config':'bot-page',
         'livechat-sessions':'livechat-page', 'livechat-templates':'livechat-page'
       };
-      ['main-panel','result-page','prediction-page','activity-page','admin-page','invest-page','pga-pending-page','bot-page','lap-page','livechat-page'].forEach(id => {
+      ['main-panel','result-page','prediction-page','activity-page','admin-page','invest-page','auto-input-page','pga-pending-page','bot-page','lap-page','livechat-page'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = 'none';
       });
@@ -1111,7 +1112,7 @@
         const direct = el.dataset.mobilePage;
         const group = el.dataset.mobileGroup;
         const inGroup =
-          (group === 'utama' && ['result','prediction','invest'].includes(page)) ||
+          (group === 'utama' && ['result','prediction','invest','auto-input'].includes(page)) ||
           (group === 'lapor' && ['lap-admin','lap-motion','lap-mozart','lap-setting','pga-pending'].includes(page));
         el.classList.toggle('nav-active', direct === page || inGroup);
       });
@@ -1146,6 +1147,8 @@
       }
 
       currentPage = page;
+
+      if (page === 'auto-input') loadAutoInputPage();
 
       if (page === 'prediction') {
         if (!pageFetchedAt.prediction) {
@@ -3670,6 +3673,7 @@
           if (result.success || result.partial) flashSendSuccess(btn);
           pendingPreview = null;
           showSendResult(result);
+          autoInputNotify(result.autoInput);
         })
         .withFailureHandler(err => {
           showActionPopup(
@@ -3680,6 +3684,157 @@
           );
         })
         .smartAutoSendFast(txt, currentSessionToken);
+    }
+
+    // ===== Auto Prediksi: input Nomor Keluar + Hitung otomatis di admin website =====
+    let autoInputState = null;
+    let autoInputTimer = null;
+
+    function autoInputNotify(a) {
+      if (!a) return;
+      if (a.skippedReason) { setTimeout(() => toast('Auto Prediksi dilewati: ' + a.skippedReason), 1800); return; }
+      const rs = Array.isArray(a.results) ? a.results : [];
+      const bad = rs.filter(r => r.manual);
+      if (bad.length) {
+        showActionPopup('ERROR', 'Auto Prediksi: ' + bad.length + ' website perlu dicek MANUAL',
+          bad.map(r => r.website + ': ' + r.detail).join('\n'), 'fa-triangle-exclamation');
+        return;
+      }
+      const ok = rs.filter(r => r.status === 'BERHASIL').map(r => r.website);
+      if (ok.length) setTimeout(() => toast('Auto Prediksi: dihitung di ' + ok.join(', ')), 1800);
+    }
+
+    function loadAutoInputPage(silent) {
+      google.script.run
+        .withSuccessHandler(res => {
+          if (apiFailed(res)) { if (!silent) toast(apiMessage(res)); return; }
+          autoInputState = res;
+          renderAutoInputPage();
+        })
+        .withFailureHandler(err => { if (!silent) toast((err && err.message) || 'Gagal memuat Auto Prediksi'); })
+        .autoInputGetState(currentSessionToken);
+      clearInterval(autoInputTimer);
+      autoInputTimer = setInterval(() => {
+        if (currentPage !== 'auto-input') { clearInterval(autoInputTimer); return; }
+        // Jangan menimpa kolom yang sedang diketik.
+        const ae = document.activeElement;
+        if (ae && /^(INPUT|SELECT)$/.test(ae.tagName) && document.getElementById('auto-input-page').contains(ae)) return;
+        loadAutoInputPage(true);
+      }, 6000);
+    }
+
+    function renderAutoInputPage() {
+      const host = document.getElementById('auto-input-page');
+      const st = autoInputState;
+      if (!host || !st) return;
+      const esc = escapeHtml;
+      const stColor = { DONE: 'text-emerald-400', FAILED: 'text-rose-400', RUNNING: 'text-amber-300', SKIPPED: 'text-slate-400' };
+      const stLabel = { DONE: 'SELESAI', FAILED: 'GAGAL', RUNNING: 'BERJALAN', SKIPPED: 'DILEWATI' };
+      const rows = (st.websites || []).map((w, i) => `
+        <div class="glass-inner rounded-2xl p-3.5 flex flex-col gap-2 border border-white/5">
+          <div class="flex items-center justify-between gap-2">
+            <b class="text-sm text-cyan-300">${esc(w.website)}</b>
+            <span class="text-[10px] font-bold ${w.hasSession ? 'text-emerald-400' : 'text-slate-500'}">${w.hasSession ? 'TERSIMPAN ' + esc(w.hint) : 'BELUM ADA SESI'}</span>
+          </div>
+          <input id="aiUrl${i}" type="text" autocomplete="off" value="${esc(w.baseUrl)}" placeholder="URL admin, mis. https://ag.suksesbogil.com/" class="glass-inner border border-white/10 rounded-xl p-2.5 text-xs font-mono text-white placeholder-slate-600 focus:outline-none">
+          <input id="aiSid${i}" type="password" autocomplete="off" placeholder="${w.hasSession ? 'Kosongkan = pakai yang tersimpan. Tempel baru untuk mengganti.' : 'Tempel PHPSESSID=xxxx dari Chrome'}" class="glass-inner border border-white/10 rounded-xl p-2.5 text-xs font-mono text-white placeholder-slate-600 focus:outline-none">
+          <div class="flex flex-wrap gap-2">
+            <button onclick="autoInputSaveSession(${i})" class="bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-extrabold px-4 py-2 rounded-xl text-xs"><i class="fa-solid fa-floppy-disk mr-1"></i>Simpan</button>
+            <button onclick="autoInputTest(${i})" class="glass-inner px-4 py-2 rounded-xl text-xs font-bold" ${w.hasSession ? '' : 'disabled style="opacity:.4"'}><i class="fa-solid fa-vial mr-1"></i>Uji (tanpa kirim)</button>
+            <button onclick="autoInputDeleteSession(${i})" class="glass-inner px-4 py-2 rounded-xl text-xs font-bold text-rose-400" ${w.hasSession ? '' : 'disabled style="opacity:.4"'}><i class="fa-solid fa-trash mr-1"></i>Hapus</button>
+          </div>
+        </div>`).join('') || '<div class="text-xs text-slate-400">Akun ini belum punya website.</div>';
+      const jobs = (st.jobs || []).map(j => {
+        const early = j.stage === '' || j.stage === 'cek';
+        const manual = j.status === 'FAILED' && !early;
+        const again = (j.status === 'FAILED' || j.status === 'SKIPPED') && early
+          ? `<button onclick="autoInputClearJob(${Number(j.id)})" class="retry-mini" title="Hapus catatan supaya result ini bisa dicoba lagi">COBA LAGI</button>` : '';
+        return `<tr class="border-t border-white/5 align-top">
+          <td class="p-2 text-[10px] text-slate-400 whitespace-nowrap">${esc(j.createdAt)}</td>
+          <td class="p-2 text-xs font-bold text-cyan-300">${esc(j.website)}</td>
+          <td class="p-2 text-xs">${esc(j.market)}<div class="font-mono text-amber-300">${esc((j.prizes || []).join(' / '))}</div></td>
+          <td class="p-2 text-[10px] font-extrabold ${stColor[j.status] || ''}">${stLabel[j.status] || esc(j.status)}${manual ? '<div class="text-rose-300">CEK MANUAL</div>' : ''}</td>
+          <td class="p-2 text-[11px] text-slate-300">${esc(j.detail)} ${again}</td></tr>`;
+      }).join('') || '<tr><td colspan="5" class="p-4 text-center text-xs text-slate-500">Belum ada.</td></tr>';
+      host.innerHTML = `
+        <div class="glass-card rounded-3xl p-5 sm:p-6 flex flex-col gap-5">
+          <div class="page-head tone-amber">
+            <div class="page-head-icon"><i class="fa-solid fa-robot"></i></div>
+            <div class="page-head-text">
+              <div class="page-eyebrow">Utama</div>
+              <h2 class="page-title">Auto Prediksi</h2>
+              <p class="page-sub">Sesudah <b>KIRIM SEMUA SISTEM</b>, angka result otomatis diinput ke menu <b>Nomor Keluar</b> admin website lalu di-<b>Hitung</b> — sesuai pasaran &amp; jumlah prize-nya.</p>
+            </div>
+          </div>
+          <div class="glass-inner rounded-2xl p-4 flex items-center justify-between gap-3 border ${st.enabled ? 'border-emerald-500/30' : 'border-white/5'}">
+            <div>
+              <div class="text-sm font-extrabold ${st.enabled ? 'text-emerald-400' : 'text-slate-300'}">${st.enabled ? 'AKTIF' : 'NONAKTIF'}</div>
+              <div class="text-[11px] text-slate-400">${st.enabled ? 'Setiap KIRIM SEMUA SISTEM langsung menghitung di website yang sesinya tersimpan.' : 'Tidak ada yang diinput otomatis. Input manual seperti biasa.'}</div>
+            </div>
+            <button onclick="autoInputToggle(${st.enabled ? 'false' : 'true'})" class="${st.enabled ? 'glass-inner text-rose-300' : 'bg-gradient-to-r from-emerald-400 to-cyan-500 text-slate-950'} font-extrabold px-5 py-2.5 rounded-xl text-xs">${st.enabled ? 'MATIKAN' : 'AKTIFKAN'}</button>
+          </div>
+          <div class="text-[11px] text-slate-400 leading-relaxed">
+            Hanya website yang akunmu boleh akses yang muncul di bawah. Ambil <b>PHPSESSID</b> dari Chrome yang sedang login admin (F12 → Application → Cookies), tempel, <b>Simpan</b>, lalu klik <b>Uji</b> sebelum mengaktifkan. Sesi bisa habis kapan saja — kalau habis, hasilnya <b>gagal sebelum menyentuh admin</b> dan kamu input manual. Nilai PHPSESSID tidak pernah ditampilkan ulang.
+          </div>
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">${rows}</div>
+          <div class="overflow-x-auto glass-inner rounded-2xl border border-white/5">
+            <table class="w-full text-left"><thead><tr class="text-[10px] text-slate-400 uppercase tracking-wider"><th class="p-2">Waktu</th><th class="p-2">Website</th><th class="p-2">Result</th><th class="p-2">Status</th><th class="p-2">Keterangan</th></tr></thead><tbody>${jobs}</tbody></table>
+          </div>
+        </div>`;
+    }
+
+    function autoInputToggle(on) {
+      google.script.run
+        .withSuccessHandler(res => { if (apiFailed(res)) { toast(apiMessage(res)); return; } toast(on ? 'Auto Prediksi AKTIF' : 'Auto Prediksi dimatikan'); loadAutoInputPage(true); })
+        .withFailureHandler(err => toast((err && err.message) || 'Gagal'))
+        .autoInputSetEnabled(currentSessionToken, !!on);
+    }
+
+    function autoInputSaveSession(i) {
+      const w = autoInputState && autoInputState.websites[i];
+      if (!w) return;
+      google.script.run
+        .withSuccessHandler(res => { if (apiFailed(res)) { toast(apiMessage(res)); return; } toast('Sesi ' + w.website + ' disimpan'); loadAutoInputPage(true); })
+        .withFailureHandler(err => toast((err && err.message) || 'Gagal menyimpan'))
+        .autoInputSaveSession(currentSessionToken, {
+          website: w.website,
+          baseUrl: document.getElementById('aiUrl' + i).value,
+          phpsessid: document.getElementById('aiSid' + i).value
+        });
+    }
+
+    function autoInputDeleteSession(i) {
+      const w = autoInputState && autoInputState.websites[i];
+      if (!w) return;
+      confirmCenter({ type: 'danger', title: 'Hapus sesi ' + w.website + '?', message: 'PHPSESSID website ini dihapus dari panel. Auto Prediksi melewati website ini sampai disimpan lagi.', confirmText: 'HAPUS', showCancel: true }).then(ok => {
+        if (!ok) return;
+        google.script.run
+          .withSuccessHandler(res => { if (apiFailed(res)) { toast(apiMessage(res)); return; } toast('Sesi dihapus'); loadAutoInputPage(true); })
+          .withFailureHandler(err => toast((err && err.message) || 'Gagal'))
+          .autoInputDeleteSession(currentSessionToken, w.website);
+      });
+    }
+
+    function autoInputClearJob(id) {
+      google.script.run
+        .withSuccessHandler(res => { if (apiFailed(res)) { toast(apiMessage(res)); return; } toast('Siap dicoba lagi — klik KIRIM SEMUA SISTEM lagi'); loadAutoInputPage(true); })
+        .withFailureHandler(err => toast((err && err.message) || 'Gagal'))
+        .autoInputClearJob(currentSessionToken, id);
+    }
+
+    function autoInputTest(i) {
+      const w = autoInputState && autoInputState.websites[i];
+      if (!w) return;
+      const market = (prompt('Uji pasaran apa di ' + w.website + '? (mis. OREGON06)\nHanya membaca & memvalidasi, TIDAK mengirim apa pun.', '') || '').trim();
+      if (!market) return;
+      showActionPopup('LOADING', 'Menguji ' + w.website, 'Membaca halaman Nomor Keluar ' + market + '...', 'fa-vial');
+      google.script.run
+        .withSuccessHandler(res => {
+          const ok = !!(res && res.success);
+          showActionPopup(ok ? 'DONE' : 'ERROR', ok ? 'Uji lolos' : 'Uji gagal', apiMessage(res), ok ? 'fa-check' : 'fa-triangle-exclamation');
+        })
+        .withFailureHandler(err => showActionPopup('ERROR', 'Uji gagal', (err && err.message) || 'Gagal', 'fa-triangle-exclamation'))
+        .autoInputTest(currentSessionToken, w.website, market);
     }
 
     function showSendResult(result) {
@@ -3966,6 +4121,7 @@
       { key: 'result', label: 'Result', group: 'Utama' },
       { key: 'prediction', label: 'Prediksi', group: 'Utama' },
       { key: 'invest', label: 'AutoCheck Invest', group: 'Utama' },
+      { key: 'auto-input', label: 'Auto Prediksi', group: 'Utama' },
       { key: 'lap-admin', label: 'Lap Admin', group: 'Laporan Harian' },
       { key: 'lap-motion', label: 'Lap Motion', group: 'Laporan Harian' },
       { key: 'pga-pending', label: 'PGA Pending', group: 'Laporan Harian' },
@@ -4001,7 +4157,7 @@
         setMenuVisible(document.getElementById('nav-' + key), menuAllowed(key));
       });
       // Grup sidebar disembunyikan kalau semua isinya tidak boleh.
-      [['utama', ['result', 'prediction', 'invest']],
+      [['utama', ['result', 'prediction', 'invest', 'auto-input']],
        ['lapor', ['lap-admin', 'lap-motion', 'pga-pending', 'lap-mozart', 'lap-setting']],
        ['livechat', LIVECHAT_PAGES]].forEach(([group, keys]) => {
         const any = keys.some(menuAllowed);
