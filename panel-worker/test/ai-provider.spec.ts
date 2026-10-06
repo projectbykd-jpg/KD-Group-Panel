@@ -9,6 +9,7 @@ import {
 	aiLoadProviders,
 	aiNextReadyInMs,
 	aiResetCooldowns,
+	AiTimeoutError,
 	AiUnavailableError,
 	cooldownMsFor,
 	legacyProviders,
@@ -372,28 +373,122 @@ describe("provider lambat / batas output", () => {
 
 	it("server diam -> berhenti menunggu & pindah ke provider berikutnya dgn pesan jelas", async () => {
 		const { networkErrorText } = await import("../src/lib/ai-provider");
-		const abort = Object.assign(new Error("This operation was aborted"), { name: "AbortError" });
-		expect(networkErrorText(abort, 150000)).toMatch(/tidak membalas dalam 150 detik/);
 		const ff = Object.assign(new Error("fetch failed"), { cause: { code: "ECONNRESET", message: "socket hang up" } });
-		expect(networkErrorText(ff, 150000)).toBe("fetch failed -- ECONNRESET -- socket hang up");
+		expect(networkErrorText(ff)).toBe("fetch failed -- ECONNRESET -- socket hang up");
 
 		await botCfgSet(env, { ai_providers: JSON.stringify([prov({ name: "Lambat" }), prov({ id: "b", name: "B", base_url: "https://b.test/v1" })]) });
-		vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
-			if (String(input).startsWith("https://a.test")) throw abort;
+		vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+			if (String(input).startsWith("https://a.test")) {
+				// Tidak pernah membalas sampai dibatalkan.
+				return new Promise<Response>((_res, rej) =>
+					init!.signal!.addEventListener("abort", () => rej(Object.assign(new Error("aborted"), { name: "AbortError" }))),
+				);
+			}
 			return new Response(JSON.stringify(chatOk("dari B").body), { status: 200 });
 		});
-		const r = await aiGenerate(env, await botCfg(env), { purpose: "t", messages: [{ role: "user", content: "x" }] }, (t) => t);
+		const r = await aiGenerate(env, await botCfg(env), { purpose: "t", messages: [{ role: "user", content: "x" }], firstByteMs: 30 }, (t) => t);
 		expect(r.call.providerName).toBe("B");
-		expect(usageRows()[0]).toMatchObject({ provider: "Lambat", ok: 0 });
+		const row = turso.current!.raw.prepare(`SELECT provider, ok, err, estimated, total_tokens FROM ai_usage ORDER BY id`).all()[0] as Record<string, unknown>;
+		expect(row).toMatchObject({ provider: "Lambat", ok: 0, estimated: 1 });
+		expect(String(row.err)).toMatch(/belum mulai membalas setelah 0 detik/);
+		expect(Number(row.total_tokens)).toBeGreaterThan(0); // prompt tetap ditagih provider -> ikut dihitung
+	});
+});
+
+/** Jawaban SSE: potongan dikirim satu per satu dgn jeda `gapMs`; `stallAfter` = berhenti total sesudah potongan ke-n. */
+function sseResponse(pieces: string[], opts: { gapMs?: number; usage?: object; stallAfter?: number; signal?: AbortSignal } = {}) {
+	const enc = new TextEncoder();
+	const body = new ReadableStream<Uint8Array>({
+		async start(ctl) {
+			opts.signal?.addEventListener("abort", () => ctl.error(Object.assign(new Error("aborted"), { name: "AbortError" })));
+			for (let i = 0; i < pieces.length; i++) {
+				if (opts.stallAfter != null && i >= opts.stallAfter) return; // diam selamanya
+				await new Promise((r) => setTimeout(r, opts.gapMs ?? 0));
+				// Satu event sengaja dipecah di tengah baris untuk menguji penyambungan buffer.
+				const line = `data: ${JSON.stringify({ model: "deepseek-v4-flash", choices: [{ delta: { content: pieces[i] } }] })}\n\n`;
+				ctl.enqueue(enc.encode(line.slice(0, 10)));
+				ctl.enqueue(enc.encode(line.slice(10)));
+			}
+			if (opts.usage) ctl.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [], usage: opts.usage })}\n\n`));
+			ctl.enqueue(enc.encode("data: [DONE]\n\n"));
+			ctl.close();
+		},
+	});
+	return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+
+describe("jawaban streaming (provider lambat tapi tetap menulis)", () => {
+	const msgs = [{ role: "user", content: "tulis artikel" }];
+
+	it("total waktu > batas diam tetap diterima selama potongan terus datang; token dari server tercatat", async () => {
+		await botCfgSet(env, { ai_providers: JSON.stringify([prov({ name: "DattioAI" })]) });
+		const sent: any[] = [];
+		vi.stubGlobal("fetch", async (_i: RequestInfo | URL, init?: RequestInit) => {
+			sent.push(JSON.parse(String(init!.body)));
+			return sseResponse(["Para", "graf ", "satu."], { gapMs: 25, usage: { prompt_tokens: 9000, completion_tokens: 4000, total_tokens: 13000 }, signal: init!.signal! });
+		});
+		// Batas diam 40 ms, tapi total jawaban ~75 ms -> tidak boleh diputus.
+		const r = await aiGenerate(env, await botCfg(env), { purpose: "t", messages: msgs, firstByteMs: 200, idleMs: 40 }, (t) => t);
+		expect(r.value).toBe("Paragraf satu.");
+		expect(r.call).toMatchObject({ totalTokens: 13000, estimated: false, model: "deepseek-v4-flash" });
+		expect(sent[0]).toMatchObject({ stream: true, stream_options: { include_usage: true } });
+		expect(usageRows()).toEqual([{ provider: "DattioAI", total_tokens: 13000, ok: 1, purpose: "t" }]);
+	});
+
+	it("server berhenti di tengah jawaban -> diputus, potongan yang sudah diterima ikut dihitung", async () => {
+		await botCfgSet(env, { ai_providers: JSON.stringify([prov({ name: "DattioAI" })]) });
+		vi.stubGlobal("fetch", async (_i: RequestInfo | URL, init?: RequestInit) =>
+			sseResponse(["x".repeat(400), "y".repeat(400), "tidak pernah"], { stallAfter: 2, signal: init!.signal! }),
+		);
+		const err = await aiGenerate(env, await botCfg(env), { purpose: "t", messages: msgs, firstByteMs: 200, idleMs: 30 }, (t) => t).catch((e) => e);
+		expect(String(err.message)).toMatch(/berhenti mengirim jawaban selama 0 detik/);
+		const row = turso.current!.raw.prepare(`SELECT ok, estimated, completion_tokens FROM ai_usage`).get() as Record<string, number>;
+		expect(row).toMatchObject({ ok: 0, estimated: 1 });
+		expect(row.completion_tokens).toBeGreaterThanOrEqual(100); // >= 400 karakter / 4
+	});
+
+	it("provider menolak stream_options -> diulang tanpa itu (tetap stream)", async () => {
+		await botCfgSet(env, { ai_providers: JSON.stringify([prov()]) });
+		const sent: any[] = [];
+		vi.stubGlobal("fetch", async (_i: RequestInfo | URL, init?: RequestInit) => {
+			const b = JSON.parse(String(init!.body));
+			sent.push(b);
+			if (b.stream_options) return new Response(JSON.stringify({ error: { message: "Unrecognized request argument: stream_options" } }), { status: 400 });
+			return sseResponse(["ok"], { signal: init!.signal! });
+		});
+		const r = await aiGenerate(env, await botCfg(env), { purpose: "t", messages: msgs }, (t) => t);
+		expect(r.value).toBe("ok");
+		expect(r.call.estimated).toBe(true); // tanpa usage dari server -> perkiraan
+		expect(sent.map((b) => [!!b.stream, !!b.stream_options])).toEqual([[true, true], [true, false]]);
+	});
+
+	it("provider menolak stream sama sekali -> diulang tanpa stream", async () => {
+		await botCfgSet(env, { ai_providers: JSON.stringify([prov()]) });
+		const sent: any[] = [];
+		mockFetch((_u, body) => {
+			sent.push(body);
+			return body.stream ? { status: 400, body: { error: { message: "stream is not supported" } } } : chatOk("biasa");
+		});
+		const r = await aiGenerate(env, await botCfg(env), { purpose: "t", messages: msgs }, (t) => t);
+		expect(r.value).toBe("biasa");
+		expect(sent.map((b) => !!b.stream)).toEqual([true, false]);
+	});
+
+	it("error yang dikirim lewat stream dianggap gagal", async () => {
+		await botCfgSet(env, { ai_providers: JSON.stringify([prov()]) });
+		vi.stubGlobal("fetch", async () =>
+			new Response(new TextEncoder().encode(`data: {"error":{"message":"upstream overloaded"}}\n\ndata: [DONE]\n\n`), { status: 200, headers: { "content-type": "text/event-stream" } }),
+		);
+		await expect(aiGenerate(env, await botCfg(env), { purpose: "t", messages: msgs }, (t) => t)).rejects.toThrow(/upstream overloaded/);
 	});
 });
 
 describe("jeda provider yang bermasalah", () => {
 	const msgs = [{ role: "user", content: "x" }];
-	const abort = () => Object.assign(new Error("aborted"), { name: "AbortError" });
 
 	it("lama jeda per jenis error", () => {
-		expect(cooldownMsFor('Gagal menghubungi server: server tidak membalas dalam 90 detik (coba model yang lebih cepat, bukan "auto")')).toBe(30 * 60_000);
+		expect(cooldownMsFor("Gagal menghubungi server: server belum mulai membalas setelah 120 detik")).toBe(10 * 60_000);
+		expect(cooldownMsFor("Gagal menghubungi server: server berhenti mengirim jawaban selama 60 detik")).toBe(10 * 60_000);
 		expect(cooldownMsFor("Gagal menghubungi server: fetch failed -- ECONNRESET")).toBe(5 * 60_000);
 		expect(cooldownMsFor("HTTP 429 Rate limit reached for model `qwen`. Please try again in 7.5s.")).toBe(9_500);
 		expect(cooldownMsFor("HTTP 429 Rate limit reached ... tokens per day (TPD). Please try again in 1h2m3s.")).toBe(60 * 60_000);
@@ -411,7 +506,7 @@ describe("jeda provider yang bermasalah", () => {
 		const hosts: string[] = [];
 		vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
 			hosts.push(new URL(String(input)).host);
-			if (String(input).startsWith("https://a.test")) throw abort();
+			if (String(input).startsWith("https://a.test")) throw new AiTimeoutError("server belum mulai membalas setelah 120 detik", 0);
 			return new Response(JSON.stringify(chatOk("dari B").body), { status: 200 });
 		});
 		await aiGenerate(env, await botCfg(env), { purpose: "t", messages: msgs }, (t) => t);
@@ -420,7 +515,7 @@ describe("jeda provider yang bermasalah", () => {
 
 		aiResetCooldowns(); // proses baru: memori kosong, jeda dibaca dari bot_kv
 		const cfg = await botCfg(env);
-		expect(aiCooldown(cfg, prov({ name: "Diam" }))?.reason).toMatch(/tidak membalas/);
+		expect(aiCooldown(cfg, prov({ name: "Diam" }))?.reason).toMatch(/belum mulai membalas/);
 		await aiGenerate(env, cfg, { purpose: "t", messages: msgs }, (t) => t);
 		expect(hosts).toEqual(["a.test", "b.test", "b.test", "b.test"]);
 	});

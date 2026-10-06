@@ -428,12 +428,34 @@ const isModelError = (status: number, msg: string) =>
 	status === 404 || /model[^.]{0,80}(not[ _]found|does not exist|decommission|not supported|not available|blocked|invalid|unknown)/i.test(msg);
 
 /**
- * Batas tunggu satu panggilan. Tanpa ini, server yang diam saja ditunggu
- * sampai 5 menit (batas bawaan Node) sebelum provider berikutnya dicoba --
- * terjadi pada DattioAI model "auto" (23:53 -> 23:58, "fetch failed").
- * 90 dtk cukup untuk artikel panjang di model normal (Groq ~10-20 dtk).
+ * Batas tunggu. Jawaban diminta sebagai STREAM (sepotong-sepotong), jadi yang
+ * dibatasi adalah server yang DIAM, bukan lamanya menulis: DattioAI
+ * deepseek-v4-flash butuh > 150 dtk untuk artikel panjang tapi terus
+ * mengirim. Dulu panggilan itu diputus padahal hampir selesai -- artikel
+ * gagal DAN token tetap ditagih provider (panel 35rb vs DattioAI 58rb).
  */
-export const AI_CALL_TIMEOUT_MS = 90_000;
+export const AI_FIRST_BYTE_MS = 180_000; // sampai server mulai membalas (provider tanpa stream: sampai jawaban lengkap)
+export const AI_IDLE_MS = 60_000; // diam di tengah jawaban
+export const AI_TOTAL_MS = 8 * 60_000; // batas keseluruhan (job GitHub maks 15 menit)
+
+export interface AiCallOpts {
+	messages: { role: string; content: string }[];
+	purpose: string;
+	temperature?: number;
+	maxTokens?: number;
+	json?: boolean;
+	/** Untuk tes; default AI_FIRST_BYTE_MS / AI_IDLE_MS / AI_TOTAL_MS. */
+	firstByteMs?: number;
+	idleMs?: number;
+	totalMs?: number;
+}
+
+/** Panggilan diputus karena waktu habis; `partialChars` = jawaban yang sempat diterima. */
+export class AiTimeoutError extends Error {
+	constructor(message: string, readonly partialChars: number) {
+		super(message);
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Jeda provider yang bermasalah
@@ -475,7 +497,7 @@ export function aiCooldown(cfg: Record<string, string>, p: AiProvider, now = Dat
 /** Berapa lama (ms) jeda dipasang untuk error ini; 0 = jangan dijeda. */
 export function cooldownMsFor(err: string): number {
 	const MIN = 60_000;
-	if (/tidak membalas/i.test(err)) return 30 * MIN; // model diam (DattioAI "auto")
+	if (/tidak membalas|belum mulai membalas|berhenti mengirim|belum selesai setelah/i.test(err)) return 10 * MIN; // server diam
 	if (/Gagal menghubungi server/i.test(err)) return 5 * MIN;
 	if (/^HTTP 40[13]\b/.test(err)) return 30 * MIN; // key salah / dicabut
 	if (/^HTTP 429\b/.test(err)) {
@@ -528,10 +550,7 @@ export async function aiNextReadyInMs(env: Env, cfg: Record<string, string>): Pr
 }
 
 /** Pesan jelas untuk error jaringan (Node cuma bilang "fetch failed"; detailnya di e.cause). */
-export function networkErrorText(e: unknown, timeoutMs: number): string {
-	if (e instanceof Error && (e.name === "AbortError" || e.name === "TimeoutError")) {
-		return `server tidak membalas dalam ${Math.round(timeoutMs / 1000)} detik (coba model yang lebih cepat, bukan "auto")`;
-	}
+export function networkErrorText(e: unknown): string {
 	const cause = e instanceof Error ? (e as Error & { cause?: unknown }).cause : undefined;
 	const c = cause && typeof cause === "object" ? (cause as { code?: string; message?: string }) : {};
 	const base = e instanceof Error ? e.message : String(e);
@@ -541,55 +560,149 @@ export function networkErrorText(e: unknown, timeoutMs: number): string {
 const isTooLarge = (status: number, body: any) =>
 	status === 413 || ((status === 429 || status === 400) && /too large|max_tokens|maximum context|context length|reduce the length/i.test(JSON.stringify(body?.error ?? body ?? "")));
 
+const parseJson = (raw: string): any => {
+	try {
+		return JSON.parse(raw);
+	} catch {
+		return { error: raw.slice(0, 300) };
+	}
+};
+
+/**
+ * Baca jawaban Server-Sent Events OpenAI ("data: {...}" per baris) jadi
+ * bentuk jawaban biasa { model, choices[0].message.content, usage }.
+ * `onChunk` dipanggil tiap ada data masuk (untuk menyetel ulang batas diam).
+ */
+export async function readChatStream(body: ReadableStream<Uint8Array>, onChunk: (chars: number) => void): Promise<any> {
+	const reader = body.getReader();
+	const dec = new TextDecoder();
+	let buf = "";
+	let content = "";
+	let model = "";
+	let usage: unknown = null;
+	let error: unknown = null;
+	const handle = (line: string) => {
+		const t = line.trim();
+		if (!t.startsWith("data:")) return;
+		const data = t.slice(5).trim();
+		if (!data || data === "[DONE]") return;
+		let o: any;
+		try {
+			o = JSON.parse(data);
+		} catch {
+			return;
+		}
+		if (o?.error) error = o.error;
+		if (o?.model) model = String(o.model);
+		if (o?.usage) usage = o.usage;
+		else if (o?.x_groq?.usage) usage = o.x_groq.usage; // Groq menaruhnya di sini
+		const ch = o?.choices?.[0];
+		const piece = ch?.delta?.content ?? ch?.message?.content ?? "";
+		if (typeof piece === "string") content += piece;
+	};
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		buf += dec.decode(value, { stream: true });
+		onChunk(content.length);
+		let nl: number;
+		while ((nl = buf.indexOf("\n")) >= 0) {
+			handle(buf.slice(0, nl));
+			buf = buf.slice(nl + 1);
+		}
+	}
+	handle(buf + dec.decode());
+	if (error && !content) return { error };
+	return { model, choices: [{ message: { content } }], usage };
+}
+
 async function postChat(
 	p: AiProvider,
 	model: string,
 	messages: { role: string; content: string }[],
-	opts: { temperature?: number; maxTokens?: number; json?: boolean; timeoutMs?: number },
+	opts: { temperature?: number; maxTokens?: number; json?: boolean; firstByteMs?: number; idleMs?: number; totalMs?: number },
 ): Promise<{ status: number; body: any }> {
-	const timeoutMs = opts.timeoutMs ?? AI_CALL_TIMEOUT_MS;
-	const send = async (withJson: boolean, maxTokens?: number) => {
+	const firstByteMs = opts.firstByteMs ?? AI_FIRST_BYTE_MS;
+	const idleMs = opts.idleMs ?? AI_IDLE_MS;
+	const totalMs = opts.totalMs ?? AI_TOTAL_MS;
+	let json = !!opts.json;
+	let maxTokens = opts.maxTokens;
+	// Semua provider OpenAI-compatible yang umum mendukung stream; stream_options
+	// (minta jumlah token di potongan terakhir) kadang ditolak -> dilepas dulu.
+	let stream = true;
+	let streamUsage = true;
+	const send = async () => {
 		const payload: Record<string, unknown> = { model, messages, temperature: opts.temperature ?? 0.8 };
 		if (maxTokens) payload.max_tokens = maxTokens;
-		if (withJson) payload.response_format = { type: "json_object" };
+		if (json) payload.response_format = { type: "json_object" };
+		if (stream) {
+			payload.stream = true;
+			if (streamUsage) payload.stream_options = { include_usage: true };
+		}
 		const ctl = new AbortController();
-		const timer = setTimeout(() => ctl.abort(), timeoutMs);
-		let r: Response;
-		let raw: string;
+		const started = Date.now();
+		let phase: "first" | "idle" | "total" = "first";
+		let received = 0;
+		let timer = setTimeout(() => ctl.abort(), firstByteMs);
+		const total = setTimeout(() => {
+			phase = "total";
+			ctl.abort();
+		}, totalMs);
+		const bump = (chars: number) => {
+			received = chars;
+			if (phase === "total") return;
+			phase = "idle";
+			clearTimeout(timer);
+			timer = setTimeout(() => ctl.abort(), idleMs);
+		};
 		try {
-			r = await fetch(normalizeBaseUrl(p.base_url) + "/chat/completions", {
+			const r = await fetch(normalizeBaseUrl(p.base_url) + "/chat/completions", {
 				method: "POST",
 				headers: { "Content-Type": "application/json", Authorization: `Bearer ${p.key}` },
 				body: JSON.stringify(payload),
 				signal: ctl.signal,
 			});
-			raw = await r.text();
+			const isSse = /text\/event-stream/i.test(r.headers.get("content-type") || "");
+			if (r.ok && isSse && r.body) return { status: r.status, body: await readChatStream(r.body, bump) };
+			return { status: r.status, body: parseJson(await r.text()) };
 		} catch (e) {
-			throw new Error(networkErrorText(e, timeoutMs));
+			if (e instanceof Error && (e.name === "AbortError" || e.name === "TimeoutError")) {
+				const sec = (ms: number) => Math.round(ms / 1000);
+				const msg =
+					phase === "first"
+						? `server belum mulai membalas setelah ${sec(firstByteMs)} detik`
+						: phase === "idle"
+							? `server berhenti mengirim jawaban selama ${sec(idleMs)} detik (jawaban terpotong sesudah ${sec(Date.now() - started - idleMs)} detik)`
+							: `jawaban belum selesai setelah ${sec(totalMs)} detik`;
+				throw new AiTimeoutError(msg, received);
+			}
+			throw new Error(networkErrorText(e));
 		} finally {
 			clearTimeout(timer);
+			clearTimeout(total);
 		}
-		let body: any;
-		try {
-			body = JSON.parse(raw);
-		} catch {
-			body = { error: raw.slice(0, 300) };
-		}
-		return { status: r.status, body };
 	};
-	let json = !!opts.json;
-	let maxTokens = opts.maxTokens;
-	let res = await send(json, maxTokens);
+	const errStr = (res: { body: any }) => JSON.stringify(res.body?.error ?? res.body ?? "");
+	let res = await send();
+	// Ditolak karena parameter stream -> ulang tanpa stream_options, lalu tanpa stream.
+	if ((res.status === 400 || res.status === 422) && /stream_options|include_usage/i.test(errStr(res))) {
+		streamUsage = false;
+		res = await send();
+	}
+	if ((res.status === 400 || res.status === 422) && /\bstream/i.test(errStr(res))) {
+		stream = false;
+		res = await send();
+	}
 	// Tidak semua provider mendukung response_format -> ulang tanpa (prompt sudah minta JSON).
-	if (json && (res.status === 400 || res.status === 422) && /response_format|json/i.test(JSON.stringify(res.body?.error ?? res.body))) {
+	if (json && (res.status === 400 || res.status === 422) && /response_format|json/i.test(errStr(res))) {
 		json = false;
-		res = await send(json, maxTokens);
+		res = await send();
 	}
 	// Batas output terlalu besar untuk paket akun (mis. Groq gratis: "Request too
 	// large ... on output tokens") -> ulang sekali dgn batas separuhnya.
 	if (maxTokens && maxTokens > 2048 && isTooLarge(res.status, res.body)) {
 		maxTokens = Math.max(2048, Math.floor(maxTokens / 2));
-		res = await send(json, maxTokens);
+		res = await send();
 	}
 	return res;
 }
@@ -609,7 +722,7 @@ export async function aiChatProvider(
 	env: Env,
 	cfg: Record<string, string>,
 	p: AiProvider,
-	opts: { messages: { role: string; content: string }[]; purpose: string; temperature?: number; maxTokens?: number; json?: boolean },
+	opts: AiCallOpts,
 ): Promise<AiCallResult> {
 	const keyId = await aiKeyId(p.key);
 	const promptChars = opts.messages.map((m) => m.content).join("\n");
@@ -623,7 +736,12 @@ export async function aiChatProvider(
 			res = await postChat(p, model, opts.messages, opts);
 		} catch (e) {
 			const err = "Gagal menghubungi server: " + (e instanceof Error ? e.message : String(e));
-			await recordUsage(env, { keyId, provider: p.name, model, purpose: opts.purpose, prompt: 0, completion: 0, total: 0, estimated: false, ok: false, err, ms: Date.now() - started });
+			// Diputus karena waktu habis: server sudah menerima permintaan dan
+			// biasanya tetap menagih -> catat perkiraannya, bukan 0.
+			const billed = e instanceof AiTimeoutError;
+			const prompt = billed ? estimateTokens(promptChars) : 0;
+			const completion = billed ? Math.ceil(e.partialChars / 4) : 0;
+			await recordUsage(env, { keyId, provider: p.name, model, purpose: opts.purpose, prompt, completion, total: prompt + completion, estimated: billed, ok: false, err, ms: Date.now() - started });
 			await setCooldown(env, cfg, { ...p, model }, err);
 			throw new Error(err);
 		}
@@ -699,7 +817,7 @@ export async function aiUsableProviders(env: Env, cfg: Record<string, string>): 
 export async function aiGenerate<T>(
 	env: Env,
 	cfg: Record<string, string>,
-	opts: { messages: { role: string; content: string }[]; purpose: string; temperature?: number; maxTokens?: number; json?: boolean },
+	opts: AiCallOpts,
 	accept: (text: string) => T,
 ): Promise<{ value: T; call: AiCallResult }> {
 	const providers = await aiReadyOrCoolingProviders(env, cfg);
