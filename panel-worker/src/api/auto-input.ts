@@ -7,6 +7,7 @@ import { hasMenu } from "../lib/menus";
 import type { Processed } from "../lib/parser";
 import type { UserProfile } from "../lib/db";
 import {
+	claimJob,
 	clearRetryable,
 	defaultAdminBase,
 	deleteSession,
@@ -108,19 +109,30 @@ export async function autoInputTest(env: Env, token: string, website: string, ma
 // ---------------------------------------------------------------------------
 // Dipanggil send.ts sesudah KIRIM SEMUA SISTEM
 // ---------------------------------------------------------------------------
+export interface AutoInputOutcome {
+	website: string;
+	status: "BERHASIL" | "GAGAL" | "DILEWATI" | "SUDAH";
+	detail: string;
+	manual: boolean;
+}
 export interface AutoInputNotice {
-	/** off = saklar mati (tidak ada notice); selain itu ada ringkasan per website. */
+	/** Alasan dilewati (tidak ada job sama sekali). */
 	skippedReason?: string;
-	results: { website: string; status: "BERHASIL" | "GAGAL" | "DILEWATI" | "SUDAH"; detail: string; manual: boolean }[];
+	/** ANTRI = job sudah dibuat, browser harus memanggil autoInputRun(jobId) -- satu panggilan per website. */
+	results: (Omit<AutoInputOutcome, "status"> & { status: AutoInputOutcome["status"] | "ANTRI"; jobId?: number })[];
 }
 
+/**
+ * Hanya MEMBUAT job (murah). Eksekusi sebenarnya (belasan request ke admin) dijalankan browser lewat
+ * autoInputRun, satu website per panggilan: Worker paket gratis hanya boleh 50 subrequest per
+ * invocation, dan KIRIM SEMUA SISTEM sendiri sudah memakai banyak (Telegram, LinkTree, Panel-Z).
+ */
 export async function autoInputAfterSend(
 	env: Env,
 	profile: UserProfile,
 	rawText: string,
 	processed: Processed,
 	websites: string[],
-	fetchFn?: Fetcher,
 ): Promise<AutoInputNotice | undefined> {
 	if (profile.role !== "ADMIN" && profile.role !== "OPERATOR") return undefined;
 	if (!hasMenu(profile, "auto-input")) return undefined;
@@ -129,31 +141,48 @@ export async function autoInputAfterSend(
 	const plan = planAutoInput(rawText, processed);
 	if (!plan.ok) return { skippedReason: plan.reason, results: [] };
 
-	const results: AutoInputNotice["results"] = await Promise.all(
-		websites.map(async (website): Promise<AutoInputNotice["results"][number]> => {
-			const sess = await getSession(env, profile.username, website);
-			if (!sess?.phpsessid) return { website, status: "DILEWATI", detail: "PHPSESSID belum disimpan — input manual.", manual: true };
-			const started = await startJob(env, profile.username, website, plan);
-			if ("existing" in started) {
-				return { website, status: "SUDAH", detail: `Result ini sudah pernah diproses (${started.existing.status}).`, manual: false };
-			}
-			const r = await runAutoInput({
-				session: sess,
-				plan,
-				fetchFn,
-				onStage: (st, period) => setStage(env, started.id, st, period),
-			});
-			await finishJob(env, started.id, r.ok ? "DONE" : "FAILED", r.ok ? "selesai" : r.stage, r.detail, r.period);
-			await logActivity(
-				env,
-				profile.username,
-				"AUTO PREDIKSI",
-				`[${website}] ${plan.market} ${plan.prizes.join("/")} — ${r.detail}`,
-				r.ok ? "BERHASIL" : "GAGAL",
-				"",
-			).catch(() => {});
-			return { website, status: r.ok ? "BERHASIL" : "GAGAL", detail: r.detail, manual: !r.ok };
-		}),
-	);
+	const sessions = await getSessions(env, profile.username);
+	const results: AutoInputNotice["results"] = [];
+	for (const website of websites) {
+		const sess = sessions.find((x) => x.website === String(website).trim().toUpperCase());
+		if (!sess?.phpsessid) {
+			results.push({ website, status: "DILEWATI", detail: "PHPSESSID belum disimpan — input manual.", manual: true });
+			continue;
+		}
+		const started = await startJob(env, profile.username, website, plan);
+		if ("existing" in started) {
+			results.push({ website, status: "SUDAH", detail: `Result ini sudah pernah diproses (${started.existing.status}).`, manual: false });
+		} else {
+			results.push({ website, status: "ANTRI", detail: "Menunggu dijalankan", manual: false, jobId: started.id });
+		}
+	}
 	return { results };
+}
+
+/** Menjalankan SATU job antre (tanpa autentikasi -- dipanggil setelah gate). */
+export async function runQueuedJob(env: Env, username: string, jobId: number, fetchFn?: Fetcher): Promise<AutoInputOutcome> {
+	const job = await claimJob(env, username, jobId);
+	if (!job) return { website: "-", status: "SUDAH", detail: "Job tidak ditemukan atau sudah berjalan.", manual: false };
+	const website = job.website;
+	const sess = await getSession(env, username, website);
+	if (!sess?.phpsessid) {
+		await finishJob(env, job.id, "FAILED", "cek", "PHPSESSID belum disimpan.");
+		return { website, status: "DILEWATI", detail: "PHPSESSID belum disimpan — input manual.", manual: true };
+	}
+	const plan = { ok: true as const, market: job.market, prizes: job.prizes, date: job.resultDate, key: "" };
+	const r = await runAutoInput({
+		session: sess,
+		plan,
+		fetchFn,
+		onStage: (st, period) => setStage(env, job.id, st, period),
+	});
+	await finishJob(env, job.id, r.ok ? "DONE" : "FAILED", r.ok ? "selesai" : r.stage, r.detail, r.period);
+	await logActivity(env, username, "AUTO PREDIKSI", `[${website}] ${job.market} ${job.prizes.join("/")} — ${r.detail}`, r.ok ? "BERHASIL" : "GAGAL", "").catch(() => {});
+	return { website, status: r.ok ? "BERHASIL" : "GAGAL", detail: r.detail, manual: !r.ok };
+}
+
+export async function autoInputRun(env: Env, token: string, jobId: number, fetchFn?: Fetcher) {
+	const s = await gate(env, token);
+	const o = await runQueuedJob(env, s.username, Number(jobId), fetchFn);
+	return { success: o.status === "BERHASIL", ...o };
 }

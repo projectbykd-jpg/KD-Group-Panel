@@ -23,6 +23,7 @@ import {
 	autoInputClearJob,
 	autoInputDeleteSession,
 	autoInputGetState,
+	autoInputRun,
 	autoInputSaveSession,
 	autoInputSetEnabled,
 	autoInputTest,
@@ -183,6 +184,7 @@ const ROUTES: Record<string, Handler> = {
 	autoInputSaveSession: (env, b) => autoInputSaveSession(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
 	autoInputDeleteSession: (env, b) => autoInputDeleteSession(env, s(b.token), s(b.website)),
 	autoInputClearJob: (env, b) => autoInputClearJob(env, s(b.token), Number(b.jobId)),
+	autoInputRun: (env, b) => autoInputRun(env, s(b.token), Number(b.jobId)),
 	autoInputTest: (env, b) => autoInputTest(env, s(b.token), s(b.website), s(b.market)),
 
 	// prediksi
