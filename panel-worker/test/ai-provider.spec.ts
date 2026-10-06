@@ -348,3 +348,36 @@ describe("proses artikel ujung-ke-ujung (situs sendiri)", () => {
 		expect((turso.current!.raw.prepare(`SELECT status FROM news_article WHERE id = 2`).get() as { status: string }).status).toBe("new");
 	});
 });
+
+describe("provider lambat / batas output", () => {
+	it("Groq 'Request too large' -> diulang sekali dgn max_tokens separuh", async () => {
+		await botCfgSet(env, { ai_providers: JSON.stringify([prov()]) });
+		const sent: number[] = [];
+		mockFetch((_u, body) => {
+			sent.push(body.max_tokens);
+			return body.max_tokens > 4096
+				? { status: 429, body: { error: { message: "Request too large for model `qwen/qwen3.8-27b` ... on output tokens" } } }
+				: chatOk("ok");
+		});
+		const r = await aiGenerate(env, await botCfg(env), { purpose: "t", messages: [{ role: "user", content: "x" }], maxTokens: 8192 }, (t) => t);
+		expect(r.value).toBe("ok");
+		expect(sent).toEqual([8192, 4096]);
+	});
+
+	it("server diam -> berhenti menunggu & pindah ke provider berikutnya dgn pesan jelas", async () => {
+		const { networkErrorText } = await import("../src/lib/ai-provider");
+		const abort = Object.assign(new Error("This operation was aborted"), { name: "AbortError" });
+		expect(networkErrorText(abort, 150000)).toMatch(/tidak membalas dalam 150 detik/);
+		const ff = Object.assign(new Error("fetch failed"), { cause: { code: "ECONNRESET", message: "socket hang up" } });
+		expect(networkErrorText(ff, 150000)).toBe("fetch failed -- ECONNRESET -- socket hang up");
+
+		await botCfgSet(env, { ai_providers: JSON.stringify([prov({ name: "Lambat" }), prov({ id: "b", name: "B", base_url: "https://b.test/v1" })]) });
+		vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+			if (String(input).startsWith("https://a.test")) throw abort;
+			return new Response(JSON.stringify(chatOk("dari B").body), { status: 200 });
+		});
+		const r = await aiGenerate(env, await botCfg(env), { purpose: "t", messages: [{ role: "user", content: "x" }] }, (t) => t);
+		expect(r.call.providerName).toBe("B");
+		expect(usageRows()[0]).toMatchObject({ provider: "Lambat", ok: 0 });
+	});
+});
