@@ -16,7 +16,7 @@ import type { Processed } from "./parser";
 
 export const RUNNING_TTL_MIN = 5;
 
-export type JobStatus = "RUNNING" | "DONE" | "FAILED" | "SKIPPED";
+export type JobStatus = "QUEUED" | "RUNNING" | "DONE" | "FAILED" | "SKIPPED";
 
 let tablesEnsured = false;
 /** Hanya untuk test (tiap test memakai database baru). */
@@ -359,7 +359,7 @@ export async function startJob(
 		.prepare(
 			`INSERT OR IGNORE INTO auto_input_job
 			   (username, website, market, prizes, result_date, result_key, status, stage, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, 'RUNNING', 'cek', ?, ?)`,
+			 VALUES (?, ?, ?, ?, ?, ?, 'QUEUED', 'cek', ?, ?)`,
 		)
 		.bind(username, w, plan.market, JSON.stringify(plan.prizes), plan.date, plan.key, now, now)
 		.run();
@@ -374,7 +374,7 @@ export async function startJob(
 export async function finishJob(
 	env: Env,
 	jobId: number,
-	status: Exclude<JobStatus, "RUNNING">,
+	status: Exclude<JobStatus, "QUEUED" | "RUNNING">,
 	stage: string,
 	detail: string,
 	period = "",
@@ -395,14 +395,51 @@ export async function setStage(env: Env, jobId: number, stage: string, period = 
 
 /** Worker bisa mati di tengah job. RUNNING yang basi jadi GAGAL -- tidak pernah diulang otomatis. */
 async function expireRunning(env: Env): Promise<void> {
-	await getTurso(env)
+	const db = getTurso(env);
+	const now = tsNow();
+	const old = tsPlusMinutes(-RUNNING_TTL_MIN);
+	// Antre tapi tidak pernah dijalankan (halaman panel ditutup sebelum sempat memanggil): belum menyentuh admin.
+	await db
+		.prepare(
+			`UPDATE auto_input_job SET status = 'FAILED', stage = 'cek', updated_at = ?,
+			   detail = 'Tidak sempat dijalankan (halaman panel ditutup / koneksi putus) — admin belum disentuh, aman klik COBA LAGI.'
+			 WHERE status = 'QUEUED' AND updated_at < ?`,
+		)
+		.bind(now, old)
+		.run();
+	// Berjalan tapi putus. Tahap 'cek' = belum ada yang diubah; tahap lain = angka MUNGKIN sudah masuk.
+	await db
+		.prepare(
+			`UPDATE auto_input_job SET status = 'FAILED', updated_at = ?,
+			   detail = 'Terputus sebelum mengubah apa pun — aman klik COBA LAGI.'
+			 WHERE status = 'RUNNING' AND stage IN ('', 'cek') AND updated_at < ?`,
+		)
+		.bind(now, old)
+		.run();
+	await db
 		.prepare(
 			`UPDATE auto_input_job SET status = 'FAILED', updated_at = ?,
 			   detail = 'Proses terputus di tengah jalan — CEK MANUAL di admin website (angka mungkin sudah masuk).'
 			 WHERE status = 'RUNNING' AND updated_at < ?`,
 		)
-		.bind(tsNow(), tsPlusMinutes(-RUNNING_TTL_MIN))
+		.bind(now, old)
 		.run();
+}
+
+/**
+ * Ambil hak menjalankan job yang sudah antre (QUEUED -> RUNNING), atomik: pemanggilan ganda
+ * (klik dobel / retry jaringan) tidak pernah menjalankan job dua kali.
+ */
+export async function claimJob(env: Env, username: string, jobId: number): Promise<JobRow | null> {
+	await ensureAutoInputTables(env);
+	const db = getTurso(env);
+	const r = await db
+		.prepare(`UPDATE auto_input_job SET status = 'RUNNING', updated_at = ? WHERE id = ? AND username = ? AND status = 'QUEUED'`)
+		.bind(tsNow(), jobId, username)
+		.run();
+	if (r.meta.changes !== 1) return null;
+	const row = await db.prepare(`SELECT * FROM auto_input_job WHERE id = ?`).bind(jobId).first<Record<string, unknown>>();
+	return row ? rowToJob(row) : null;
 }
 
 export async function listJobs(env: Env, username: string, limit = 30): Promise<JobRow[]> {

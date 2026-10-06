@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: import("node:sqlite").DatabaseSync } }));
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
-import { autoInputAfterSend } from "../src/api/auto-input";
-import { parseCookieInput, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
+import { autoInputAfterSend, runQueuedJob, type AutoInputNotice } from "../src/api/auto-input";
+import { claimJob, parseCookieInput, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
 import { frameSources, parseAngkaPage, readTopRow, parseHitungPage, runAutoInput, buildPayload, parseForms } from "../src/lib/auto-input-run";
 import { processText } from "../src/lib/parser";
 import { fakeD1, fakeEnv } from "./helpers/fake-env";
@@ -191,6 +191,14 @@ describe("runAutoInput", () => {
 		expect(m.st.posts).toHaveLength(0);
 		expect(r.preview).toMatchObject({ code: "p21545", post: "admin_angka13.php", fields: { angka: "9808", periode: "1630", psr: "p21545" } });
 	});
+	it("anggaran request: satu website penuh memakai <= 14 fetch (batas Worker gratis 50 per panggilan)", async () => {
+		const m = mockSite();
+		let n = 0;
+		const f = async (u: string, i?: RequestInit) => (n++, m.fetchFn(u, i));
+		const r = await runAutoInput({ session: sess, plan: plan(), fetchFn: f });
+		expect(r.ok).toBe(true);
+		expect(n).toBeLessThanOrEqual(14);
+	});
 	it("alur penuh: Kirim -> verifikasi -> Hitung; payload membawa field tersembunyi & TIDAK membawa Hapus", async () => {
 		const m = mockSite();
 		const stages: string[] = [];
@@ -358,7 +366,19 @@ describe("autoInputAfterSend (DB)", () => {
 		resetAutoInputTablesFlag();
 		env = fakeEnv().env;
 	});
-	const go = (m: ReturnType<typeof mockSite>, text = RAW, sites = ["HUGOTOGEL"]) => autoInputAfterSend(env, profile, text, processText(text), sites, m.fetchFn);
+	/** Seperti browser: afterSend membuat job, lalu tiap ANTRI dijalankan lewat panggilan TERPISAH. */
+	const go = async (m: ReturnType<typeof mockSite>, text = RAW, sites = ["HUGOTOGEL"]): Promise<AutoInputNotice | undefined> => {
+		const n = await autoInputAfterSend(env, profile, text, processText(text), sites);
+		if (!n) return n;
+		const results: AutoInputNotice["results"] = [];
+		for (const r of n.results) {
+			if (r.status === "ANTRI") {
+				const o = await runQueuedJob(env, "Op", r.jobId!, m.fetchFn);
+				results.push({ ...o });
+			} else results.push(r);
+		}
+		return { ...n, results };
+	};
 	const withSession = () => saveSession(env, "Op", "HUGOTOGEL", "https://ag.suksesbogil.com", "PHPSESSID=" + SID1);
 
 	it("saklar OFF (default) -> tidak melakukan apa pun", async () => {
@@ -412,7 +432,40 @@ describe("autoInputAfterSend (DB)", () => {
 	it("VIEWER tidak pernah memicu", async () => {
 		await setEnabled(env, "Op", true);
 		const m = mockSite();
-		expect(await autoInputAfterSend(env, { ...profile, role: "VIEWER" } as UserProfile, RAW, processText(RAW), ["HUGOTOGEL"], m.fetchFn)).toBeUndefined();
+		expect(await autoInputAfterSend(env, { ...profile, role: "VIEWER" } as UserProfile, RAW, processText(RAW), ["HUGOTOGEL"])).toBeUndefined();
+		expect(m.st.posts).toHaveLength(0);
+	});
+	it("afterSend hanya MEMBUAT job (tanpa request ke admin) -- eksekusi di panggilan terpisah", async () => {
+		const m = mockSite();
+		await setEnabled(env, "Op", true);
+		await withSession();
+		let hits = 0;
+		const counting = { ...m, fetchFn: async (u: string, i?: RequestInit) => (hits++, m.fetchFn(u, i)) };
+		const n = await autoInputAfterSend(env, profile, RAW, processText(RAW), ["HUGOTOGEL"]);
+		expect(n?.results[0]).toMatchObject({ status: "ANTRI", jobId: expect.any(Number) });
+		expect(hits).toBe(0);
+		expect((await listJobs(env, "Op"))[0].status).toBe("QUEUED");
+		void counting;
+	});
+	it("job antre hanya bisa dijalankan SEKALI (klik dobel / retry jaringan tidak menggandakan input)", async () => {
+		const m = mockSite();
+		await setEnabled(env, "Op", true);
+		await withSession();
+		const n = await autoInputAfterSend(env, profile, RAW, processText(RAW), ["HUGOTOGEL"]);
+		const id = n!.results[0].jobId!;
+		const [a, b] = await Promise.all([runQueuedJob(env, "Op", id, m.fetchFn), runQueuedJob(env, "Op", id, m.fetchFn)]);
+		expect([a.status, b.status].sort()).toEqual(["BERHASIL", "SUDAH"]);
+		expect(m.st.calcPosts).toBe(1);
+		expect(await claimJob(env, "Op", id)).toBeNull();
+	});
+	it("user lain tidak bisa menjalankan job milik orang lain", async () => {
+		const m = mockSite();
+		await setEnabled(env, "Op", true);
+		await withSession();
+		const n = await autoInputAfterSend(env, profile, RAW, processText(RAW), ["HUGOTOGEL"]);
+		const o = await runQueuedJob(env, "Orang-Lain", n!.results[0].jobId!, m.fetchFn);
+		expect(o.status).toBe("SUDAH");
+		expect(m.st.posts).toHaveLength(0);
 	});
 	it("saveSession: banyak website, input kosong = pertahankan yang lama, URL http ditolak", async () => {
 		await saveSession(env, "Op", "HUGOTOGEL", "https://ag.suksesbogil.com", "PHPSESSID=" + SID1);

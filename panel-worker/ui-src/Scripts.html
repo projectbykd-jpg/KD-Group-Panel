@@ -3690,10 +3690,39 @@
     let autoInputState = null;
     let autoInputTimer = null;
 
+    // Server hanya MEMBUAT job; tiap website dijalankan lewat panggilan terpisah (autoInputRun) karena
+    // Worker paket gratis dibatasi 50 subrequest per panggilan.
     function autoInputNotify(a) {
       if (!a) return;
       if (a.skippedReason) { setTimeout(() => toast('Auto Prediksi dilewati: ' + a.skippedReason), 1800); return; }
       const rs = Array.isArray(a.results) ? a.results : [];
+      const queued = rs.filter(r => r.status === 'ANTRI' && r.jobId);
+      const out = rs.filter(r => r.status !== 'ANTRI');
+      if (!queued.length) { autoInputShow(out); return; }
+      setTimeout(() => toast('Auto Prediksi: memproses ' + queued.map(q => q.website).join(', ') + '…'), 1500);
+      let left = queued.length;
+      const finish = () => { if (--left === 0) autoInputShow(out); };
+      queued.forEach(q => {
+        google.script.run
+          .withSuccessHandler(res => {
+            const ok = !!(res && res.success);
+            out.push({
+              website: (res && res.website && res.website !== '-') ? res.website : q.website,
+              status: ok ? 'BERHASIL' : ((res && res.status) || 'GAGAL'),
+              detail: apiMessage(res && res.detail ? { message: res.detail } : res),
+              manual: !ok && !(res && res.manual === false)
+            });
+            finish();
+          })
+          .withFailureHandler(err => {
+            out.push({ website: q.website, status: 'GAGAL', detail: ((err && err.message) || 'Koneksi putus') + ' — CEK MANUAL di admin website.', manual: true });
+            finish();
+          })
+          .autoInputRun(currentSessionToken, q.jobId);
+      });
+    }
+
+    function autoInputShow(rs) {
       const bad = rs.filter(r => r.manual);
       if (bad.length) {
         showActionPopup('ERROR', 'Auto Prediksi: ' + bad.length + ' website perlu dicek MANUAL',
@@ -3701,7 +3730,7 @@
         return;
       }
       const ok = rs.filter(r => r.status === 'BERHASIL').map(r => r.website);
-      if (ok.length) setTimeout(() => toast('Auto Prediksi: dihitung di ' + ok.join(', ')), 1800);
+      if (ok.length) toast('Auto Prediksi: dihitung di ' + ok.join(', '));
     }
 
     function loadAutoInputPage(silent) {
@@ -3728,8 +3757,8 @@
       const st = autoInputState;
       if (!host || !st) return;
       const esc = escapeHtml;
-      const stColor = { DONE: 'text-emerald-400', FAILED: 'text-rose-400', RUNNING: 'text-amber-300', SKIPPED: 'text-slate-400' };
-      const stLabel = { DONE: 'SELESAI', FAILED: 'GAGAL', RUNNING: 'BERJALAN', SKIPPED: 'DILEWATI' };
+      const stColor = { DONE: 'text-emerald-400', FAILED: 'text-rose-400', RUNNING: 'text-amber-300', QUEUED: 'text-sky-300', SKIPPED: 'text-slate-400' };
+      const stLabel = { DONE: 'SELESAI', FAILED: 'GAGAL', RUNNING: 'BERJALAN', QUEUED: 'ANTRI', SKIPPED: 'DILEWATI' };
       const rows = (st.websites || []).map((w, i) => `
         <div class="glass-inner rounded-2xl p-3.5 flex flex-col gap-2 border border-white/5">
           <div class="flex items-center justify-between gap-2">
