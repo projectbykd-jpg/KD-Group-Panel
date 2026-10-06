@@ -240,6 +240,21 @@ describe("runAutoInput", () => {
 });
 
 describe("URL admin hanya tiga host yang diizinkan", () => {
+	it("kode singkat panel (HUGO / FOLA / SOHO) sama dengan nama panjangnya", () => {
+		expect(adminBaseProblem("HUGO", "https://ag.suksesbogil.com/")).toBeNull();
+		expect(adminBaseProblem("FOLA", "https://agwl12.suksesbogil.com/")).toBeNull();
+		expect(adminBaseProblem("SOHO", "https://agwl5.suksesbogil.com/")).toBeNull();
+		expect(adminBaseProblem("hugo", "https://ag.suksesbogil.com/")).toBeNull();
+		expect(adminBaseProblem("HUGO", "https://agwl12.suksesbogil.com/")).toMatch(/harus memakai/);
+		expect(adminBaseProblem("FOLA", "https://ag.suksesbogil.com/")).toMatch(/harus memakai/);
+		expect(defaultAdminBase("HUGO")).toBe("https://ag.suksesbogil.com/");
+		expect(defaultAdminBase("SOHO")).toBe("https://agwl5.suksesbogil.com/");
+	});
+	it("website HUGO (kode singkat) lolos cek merek HUGOTOGEL.COM di halaman admin", async () => {
+		const m = mockSite();
+		const r = await runAutoInput({ session: { ...sess, website: "HUGO" }, plan: plan(), dryRun: true, fetchFn: m.fetchFn });
+		expect(r.ok).toBe(true);
+	});
 	it("cocokkan website dengan host-nya", () => {
 		const ok = (w: string, u: string) => adminBaseProblem(w, u);
 		expect(ok("HUGOTOGEL", "https://ag.suksesbogil.com/")).toBeNull();

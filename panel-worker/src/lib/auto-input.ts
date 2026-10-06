@@ -190,16 +190,32 @@ export function sessionHint(stored: string): string {
 
 /** Hanya tiga admin ini yang boleh disentuh (sekaligus mencegah panel dipakai menembak host lain). */
 export const ADMIN_HOSTS = ["ag.suksesbogil.com", "agwl12.suksesbogil.com", "agwl5.suksesbogil.com"] as const;
-/** Website yang host-nya sudah pasti. Website lain cukup salah satu host di atas yang BUKAN milik website di sini. */
-const SITE_HOST: Record<string, string> = {
-	HUGOTOGEL: "ag.suksesbogil.com",
-	FOLATOTO: "agwl12.suksesbogil.com",
-	SOHOTOGEL: "agwl5.suksesbogil.com",
+/**
+ * Kode website di panel adalah kode SINGKAT (HUGO, FOLA, SOHO -- lihat sites.ts), nama
+ * panjangnya cuma label. Keduanya dikenali. Website lain cukup memakai salah satu host
+ * di atas yang BUKAN milik tiga website ini.
+ */
+const SITE_ALIAS: Record<string, string> = {
+	HUGO: "HUGO", HUGOTOGEL: "HUGO",
+	FOLA: "FOLA", FOLATOTO: "FOLA",
+	SOHO: "SOHO", SOHOTOGEL: "SOHO",
 };
+const SITE_HOST: Record<string, string> = {
+	HUGO: "ag.suksesbogil.com",
+	FOLA: "agwl12.suksesbogil.com",
+	SOHO: "agwl5.suksesbogil.com",
+};
+const SITE_BRAND: Record<string, string> = { HUGO: "HUGOTOGEL", FOLA: "FOLATOTO", SOHO: "SOHOTOGEL" };
+
+/** Nama merek yang tampil di header admin ("HUGOTOGEL.COM"), null untuk website tak dikenal. */
+export function siteBrand(website: string): string | null {
+	const k = SITE_ALIAS[String(website).trim().toUpperCase()];
+	return k ? SITE_BRAND[k] : null;
+}
 
 export function defaultAdminBase(website: string): string {
-	const h = SITE_HOST[String(website).trim().toUpperCase()];
-	return h ? `https://${h}/` : "";
+	const k = SITE_ALIAS[String(website).trim().toUpperCase()];
+	return k ? `https://${SITE_HOST[k]}/` : "";
 }
 
 /** null = URL ini sah untuk website ini; selain itu alasan penolakan. */
@@ -216,7 +232,7 @@ export function adminBaseProblem(website: string, base: string): string | null {
 	if (!(ADMIN_HOSTS as readonly string[]).includes(host)) {
 		return `host ${host} bukan salah satu admin yang diizinkan (${ADMIN_HOSTS.join(", ")})`;
 	}
-	const want = SITE_HOST[w];
+	const want = SITE_HOST[SITE_ALIAS[w] ?? ""];
 	if (want && host !== want) return `${w} harus memakai ${want}, bukan ${host}`;
 	if (!want && Object.values(SITE_HOST).includes(host)) return `${host} milik website lain, bukan ${w}`;
 	return null;
