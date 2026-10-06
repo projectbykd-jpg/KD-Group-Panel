@@ -229,3 +229,34 @@
   document.addEventListener('DOMContentLoaded', function () { wrap(); updateTopbar(); }, { once: true });
 })();
 </script>
+
+<script>
+/* Akun role BOT tidak punya website -> chip "Website aktif" di top bar menampilkan
+   emblem BOT. Murni tampilan: hanya mengisi elemen kosong SESUDAH renderSessionWebsites(). */
+(function () {
+  function isBot() {
+    try { if (typeof currentProfile !== 'undefined' && currentProfile) return String(currentProfile.role || '').toUpperCase() === 'BOT'; } catch (e) {}
+    try { return String((JSON.parse(localStorage.getItem('daygroup_profile') || '{}') || {}).role || '').toUpperCase() === 'BOT'; } catch (e) { return false; }
+  }
+  function wrap() {
+    var original = window.renderSessionWebsites;
+    if (typeof original !== 'function' || original.__kdBotWrapped) return;
+    var wrapped = function () {
+      var out = original.apply(this, arguments);
+      try {
+        var logos = document.getElementById('session-logos');
+        var name = document.getElementById('session-sites-name');
+        if (logos && name && !logos.children.length && isBot()) {
+          name.textContent = 'KD BOT NEWS';
+          logos.innerHTML = '<div class="session-logo-item session-logo-bot" title="KD Bot News"><img src="/BOT.svg" alt="KD Bot News" width="36" height="36" decoding="async"><span>BOT NEWS</span></div>';
+        }
+      } catch (e) { /* tampilan saja */ }
+      return out;
+    };
+    wrapped.__kdBotWrapped = true;
+    window.renderSessionWebsites = wrapped;
+  }
+  wrap();
+  document.addEventListener('DOMContentLoaded', wrap, { once: true });
+})();
+</script>

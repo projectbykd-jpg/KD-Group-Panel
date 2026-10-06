@@ -540,30 +540,145 @@ label, .cfg-field { font-size: 12px; }
 .progress-bar, body.theme-dynamic .progress-bar { background: var(--ui-accent) !important; box-shadow: none !important; border-radius: 999px; }
 
 /* ============================================================
-   8. TABEL
+   8. TABEL — satu sistem untuk semua menu
+   Header lengket, baris 48px, angka tabular, status seragam,
+   empty state & pager konsisten. Hanya visual; markup/JS tetap.
    ============================================================ */
-.pretty-table-wrap, .admin-users-table-wrap {
+table { border-collapse: separate; border-spacing: 0; font-variant-numeric: tabular-nums; }
+
+/* Pembungkus kartu tabel */
+.pretty-table-wrap, .admin-users-table-wrap, .lap-jobs-table-wrap,
+#activity-page .overflow-x-auto.glass-inner {
   background: var(--ui-surface) !important; border: 1px solid var(--ui-line) !important;
-  border-radius: var(--ui-radius) !important; overflow: hidden; box-shadow: none !important;
+  border-radius: var(--ui-radius) !important; box-shadow: none !important; overflow: hidden;
 }
-table { border-collapse: separate; border-spacing: 0; }
-thead th, .pretty-table thead th, .log-table thead th, .admin-users-table thead th, .lap-tbl thead th {
+.admin-users-table-wrap, .pretty-table-wrap.overflow-x-auto, .pretty-table-wrap > .overflow-x-auto,
+.lap-jobs-table-wrap, #activity-page .overflow-x-auto.glass-inner { overflow-x: auto; }
+.lap-jobs-table-wrap { margin: 4px 0 0; }
+
+/* Header */
+thead th, .pretty-table thead th, .log-table thead th, .admin-users-table thead th, .lap-tbl thead th, .lap-jobs-table thead th {
   background: var(--ui-surface-2) !important; color: var(--ui-text-3) !important;
-  font-size: 11px !important; font-weight: 600 !important; letter-spacing: .04em !important; text-transform: uppercase;
-  padding: 11px 14px !important; border-bottom: 1px solid var(--ui-line) !important; white-space: nowrap;
+  font-size: 11px !important; font-weight: 600 !important; letter-spacing: .06em !important; text-transform: uppercase;
+  line-height: 1.2; text-align: left; vertical-align: middle !important;
+  padding: 0 16px !important; height: 42px; border-bottom: 1px solid var(--ui-line-strong) !important; white-space: nowrap;
+  position: sticky; top: 0; z-index: 2;
 }
-tbody td, .pretty-table tbody td, .log-table td, .admin-users-table tbody td {
-  padding: 12px 14px !important; color: var(--ui-text) !important; font-size: 13px !important;
+thead th.text-center { text-align: center; }
+thead th.text-right { text-align: right; }
+thead th:first-child { padding-left: 18px !important; }
+thead th:last-child { padding-right: 18px !important; }
+
+/* Sel */
+tbody td { color: var(--ui-text-2); }
+tbody td, .pretty-table tbody td, .log-table td, .admin-users-table tbody td, .lap-jobs-table td {
+  padding: 12px 16px !important; font-size: 13px !important; line-height: 1.45;
   border-bottom: 1px solid var(--ui-line) !important; vertical-align: middle;
 }
-.pretty-table tbody tr:nth-child(even) { background: transparent !important; }
-tbody tr:hover td, .pretty-table tbody tr:hover { background: var(--ui-surface-2) !important; }
-tbody tr:last-child td { border-bottom: 0 !important; }
-.log-table { min-width: 900px; }
-#activity-page .glass-inner.overflow-x-auto, #activity-page .overflow-x-auto.glass-inner {
-  background: var(--ui-surface) !important; border-radius: var(--ui-radius) !important; border: 1px solid var(--ui-line) !important;
+tbody td:first-child { padding-left: 18px !important; }
+tbody td:last-child { padding-right: 18px !important; }
+.lap-tbl-body table, .lap-tbl-body table td { font-family: inherit !important; }
+.lap-tbl-body table { font-size: 13px !important; }
+.lap-tbl-body tbody td { white-space: nowrap; font-size: 13px !important; }
+.lap-tbl-body tbody td:first-child:not([class*="text-emerald"]):not([class*="text-rose"]):not([class*="text-cyan"]):not([class*="text-amber"]) { color: var(--ui-text); }
+.lap-tbl-body td.text-right, .lap-tbl-body th.text-right, .pretty-table td.text-right { text-align: right; font-variant-numeric: tabular-nums; }
+.lap-tbl-body thead { user-select: none; }
+.lap-tbl-body th.w-8, .lap-tbl-body td.w-8 { width: 44px; padding-left: 16px !important; padding-right: 0 !important; }
+
+.pretty-table tbody td, .log-table td, .admin-users-table tbody td, .lap-jobs-table td { color: var(--ui-text); }
+.admin-users-table td, .pretty-table td { color: var(--ui-text) !important; }
+
+/* Baris */
+.pretty-table tbody tr:nth-child(even), .activity-log-row, .activity-log-row:nth-child(even) { background: transparent !important; }
+tbody tr { transition: background-color .12s ease; }
+tbody tr:hover > td { background: var(--ui-surface-2) !important; }
+tbody tr:has(input[type="checkbox"]:checked) > td { background: rgba(var(--ui-accent-rgb), .08) !important; }
+tbody tr:last-child > td { border-bottom: 0 !important; }
+.lap-tbl-body input[type="checkbox"], .lap-row-chk { width: 16px; height: 16px; accent-color: var(--ui-accent); cursor: pointer; vertical-align: middle; }
+
+/* Log aktivitas */
+.log-table { min-width: 1040px; table-layout: fixed; }
+.log-table thead th:nth-child(1) { width: 132px; }
+.log-table thead th:nth-child(2) { width: 124px; }
+.log-table thead th:nth-child(3) { width: 220px; }
+.log-table thead th:nth-child(4) { width: 128px; }
+.log-table td { vertical-align: top !important; padding-top: 14px !important; padding-bottom: 14px !important; }
+.log-time-cell b { font-size: 13px !important; font-weight: 600; color: var(--ui-text) !important; }
+.log-time-cell span { font-size: 12px !important; color: var(--ui-text-3) !important; font-family: inherit !important; font-variant-numeric: tabular-nums; margin-top: 1px !important; }
+.log-user-chip, .log-action-badge, .log-status-badge { font-size: 12px !important; font-weight: 600 !important; letter-spacing: 0 !important; min-height: 26px; padding: 4px 10px !important; gap: 7px !important; }
+.log-user-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log-action-badge { border-radius: 8px !important; line-height: 1.25 !important; letter-spacing: .01em !important; white-space: normal; text-align: left; }
+.log-action-badge i, .log-user-chip i, .log-status-badge i { font-size: 11px; opacity: .85; flex: none; }
+.log-plain-text { font-size: 13px !important; color: var(--ui-text) !important; line-height: 1.5; }
+.log-table td > span.text-slate-600 { font-size: 12.5px; color: var(--ui-text-3) !important; font-style: italic; }
+.log-details { border-radius: 8px !important; background: var(--ui-surface-2) !important; border-color: var(--ui-line) !important; }
+.log-details summary { font-size: 12.5px; color: var(--ui-text-2) !important; padding: 8px 10px !important; }
+
+/* Skrol dalam: header tetap terlihat di tabel panjang (desktop saja) */
+@media (min-width: 641px) {
+  #activity-page .overflow-x-auto.glass-inner { max-height: min(74vh, 780px); overflow: auto; }
+  .lap-tbl-body > .overflow-x-auto { max-height: min(64vh, 560px); overflow: auto; }
 }
-.table-empty-inner, .table-empty-cell { color: var(--ui-text-3) !important; }
+#activity-page .overflow-x-auto.glass-inner, .lap-tbl-body > .overflow-x-auto { scrollbar-width: thin; scrollbar-color: var(--ui-line-strong) transparent; }
+
+/* Tabel data Laporan Harian: kepala kartu + cari + pager */
+.lap-tbl { margin-top: 12px; }
+.lap-tbl-head { min-height: 52px; padding: 0 18px !important; font-size: 12px !important; font-weight: 600 !important; letter-spacing: .06em !important; color: var(--ui-text) !important; }
+.lap-tbl-head:hover { background: var(--ui-surface-2) !important; }
+.lap-tbl-chev { color: var(--ui-text-3) !important; width: 14px; }
+.lap-tbl.open .lap-tbl-chev { color: var(--ui-accent) !important; }
+.lap-tbl-count { min-width: 26px; text-align: center; font-size: 11.5px !important; font-weight: 600 !important; padding: 2px 9px !important; background: var(--ui-surface-3) !important; color: var(--ui-text-2) !important; font-variant-numeric: tabular-nums; }
+.lap-tbl-copy { font-size: 11.5px !important; font-weight: 600 !important; letter-spacing: .03em; padding: 6px 12px !important; border-radius: 8px !important; background: var(--ui-surface-2) !important; border: 1px solid var(--ui-line-strong) !important; color: var(--ui-text-2) !important; }
+.lap-tbl-copy:hover { color: var(--ui-text) !important; border-color: rgba(var(--ui-accent-rgb), .55) !important; }
+.lap-tbl-body { border-top: 1px solid var(--ui-line) !important; }
+.lap-tbl-body > .p-2 { padding: 12px 16px !important; border-bottom: 1px solid var(--ui-line); }
+.lap-tbl-body > .p-2 input { height: 38px; background: var(--ui-surface-2) !important; border: 1px solid var(--ui-line-strong) !important; border-radius: 8px !important; font-size: 13px !important; padding: 0 12px !important; color: var(--ui-text) !important; }
+.lap-tbl-body > .p-2 input:focus { border-color: var(--ui-accent) !important; outline: none; box-shadow: 0 0 0 3px rgba(var(--ui-accent-rgb), .18); }
+.lap-tbl-body > .flex.justify-between { padding: 10px 18px !important; font-size: 12px !important; color: var(--ui-text-2) !important; border-top: 1px solid var(--ui-line) !important; background: var(--ui-surface-2); }
+.lap-tbl-body > .flex.justify-between .font-mono { font-family: inherit !important; font-variant-numeric: tabular-nums; color: var(--ui-text) !important; }
+.lap-pg-btn { width: 30px !important; height: 30px !important; font-size: 11px !important; border-radius: 8px !important; display: inline-flex; align-items: center; justify-content: center; }
+
+/* Riwayat tarik data */
+.lap-jobs-table { font-size: 13px !important; width: 100%; }
+.lap-jobs-table td { color: var(--ui-text) !important; white-space: nowrap; vertical-align: top !important; }
+.lap-jobs-table td .text-slate-500 { color: var(--ui-text-3) !important; font-size: 12px; }
+.lap-jobs-table td.lap-job-msg { white-space: normal; color: var(--ui-text-2) !important; min-width: 200px; }
+
+/* Footer & ringkasan di dalam tabel (total, dll.) */
+.lap-tbl-body tfoot td { background: var(--ui-surface-2) !important; font-weight: 600; border-top: 1px solid var(--ui-line-strong) !important; }
+
+/* Tabel Pending / WD, Prediksi, Pemakaian AI */
+.pretty-table tbody td { font-size: 13px !important; }
+.ai-usage-table td, .ai-usage-table th { font-size: 12.5px !important; }
+.ai-usage-table thead th { font-size: 11px !important; }
+
+/* Tabel user & sesi aktif: role/status sebagai lencana seragam (warna menurut data, bukan kelas Tailwind) */
+.admin-users-table td:nth-child(4) > span.rounded-full, .admin-users-table td:nth-child(5) > span.rounded-full,
+#activeSessionsBody td:nth-child(2) > span.rounded-full, #activeSessionsBody td:last-child > span.rounded-full {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 3px 10px !important;
+  font-size: 11.5px !important; font-weight: 600 !important; letter-spacing: .02em; border-radius: 999px !important;
+  border: 1px solid var(--ui-line-strong); line-height: 1.2; background: var(--ui-surface-3) !important; color: var(--ui-text-2) !important;
+}
+tr[data-role="ADMIN"] > td:nth-child(4) > span.rounded-full, #activeSessionsBody tr[data-role="ADMIN"] > td:nth-child(2) > span.rounded-full { background: rgba(var(--ui-warning-rgb), .12) !important; color: var(--ui-warning) !important; border-color: rgba(var(--ui-warning-rgb), .28); }
+tr[data-role="OPERATOR"] > td:nth-child(4) > span.rounded-full, #activeSessionsBody tr[data-role="OPERATOR"] > td:nth-child(2) > span.rounded-full { background: rgba(var(--ui-info-rgb), .12) !important; color: #8ec9ff !important; border-color: rgba(var(--ui-info-rgb), .28); }
+tr[data-role="BOT"] > td:nth-child(4) > span.rounded-full, #activeSessionsBody tr[data-role="BOT"] > td:nth-child(2) > span.rounded-full { background: rgba(var(--ui-success-rgb), .12) !important; color: var(--ui-success) !important; border-color: rgba(var(--ui-success-rgb), .28); }
+.admin-users-table td:nth-child(5) > span.rounded-full::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+.admin-users-table tr[data-status="AKTIF"] td:nth-child(5) > span.rounded-full { background: rgba(var(--ui-success-rgb), .12) !important; color: var(--ui-success) !important; border-color: rgba(var(--ui-success-rgb), .28); }
+.admin-users-table tr[data-status="TERKUNCI"] td:nth-child(5) > span.rounded-full { background: rgba(var(--ui-warning-rgb), .12) !important; color: var(--ui-warning) !important; border-color: rgba(var(--ui-warning-rgb), .28); }
+#activeSessionsBody td:last-child > span.rounded-full[class*="emerald"] { background: rgba(var(--ui-success-rgb), .12) !important; color: var(--ui-success) !important; border-color: rgba(var(--ui-success-rgb), .28); }
+#activeSessionsBody td { font-size: 13px !important; }
+#activeSessionsBody td.font-mono { font-family: inherit !important; color: var(--ui-text) !important; font-variant-numeric: tabular-nums; }
+#activeSessionsBody td .text-slate-500 { color: var(--ui-text-3) !important; font-size: 12px !important; font-weight: 400; margin-top: 1px; }
+.user-menu-chip { display: flex !important; margin-top: 6px !important; font-size: 11.5px !important; font-weight: 500 !important; color: var(--ui-text-3) !important; }
+.user-menu-chip i { color: var(--ui-text-3) !important; font-size: 10px !important; }
+
+/* Prediksi: jam posting rapi (bukan monospace tebal) */
+.pretty-table td.font-mono { font-family: inherit !important; font-weight: 600 !important; color: var(--ui-text) !important; font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+
+/* Keadaan kosong & memuat */
+.table-empty-cell, .table-loading-cell { padding: 44px 16px !important; text-align: center !important; color: var(--ui-text-3) !important; border-bottom: 0 !important; }
+.table-empty-inner { display: inline-flex; flex-direction: column; align-items: center; gap: 10px; font-size: 13px; color: var(--ui-text-3) !important; }
+.table-empty-inner i { width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; background: var(--ui-surface-2); border: 1px solid var(--ui-line); font-size: 16px; color: var(--ui-text-3); }
 .skeleton-bar { background: var(--ui-surface-3) !important; }
 
 /* ============================================================
@@ -681,7 +796,7 @@ tbody tr:last-child td { border-bottom: 0 !important; }
 .menu-access { background: var(--ui-surface-2) !important; border: 1px solid var(--ui-line) !important; border-radius: 10px !important; }
 .menu-access-title { font-size: 13px !important; font-weight: 600 !important; color: var(--ui-text) !important; }
 
-.admin-users-table { min-width: 1064px !important; }
+.admin-users-table { min-width: 1120px !important; }
 .admin-users-table th:nth-child(1), .admin-users-table td:nth-child(1) { width: 112px; }
 .admin-users-table th:nth-child(2), .admin-users-table td:nth-child(2) { width: 118px; }
 .admin-users-table th:nth-child(3), .admin-users-table td:nth-child(3) { width: 130px; }
@@ -767,6 +882,12 @@ tbody tr:last-child td { border-bottom: 0 !important; }
 @media (max-width: 1023px) { #botNewsStat { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } #main-panel .monitor-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 700px) { #main-panel .monitor-stats { grid-template-columns: 1fr !important; } }
 @media (max-width: 560px) { #botNewsStat > .mini-card:nth-child(5) { grid-column: 1 / -1; } #botNewsStat > .mini-card { min-height: 78px; } }
+
+
+/* ---- Gambar role BOT ---- */
+.page-head-icon.has-art { width: 56px !important; height: 56px !important; flex-basis: 56px !important; background: none !important; border: 0 !important; padding: 0 !important; }
+.page-head-art { width: 56px; height: 56px; object-fit: contain; display: block; filter: drop-shadow(0 6px 14px rgba(34, 211, 238, .18)); }
+.topbar .session-logo-bot img { width: 36px; height: 36px; padding: 0; background: none; border: 0; border-radius: 0; }
 
 /* ============================================================
    11. MODAL, TOAST, POPUP
@@ -884,3 +1005,13 @@ html { scroll-padding-top: calc(var(--ui-topbar-h) + 16px); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
 }
+
+/* Live Chat: info sinkron terakhir sebagai chip kecil, bukan kotak besar */
+#livechatSyncHint { background: var(--ui-surface-2) !important; border: 1px solid var(--ui-line) !important; border-radius: 8px !important; padding: 6px 12px !important; font-size: 12px !important; font-weight: 500 !important; color: var(--ui-text-2) !important; align-self: flex-start; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* Tabel Sesi Aktif: kolom tanggal tidak boleh terpotong-potong; geser ke samping bila sempit */
+table:has(> #activeSessionsBody) { min-width: 900px !important; }
+#activeSessionsBody td:not(:first-child) { white-space: nowrap; }
+
+/* Opsi <select> sangat panjang (mis. nama aksi di log) tidak boleh melebarkan kolom grid / halaman */
+.activity-filter-control { min-width: 0; max-width: 100%; text-overflow: ellipsis; }
