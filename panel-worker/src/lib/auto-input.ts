@@ -13,6 +13,7 @@
 import { getTurso } from "./turso";
 import { tsNow, tsPlusMinutes } from "./time";
 import type { Processed } from "./parser";
+import { PREDICTION_SITE_NAMES } from "./prediction";
 
 export const RUNNING_TTL_MIN = 5;
 
@@ -188,8 +189,12 @@ export function sessionHint(stored: string): string {
 	return sid ? "••••" + sid.slice(-4) : "";
 }
 
-/** Hanya tiga admin ini yang boleh disentuh (sekaligus mencegah panel dipakai menembak host lain). */
-export const ADMIN_HOSTS = ["ag.suksesbogil.com", "agwl12.suksesbogil.com", "agwl5.suksesbogil.com"] as const;
+/**
+ * Admin hanya boleh di domain suksesbogil.com (subdomain mana pun: ag, agwl5, agwl12, ...), https saja.
+ * Satu host BISA melayani beberapa website (tiap website punya akun agen sendiri), jadi host tidak
+ * dipakai sebagai identitas website -- kecuali tiga website di bawah yang host-nya sudah pasti.
+ */
+export const ADMIN_DOMAIN = "suksesbogil.com";
 /**
  * Kode website di panel adalah kode SINGKAT (HUGO, FOLA, SOHO -- lihat sites.ts), nama
  * panjangnya cuma label. Keduanya dikenali. Website lain cukup memakai salah satu host
@@ -205,12 +210,12 @@ const SITE_HOST: Record<string, string> = {
 	FOLA: "agwl12.suksesbogil.com",
 	SOHO: "agwl5.suksesbogil.com",
 };
-const SITE_BRAND: Record<string, string> = { HUGO: "HUGOTOGEL", FOLA: "FOLATOTO", SOHO: "SOHOTOGEL" };
 
-/** Nama merek yang tampil di header admin ("HUGOTOGEL.COM"), null untuk website tak dikenal. */
+/** Nama merek penuh ("SENJATOGEL") dari kode website panel ("SENJA"); null kalau tidak dikenal. */
 export function siteBrand(website: string): string | null {
-	const k = SITE_ALIAS[String(website).trim().toUpperCase()];
-	return k ? SITE_BRAND[k] : null;
+	const w = String(website).trim().toUpperCase();
+	const k = SITE_ALIAS[w] ?? w;
+	return PREDICTION_SITE_NAMES[k] ?? (Object.values(PREDICTION_SITE_NAMES).includes(w) ? w : null);
 }
 
 export function defaultAdminBase(website: string): string {
@@ -229,12 +234,11 @@ export function adminBaseProblem(website: string, base: string): string | null {
 	} catch {
 		return "bukan URL yang valid";
 	}
-	if (!(ADMIN_HOSTS as readonly string[]).includes(host)) {
-		return `host ${host} bukan salah satu admin yang diizinkan (${ADMIN_HOSTS.join(", ")})`;
+	if (host !== ADMIN_DOMAIN && !host.endsWith("." + ADMIN_DOMAIN)) {
+		return `host ${host} bukan admin yang diizinkan (hanya *.${ADMIN_DOMAIN})`;
 	}
 	const want = SITE_HOST[SITE_ALIAS[w] ?? ""];
 	if (want && host !== want) return `${w} harus memakai ${want}, bukan ${host}`;
-	if (!want && Object.values(SITE_HOST).includes(host)) return `${host} milik website lain, bukan ${w}`;
 	return null;
 }
 

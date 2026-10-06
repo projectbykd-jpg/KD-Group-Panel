@@ -38,7 +38,8 @@ const CLOSING_PREDICTION_VARIANTS = [
 	"Prediksi hari ini tidak menjamin hasil akhir. Semoga pilihan anda membawa hoki terbaik bosku.",
 ];
 
-const PREDICTION_SITE_NAMES: Record<string, string> = {
+/** Kode website panel -> nama merek penuh (dipakai juga Auto Prediksi). */
+export const PREDICTION_SITE_NAMES: Record<string, string> = {
 	SOHO: "SOHOTOGEL", LIMA: "LIMATOGEL", RETRO: "RETROTOGEL", HUGO: "HUGOTOGEL",
 	XO: "XOTOGEL", SENJA: "SENJATOGEL", DODO: "DODOTOGEL", AXIS: "AXISTOGEL",
 	REMBO: "REMBOTOGEL", HELEN: "HELENTOGEL", FOLA: "FOLATOTO", YEL: "YELTOTO",

@@ -3765,7 +3765,7 @@
             <b class="text-sm text-cyan-300">${esc(w.website)}</b>
             <span class="text-[10px] font-bold ${w.hasSession ? 'text-emerald-400' : 'text-slate-500'}">${w.hasSession ? 'TERSIMPAN ' + esc(w.hint) : 'BELUM ADA SESI'}</span>
           </div>
-          <input id="aiUrl${i}" type="text" autocomplete="off" value="${esc(w.baseUrl)}" placeholder="URL admin (ag / agwl12 / agwl5 .suksesbogil.com)" class="glass-inner border border-white/10 rounded-xl p-2.5 text-xs font-mono text-white placeholder-slate-600 focus:outline-none">
+          <input id="aiUrl${i}" type="text" autocomplete="off" value="${esc(w.baseUrl)}" placeholder="URL admin, mis. https://ag.suksesbogil.com/ (domain *.suksesbogil.com)" class="glass-inner border border-white/10 rounded-xl p-2.5 text-xs font-mono text-white placeholder-slate-600 focus:outline-none">
           <input id="aiSid${i}" type="password" autocomplete="off" placeholder="${w.hasSession ? 'Kosongkan = pakai yang tersimpan. Tempel baru untuk mengganti.' : 'Tempel PHPSESSID=xxxx atau seluruh isi Cookie dari Chrome'}" class="glass-inner border border-white/10 rounded-xl p-2.5 text-xs font-mono text-white placeholder-slate-600 focus:outline-none">
           <div class="flex flex-wrap gap-2">
             <button onclick="autoInputSaveSession(${i})" class="bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-extrabold px-4 py-2 rounded-xl text-xs"><i class="fa-solid fa-floppy-disk mr-1"></i>Simpan</button>

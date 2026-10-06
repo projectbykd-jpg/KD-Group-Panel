@@ -276,6 +276,7 @@ describe("URL admin hanya tiga host yang diizinkan", () => {
 		expect(adminBaseProblem("hugo", "https://ag.suksesbogil.com/")).toBeNull();
 		expect(adminBaseProblem("HUGO", "https://agwl12.suksesbogil.com/")).toMatch(/harus memakai/);
 		expect(adminBaseProblem("FOLA", "https://ag.suksesbogil.com/")).toMatch(/harus memakai/);
+		expect(adminBaseProblem("SENJA", "https://ag.suksesbogil.com/")).toBeNull();
 		expect(defaultAdminBase("HUGO")).toBe("https://ag.suksesbogil.com/");
 		expect(defaultAdminBase("SOHO")).toBe("https://agwl5.suksesbogil.com/");
 	});
@@ -284,28 +285,49 @@ describe("URL admin hanya tiga host yang diizinkan", () => {
 		const r = await runAutoInput({ session: { ...sess, website: "HUGO" }, plan: plan(), dryRun: true, fetchFn: m.fetchFn });
 		expect(r.ok).toBe(true);
 	});
-	it("cocokkan website dengan host-nya", () => {
+	it("tiga website pertama dikunci ke host-nya; website lain bebas di *.suksesbogil.com", () => {
 		const ok = (w: string, u: string) => adminBaseProblem(w, u);
 		expect(ok("HUGOTOGEL", "https://ag.suksesbogil.com/")).toBeNull();
 		expect(ok("FOLATOTO", "https://agwl12.suksesbogil.com/")).toBeNull();
 		expect(ok("SOHOTOGEL", "https://agwl5.suksesbogil.com/")).toBeNull();
-		expect(ok("SOHOTOGEL", "https://ag.suksesbogil.com/")).toMatch(/harus memakai/);
-		expect(ok("HUGOTOGEL", "https://agwl5.suksesbogil.com/")).toMatch(/harus memakai/);
-		expect(ok("WEBLAIN", "https://agwl5.suksesbogil.com/")).toMatch(/milik website lain/);
 		expect(ok("HUGOTOGEL", "https://agwl12.suksesbogil.com/")).toMatch(/harus memakai/);
 		expect(ok("FOLATOTO", "https://agwl5.suksesbogil.com/")).toMatch(/harus memakai/);
-		expect(ok("WEBKETIGA", "https://ag.suksesbogil.com/")).toMatch(/milik website lain/);
-		expect(ok("HUGOTOGEL", "https://evil.example.com/")).toMatch(/bukan salah satu/);
-		expect(ok("HUGOTOGEL", "https://ag.suksesbogil.com.evil.com/")).toMatch(/bukan salah satu/);
-		expect(ok("HUGOTOGEL", "http://ag.suksesbogil.com/")).toMatch(/https/);
+		expect(ok("SOHOTOGEL", "https://ag.suksesbogil.com/")).toMatch(/harus memakai/);
+		// satu host melayani beberapa website: SENJA / XO boleh di ag (sama dengan HUGO) atau host lain
+		expect(ok("SENJA", "https://ag.suksesbogil.com/")).toBeNull();
+		expect(ok("XO", "https://agwl7.suksesbogil.com/")).toBeNull();
+		expect(ok("XO", "https://agwl5.suksesbogil.com/")).toBeNull();
+		// tetap tertutup untuk domain lain / skema tidak aman
+		expect(ok("SENJA", "https://evil.example.com/")).toMatch(/bukan admin yang diizinkan/);
+		expect(ok("SENJA", "https://ag.suksesbogil.com.evil.com/")).toMatch(/bukan admin yang diizinkan/);
+		expect(ok("SENJA", "https://evilsuksesbogil.com/")).toMatch(/bukan admin yang diizinkan/);
+		expect(ok("SENJA", "http://ag.suksesbogil.com/")).toMatch(/https/);
 		expect(defaultAdminBase("FOLATOTO")).toBe("https://agwl12.suksesbogil.com/");
+		expect(defaultAdminBase("SENJA")).toBe("");
+	});
+	it("cookie milik website lain di host yang sama ditolak bila nama website terbaca di sidebar", async () => {
+		const m = mockSite();
+		const withBrand = (brand: string) => async (u: string, i?: RequestInit) =>
+			new Response((await (await m.fetchFn(u, i)).text()).replace("Agent (fakeagent)", `Agent (fakeagent) ${brand}.COM`));
+		const dry = (website: string, brand: string) => runAutoInput({ session: { ...sess, website }, plan: plan(), dryRun: true, fetchFn: withBrand(brand) });
+		// SENJA di host bersama, tapi cookie-nya milik HUGOTOGEL -> berhenti
+		expect(await dry("SENJA", "HUGOTOGEL")).toMatchObject({ ok: false, stage: "cek" });
+		expect((await dry("SENJA", "HUGOTOGEL")).detail).toMatch(/milik HUGOTOGEL\.COM.*bukan SENJATOGEL/);
+		// cookie yang benar lolos, dan nama website ikut ditampilkan
+		const good = await dry("SENJA", "SENJATOGEL");
+		expect(good.ok).toBe(true);
+		expect(good.detail).toMatch(/di SENJATOGEL\.COM/);
+		// nama website tidak terbaca (cookie hanya PHPSESSID) -> tidak menghalangi, agen tetap ditampilkan
+		const bare = await runAutoInput({ session: { ...sess, website: "SENJA" }, plan: plan(), dryRun: true, fetchFn: mockSite().fetchFn });
+		expect(bare.ok).toBe(true);
+		expect(bare.detail).toMatch(/login sebagai \(fakeagent\)/);
 	});
 	it("saveSession menolak host salah & mengisi default kalau URL kosong", async () => {
 		turso.current = fakeD1([]);
 		resetAutoInputTablesFlag();
 		const env = fakeEnv().env;
 		await expect(saveSession(env, "Op", "HUGOTOGEL", "https://agwl12.suksesbogil.com", SID1)).rejects.toThrow(/harus memakai/);
-		await expect(saveSession(env, "Op", "HUGOTOGEL", "https://evil.example.com", SID1)).rejects.toThrow(/bukan salah satu/);
+		await expect(saveSession(env, "Op", "HUGOTOGEL", "https://evil.example.com", SID1)).rejects.toThrow(/bukan admin yang diizinkan/);
 		await saveSession(env, "Op", "FOLATOTO", "", SID2);
 		expect((await getSessions(env, "Op"))[0].baseUrl).toBe("https://agwl12.suksesbogil.com/");
 	});
