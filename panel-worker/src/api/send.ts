@@ -9,6 +9,7 @@ import { getRegistryEntry, upsertRegistry } from "../lib/registry";
 import { sendTelegram } from "../senders/telegram";
 import { sendLinktree } from "../senders/linktree";
 import { sendCustomPanelZ, sendPanelZ } from "../senders/panelz";
+import { autoInputAfterSend } from "./auto-input";
 
 type SystemKey = "telegram" | "linktree" | "panelz";
 const SYSTEMS: SystemKey[] = ["telegram", "linktree", "panelz"];
@@ -181,7 +182,22 @@ async function runSend(env: Env, session: Session, rawText: string, opts: SendOp
 		textToSend,
 	);
 
+	// Auto Prediksi (input Nomor Keluar + Hitung di admin website). Hanya dari
+	// KIRIM SEMUA SISTEM -- bukan retry satu sistem / prediksi. Kegagalan di sini
+	// TIDAK boleh merusak hasil kirim yang sudah jadi, jadi dibungkus try/catch.
+	let autoInput: Awaited<ReturnType<typeof autoInputAfterSend>>;
+	if (!opts.forceDuplicate && !opts.isPrediksiAuto) {
+		try {
+			autoInput = await autoInputAfterSend(env, profile, rawText, processed, websites);
+		} catch (e) {
+			autoInput = {
+				results: [{ website: "-", status: "GAGAL", detail: "Auto Prediksi error: " + (e instanceof Error ? e.message : String(e)), manual: true }],
+			};
+		}
+	}
+
 	return {
+		autoInput,
 		success: counters.failed === 0 && counters.success > 0,
 		partial: counters.success > 0 && counters.failed > 0,
 		allAlready: allDuplicate,

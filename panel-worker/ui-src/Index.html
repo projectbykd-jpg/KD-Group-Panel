@@ -120,6 +120,9 @@
               <button onclick="switchPage('invest')" id="nav-invest" class="nav-extra sidebar-nav w-full flex items-center justify-start gap-3 px-4 py-2.5 rounded-xl font-bold text-xs cursor-pointer">
                 <i class="fa-solid fa-magnifying-glass-dollar text-emerald-400 text-sm shrink-0"></i><span class="tracking-wider">AutoCheck Invest</span>
               </button>
+              <button onclick="switchPage('auto-input')" id="nav-auto-input" class="nav-extra sidebar-nav w-full flex items-center justify-start gap-3 px-4 py-2.5 rounded-xl font-bold text-xs cursor-pointer">
+                <i class="fa-solid fa-robot text-amber-400 text-sm shrink-0"></i><span class="tracking-wider">Auto Prediksi</span>
+              </button>
             </div>
           </div>
 
@@ -725,6 +728,9 @@
       </div>
 
       <!-- VIEW: INVEST — AutoCheck batas line invest per user -->
+      <!-- VIEW: AUTO PREDIKSI (dirender oleh renderAutoInputPage) -->
+      <div id="auto-input-page" style="display:none" class="flex flex-col gap-5 fade-in"></div>
+
       <div id="invest-page" style="display:none" class="flex flex-col gap-5 fade-in">
         <div class="glass-card rounded-3xl p-5 sm:p-6 flex flex-col gap-5">
 

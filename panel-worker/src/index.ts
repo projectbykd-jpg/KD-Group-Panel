@@ -19,6 +19,14 @@ import {
 	adminSetAutoPost,
 	pruneActivityLogCron,
 } from "./api/admin";
+import {
+	autoInputClearJob,
+	autoInputDeleteSession,
+	autoInputGetState,
+	autoInputSaveSession,
+	autoInputSetEnabled,
+	autoInputTest,
+} from "./api/auto-input";
 import { adminDeleteSite, adminListSites, adminSaveSite } from "./api/sites";
 import { setMaintenance } from "./api/settings";
 import { getCurrentUserProfile, getLivePanelData } from "./api/live";
@@ -168,6 +176,14 @@ const ROUTES: Record<string, Handler> = {
 	adminListSites: (env, b) => adminListSites(env, s(b.token)),
 	adminSaveSite: (env, b) => adminSaveSite(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
 	adminDeleteSite: (env, b) => adminDeleteSite(env, s(b.token), s(b.website)),
+
+	// auto prediksi (input Nomor Keluar + Hitung di admin website)
+	autoInputGetState: (env, b) => autoInputGetState(env, s(b.token)),
+	autoInputSetEnabled: (env, b) => autoInputSetEnabled(env, s(b.token), !!b.enabled),
+	autoInputSaveSession: (env, b) => autoInputSaveSession(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
+	autoInputDeleteSession: (env, b) => autoInputDeleteSession(env, s(b.token), s(b.website)),
+	autoInputClearJob: (env, b) => autoInputClearJob(env, s(b.token), Number(b.jobId)),
+	autoInputTest: (env, b) => autoInputTest(env, s(b.token), s(b.website), s(b.market)),
 
 	// prediksi
 	getPredictionStatusData: (env, b) => getPredictionStatusData(env, s(b.token)),
