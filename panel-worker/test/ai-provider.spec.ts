@@ -4,6 +4,7 @@ const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: im
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
 import {
+	aiClearAllCooldowns,
 	aiCooldown,
 	aiGenerate,
 	aiLoadProviders,
@@ -547,6 +548,17 @@ describe("jeda provider yang bermasalah", () => {
 		const wait = await aiNextReadyInMs(env, await botCfg(env));
 		expect(wait).toBeGreaterThan(15_000);
 		expect(wait).toBeLessThanOrEqual(22_000);
+	});
+
+	it("PROSES manual menghapus semua jeda (memori & bot_kv)", async () => {
+		await botCfgSet(env, { ai_providers: JSON.stringify([prov()]) });
+		mockFetch(() => ({ status: 503, body: { error: { message: "busy" } } }));
+		await aiGenerate(env, await botCfg(env), { purpose: "t", messages: msgs }, (t) => t).catch(() => {});
+		expect(aiCooldown(await botCfg(env), prov())).not.toBeNull();
+		await aiClearAllCooldowns(env, await botCfg(env));
+		aiResetCooldowns(); // proses baru
+		expect(aiCooldown(await botCfg(env), prov())).toBeNull();
+		expect(await aiNextReadyInMs(env, await botCfg(env))).toBe(0);
 	});
 
 	it("simpan ulang provider di panel menghapus jedanya", async () => {

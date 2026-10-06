@@ -537,6 +537,17 @@ export async function aiClearCooldown(env: Env, cfg: Record<string, string>, id:
 	await persistCooldowns(env, cfg, stored);
 }
 
+/**
+ * Lupakan semua jeda. Dipakai saat pemilik menekan PROSES manual: itu
+ * permintaan eksplisit untuk mencoba sekarang, jadi jeda dari run
+ * sebelumnya tidak boleh membuat tombol itu langsung berhenti dgn 0 artikel.
+ * Jeda yang muncul DI DALAM run ini tetap berlaku.
+ */
+export async function aiClearAllCooldowns(env: Env, cfg: Record<string, string>): Promise<void> {
+	memCooldowns.clear();
+	if (Object.keys(storedCooldowns(cfg)).length) await persistCooldowns(env, cfg, {});
+}
+
 /** Jeda terdekat yang akan habis (ms dari sekarang) di antara provider aktif, atau null. */
 export async function aiNextReadyInMs(env: Env, cfg: Record<string, string>): Promise<number | null> {
 	const now = Date.now();
