@@ -16,7 +16,7 @@
 //
 // Cara pakai: `npx tsx scripts/gh-turbo-run.ts` dengan env TURSO_URL &
 // TURSO_TOKEN ter-set (lihat .github/workflows/news-turbo.yml).
-import { aiNextReadyInMs } from "../src/lib/ai-provider";
+import { aiClearAllCooldowns, aiNextReadyInMs } from "../src/lib/ai-provider";
 import { botCfg, botCfgSet, botNewsRun } from "../src/lib/bot-news";
 
 const env = {
@@ -136,6 +136,9 @@ async function main() {
 		}
 		await botCfgSet(env, { auto_last_run_ts: String(Date.now()) });
 		console.log(`[diag] Proses otomatis (interval ${intervalMin} menit) -- lanjut.`);
+	} else {
+		// Tombol PROSES manual: coba semua provider sekarang, abaikan jeda dari run sebelumnya.
+		await aiClearAllCooldowns(env, await botCfg(env));
 	}
 
 	// Blogger & situs sendiri jalan BERSAMAAN (dulu berurutan: situs baru mulai
