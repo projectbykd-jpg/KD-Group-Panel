@@ -86,7 +86,11 @@ export async function livechatRecentLogs(env: Env, token: string) {
 
 export async function livechatBotSync(env: Env, key: string, rows: unknown) {
 	gateBotKey(env, key);
-	const list = Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : [];
+	// `rows` kosong ([]) = Kotak Masuk memang kosong -> sesi lama dibuang. Tapi
+	// body tanpa `rows` / bukan array (userscript versi lama, request rusak)
+	// BUKAN berarti kosong: jangan sampai itu mematikan semua bot & menghapus sesi.
+	if (!Array.isArray(rows)) throw new Error("rows wajib berupa array.");
+	const list = rows as Array<Record<string, unknown>>;
 	const mapped = list.map((r) => ({
 		sessionKey: String(r.sessionKey ?? r.session_key ?? ""),
 		queueCode: String(r.queueCode ?? r.queue_code ?? ""),

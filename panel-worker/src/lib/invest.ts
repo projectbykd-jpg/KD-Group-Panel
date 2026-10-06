@@ -93,7 +93,23 @@ export function normalizeInvestBaseUrl(raw: string): string {
 // ---------------------------------------------------------------------------
 // CONFIG (per-user) — invest_config
 // ---------------------------------------------------------------------------
+// Kolom pasaran_json ditambahkan belakangan dan tidak ada di migration/turso_001
+// (hanya di database produksi yang sudah dipatch tangan). Tanpa ini Turso baru
+// gagal "table invest_config has no column named pasaran_json". Dicek sekali
+// per isolate; ALTER yang gagal (kolom sudah ada) diabaikan.
+let pasaranColumnReady = false;
+export async function ensureInvestPasaranColumn(env: Env): Promise<void> {
+	if (pasaranColumnReady) return;
+	try {
+		await getTurso(env).prepare(`ALTER TABLE invest_config ADD COLUMN pasaran_json TEXT NOT NULL DEFAULT ''`).run();
+	} catch {
+		/* kolom sudah ada */
+	}
+	pasaranColumnReady = true;
+}
+
 export async function investLoadConfig(env: Env, user: string): Promise<InvestConfig> {
+	await ensureInvestPasaranColumn(env);
 	const row = await getTurso(env).prepare(`SELECT * FROM invest_config WHERE username = ?`)
 		.bind(user)
 		.first<Record<string, unknown>>();

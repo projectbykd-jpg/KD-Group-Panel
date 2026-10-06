@@ -6,7 +6,7 @@ import { hashPassword } from "../lib/crypto";
 import { logActivity } from "../lib/activity";
 import { getUserProfiles, withUserMenusColumn } from "../lib/db";
 import { MENU_ITEMS, parseMenus, serializeMenus } from "../lib/menus";
-import { listActiveSessions, migrateKvSessionsOnce } from "../lib/session";
+import { listActiveSessions, migrateKvSessionsOnce, revokeUserSessions } from "../lib/session";
 import { tsNow } from "../lib/time";
 
 const OFFSET_MS = 7 * 60 * 60 * 1000;
@@ -157,6 +157,16 @@ export async function adminSaveUser(env: Env, token: string, data: Record<string
 		}
 		args.push(originalRow.id);
 		await withUserMenusColumn(env, () => env.DB.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).bind(...args).run());
+		// Sesi lama tidak boleh bertahan setelah identitas/kredensial berubah:
+		// rename -> sesi atas nama lama jadi yatim (dan bisa diwarisi akun baru
+		// yang memakai nama itu); password di-reset / akun dinonaktifkan -> token
+		// yang mungkin sudah bocor harus mati. Sesi admin yang sedang memproses
+		// dipertahankan (kalau dia mengubah akunnya sendiri).
+		if (originalRow.username.toLowerCase() !== username.toLowerCase()) {
+			await revokeUserSessions(env, originalRow.username);
+		} else if (password || status !== "AKTIF") {
+			await revokeUserSessions(env, username, admin.token);
+		}
 		await logActivity(
 			env,
 			admin.username,
@@ -222,6 +232,9 @@ export async function adminDeleteUser(env: Env, token: string, targetUsername: s
 		if (Number(cnt?.n ?? 0) <= 1) throw new Error("Admin terakhir tidak boleh dihapus.");
 	}
 	await env.DB.prepare(`DELETE FROM users WHERE id = ?`).bind(row.id).run();
+	// Cabut sesinya: kalau tidak, token lama ikut berlaku untuk akun baru yang
+	// kelak dibuat dengan username yang sama.
+	await revokeUserSessions(env, target);
 	await logActivity(env, admin.username, "HAPUS USER", "Target: " + target, "BERHASIL", "Akun dihapus");
 	return { success: true, message: "User " + target + " berhasil dihapus." };
 }

@@ -4662,7 +4662,7 @@
             + fld('Auto Posting Prediksi', r.url)
             + (r.urlInvest ? fld('Pump Scan INVEST', r.urlInvest) : '')
             + '<div style="margin-top:8px">Jam sesi (' + escapeHtml(r.timezone || 'WIB') + '): <b class="text-cyan-300">' + escapeHtml(times) + '</b></div>'
-            + '<div style="margin-top:4px;color:#64748b">Router memilih sendiri sesi yang jatuh tempo, susulan sampai 90 menit.</div>';
+            + '<div style="margin-top:4px;color:#64748b">Router memilih sendiri sesi yang jatuh tempo, susulan sampai 25 menit.</div>';
           try { navigator.clipboard.writeText(r.url); toast('URL cron auto-posting disalin'); } catch (e) {}
         })
         .withFailureHandler(e => {

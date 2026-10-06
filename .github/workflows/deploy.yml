@@ -42,13 +42,13 @@ jobs:
         # tidak ada versi yang bergeser diam-diam antar deploy).
         run: npm ci
 
-      - name: Cek TypeScript (batal deploy kalau ada error)
+      # Gerbang yang SAMA dengan check.yml (PR): typecheck src + test, unit test,
+      # build UI, dan cek nama fungsi tak terdefinisi di JavaScript panel. Dulu
+      # di sini cuma tsc + test, jadi `tsc -p test` dan cek UI baru ketahuan
+      # kalau seseorang lupa menjalankannya sebelum merge.
+      - name: Cek lengkap (typecheck + test + build UI) -- batal deploy kalau gagal
         working-directory: panel-worker
-        run: npx tsc --noEmit -p .
-
-      - name: Unit test (batal deploy kalau ada yang gagal)
-        working-directory: panel-worker
-        run: npm test
+        run: npm run check
 
       - name: Build UI + deploy ke Cloudflare
         working-directory: panel-worker

@@ -79,6 +79,45 @@ async function capUserSessions(env: Env, username: string, keep = MAX_SESSIONS_P
 	}
 }
 
+// Cabut SEMUA sesi milik satu username (D1 + KV). Dipakai saat akun dihapus,
+// di-rename, dinonaktifkan, atau password-nya di-reset admin. Tanpa ini token
+// lama tetap hidup: akun yang dibuat ulang dengan username sama ikut mewarisi
+// sesi lama, dan sesi yatim menumpuk di daftar "Sesi Aktif".
+// `exceptToken` = sesi admin yang sedang memproses (supaya tidak menendang diri
+// sendiri saat mengganti password akunnya sendiri).
+export async function revokeUserSessions(env: Env, username: string, exceptToken = ""): Promise<number> {
+	const lc = String(username ?? "").trim().toLowerCase();
+	if (!lc) return 0;
+	let tokens: string[] = [];
+	try {
+		const res = await env.DB.prepare(`SELECT token FROM sessions WHERE lower(username) = ?`)
+			.bind(lc)
+			.all<{ token: string }>();
+		tokens = (res.results ?? []).map((r) => r.token).filter((t) => t && t !== exceptToken);
+	} catch {
+		return 0;
+	}
+	if (!tokens.length) return 0;
+	for (let i = 0; i < tokens.length; i += 50) {
+		const chunk = tokens.slice(i, i + 50);
+		try {
+			await env.DB.prepare(`DELETE FROM sessions WHERE token IN (${chunk.map(() => "?").join(",")})`)
+				.bind(...chunk)
+				.run();
+		} catch {
+			/* abaikan -- KV di bawah tetap dibersihkan */
+		}
+	}
+	for (const t of tokens) {
+		try {
+			await env.SESS.delete(t);
+		} catch {
+			/* abaikan (kuota KV delete) */
+		}
+	}
+	return tokens.length;
+}
+
 // Daftar sesi aktif (username unik + jumlah token + login pertama + kedaluwarsa
 // terakhir), dibaca dari D1 — TIDAK memakai SESS.list (hemat kuota KV list).
 export async function listActiveSessions(env: Env): Promise<

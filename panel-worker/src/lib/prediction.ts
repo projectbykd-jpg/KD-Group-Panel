@@ -128,11 +128,13 @@ async function generatePrediksiTextForWebsite(namaPasaran: string, seedKey: stri
 	const shioPilihan = DAFTAR_SHIO[randInt(random, 0, DAFTAR_SHIO.length - 1)];
 
 	const b1 = bbfs.charAt(0), b2 = bbfs.charAt(1), b3 = bbfs.charAt(2), b4 = bbfs.charAt(3);
+	// 4 digit pertama BBFS -> 12 pasangan berurutan dengan posisi berbeda.
+	// (Dulu b2+b2 & b4+b3 tertulis dobel, jadi b2b4/b4b2 tidak pernah muncul.)
 	const line12 = [
 		b1 + b2, b1 + b3, b1 + b4,
-		b2 + b2, b2 + b3, b2 + b1,
-		b3 + b4, b3 + b1, b3 + b2,
-		b4 + b1, b4 + b3, b4 + b3,
+		b2 + b1, b2 + b3, b2 + b4,
+		b3 + b1, b3 + b2, b3 + b4,
+		b4 + b1, b4 + b2, b4 + b3,
 	].join(" ");
 
 	let hasil = "PREDIKSI <" + namaPasaran + "> HARI INI\n\n";
