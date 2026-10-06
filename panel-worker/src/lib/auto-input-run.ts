@@ -63,6 +63,9 @@ function attr(tag: string, name: string): string | null {
 }
 const hasFlag = (tag: string, name: string) => new RegExp(`\\s${name}(?:\\s|=|>|/|$)`, "i").test(tag);
 
+/** Judul tabel: "Daftar  Nomor X" -- spasinya sering berupa &nbsp; di HTML aslinya. */
+const DAFTAR_RE = /Daftar(?:\s|&nbsp;|&#160;|\u00a0)+Nomor/i;
+
 export interface FormInput {
 	name: string;
 	type: string;
@@ -159,7 +162,7 @@ export interface ResultTable {
 
 /** Tabel "Daftar Nomor ..." (nilai <input> di dalam sel ikut dibaca). */
 export function parseResultTable(html: string): ResultTable | null {
-	const at = html.search(/Daftar\s+Nomor/i);
+	const at = html.search(DAFTAR_RE);
 	if (at < 0) return null;
 	const rest = html.slice(at);
 	const tm = rest.match(/<table\b[\s\S]*?<\/table>/i);
@@ -189,6 +192,40 @@ export function topRow(t: ResultTable): { period: number; date: string; numbers:
 	const dm = (r.cells[di] ?? "").match(/(\d{1,2})-(\d{1,2})-(\d{4})/);
 	const date = dm ? `${dm[3]}-${dm[2].padStart(2, "0")}-${dm[1].padStart(2, "0")}` : "";
 	return { period, date, numbers: ni.map((i) => (r.cells[i] ?? "").trim()) };
+}
+
+/** Isi <input> ikut jadi teks (htmlText membuangnya), supaya nilai kolom tabel terbaca. */
+function textWithInputs(html: string): string {
+	return htmlText(html.replace(/<input\b([^>]*)>/gi, (_m, a) => " " + (attr(a, "value") ?? "") + " "));
+}
+
+/**
+ * Cadangan kalau struktur <table> tidak terbaca (tag tidak ditutup, judul di dalam tabel, dsb):
+ * baca baris teratas dari TEKS di bawah "Daftar Nomor ...". Kolom: No, Tanggal(jam), E, Hari, Periode, Nomor Keluar 1..N.
+ */
+export function topRowFromText(html: string): { period: number; date: string; numbers: string[] } | null {
+	const at = html.search(DAFTAR_RE);
+	if (at < 0) return null;
+	const t = textWithInputs(html.slice(at));
+	const hm = t.match(/Periode\s+((?:Nomor\s+Keluar\s*\d*\s*)+)Hitung/i);
+	if (!hm) return null;
+	const cols = (hm[1].match(/Nomor\s+Keluar/gi) ?? []).length;
+	const after = t.slice((hm.index ?? 0) + hm[0].length);
+	const rm = after.match(
+		new RegExp(`\\b1\\s+(\\d{1,2})-(\\d{1,2})-(\\d{4})\\s+\\d{1,2}:\\d{2}(?::\\d{2})?\\s+(?:E\\s+)?[A-Za-z]+\\s+(\\d+)((?:\\s+\\d{3,6}){${cols}})`),
+	);
+	if (!rm) return null;
+	return {
+		period: Number(rm[4]),
+		date: `${rm[3]}-${rm[2].padStart(2, "0")}-${rm[1].padStart(2, "0")}`,
+		numbers: rm[5].trim().split(/\s+/),
+	};
+}
+
+/** Baris teratas "Daftar Nomor": dari struktur tabel, kalau gagal dari teks. */
+export function readTopRow(html: string): { period: number; date: string; numbers: string[] } | null {
+	const t = parseResultTable(html);
+	return (t && topRow(t)) || topRowFromText(html);
 }
 
 export interface AngkaPage {
@@ -251,9 +288,12 @@ export function parseAngkaPage(html: string, plan: Plan): AngkaPage {
 		if (p.maxlength && p.maxlength < plan.prizes[0].length) fail("Panjang kolom angka tidak cocok dengan prize.");
 	}
 
-	const table = parseResultTable(html);
-	const prev = table && topRow(table);
-	if (!prev) fail("Tabel Daftar Nomor / baris periode sebelumnya tidak terbaca.");
+	const prev = readTopRow(html);
+	if (!prev) {
+		const at = html.search(DAFTAR_RE);
+		const seen = at < 0 ? "judul 'Daftar Nomor' tidak ditemukan" : textWithInputs(html.slice(at)).slice(0, 260);
+		fail(`Tabel Daftar Nomor / baris periode sebelumnya tidak terbaca. Yang terbaca: "${seen}"`);
+	}
 	if (prev!.period + 1 !== period) fail(`Periode form ${period} ≠ periode terakhir ${prev!.period} + 1. Ada periode terlewat / sudah terinput.`);
 	if (!prev!.date || prev!.date >= plan.date) fail(`Baris terakhir bertanggal ${prev!.date || "?"} (≥ ${plan.date}) — result hari ini kemungkinan sudah terinput.`);
 
@@ -444,8 +484,7 @@ export async function runAutoInput(opts: {
 		await opts.onStage?.("kirim", period);
 		stage = "kirim";
 		const verifyEntered = async () => {
-			const t = parseResultTable(await adminReq(f, sess, angkaPath));
-			const top = t && topRow(t);
+			const top = readTopRow(await adminReq(f, sess, angkaPath));
 			return !!top && top.period === page.period && used.every((n, i) => top.numbers[i] === n);
 		};
 		// Satu kali saja (tidak ada percobaan ulang): request asli browser POST ke admin_angka13.php tanpa query.

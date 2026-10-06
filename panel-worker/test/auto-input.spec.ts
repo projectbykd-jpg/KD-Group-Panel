@@ -5,7 +5,7 @@ vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
 import { autoInputAfterSend } from "../src/api/auto-input";
 import { parseCookieInput, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
-import { frameSources, parseAngkaPage, parseHitungPage, runAutoInput, buildPayload, parseForms } from "../src/lib/auto-input-run";
+import { frameSources, parseAngkaPage, readTopRow, parseHitungPage, runAutoInput, buildPayload, parseForms } from "../src/lib/auto-input-run";
 import { processText } from "../src/lib/parser";
 import { fakeD1, fakeEnv } from "./helpers/fake-env";
 import type { UserProfile } from "../src/lib/db";
@@ -159,6 +159,27 @@ describe("parseAngkaPage", () => {
 		const p = planAutoInput(t, processText(t));
 		if (!p.ok) throw new Error(p.reason);
 		expect(parseAngkaPage(await html({ prizeCols: 3 }), p).prizeFields).toEqual(["angka", "angka2", "angka3"]);
+	});
+});
+
+describe("tabel Daftar Nomor dengan HTML 'liar' (tag tidak ditutup, judul di dalam tabel)", () => {
+	const messy = (rows: string) => `<h1>Silahkan isi Angka baru LAOS MALAM</h1>
+<table><tr><td colspan=9><b>Daftar&nbsp; Nomor LAOS MALAM</b>
+<tr bgcolor=#6600ff><td>No<td>Tanggal<td>Hari<td>Periode<td>Nomor Keluar 1<td>Nomor Keluar 2<td>Nomor Keluar 3<td>Hitung<td>
+${rows}</table>`;
+	it("baca baris teratas dari teks", () => {
+		const html = messy(`<tr bgcolor=#00cc33><td>1<td><input value="05-10-2026 &nbsp;23:30:35" size=20><input type=button value="E"><td>Senin<td>80<td><input value="7830"><td><input value="4918"><td><input value="0285"><td>Yes
+<tr><td>2<td><input value="04-10-2026 23:31:28"><input type=button value="E"><td>Minggu<td>79<td><input value="3392"><td><input value="1829"><td><input value="0295"><td>Yes`);
+		expect(readTopRow(html)).toEqual({ period: 80, date: "2026-10-05", numbers: ["7830", "4918", "0285"] });
+	});
+	it("satu kolom nomor (FLORIDAEVE) juga terbaca & angka berawalan 0 dipertahankan", () => {
+		const html = `<b>Daftar Nomor X</b><table><tr><td>No<td>Tanggal<td>Hari<td>Periode<td>Nomor Keluar 1<td>Hitung
+<tr><td>1<td><input value="05-10-2026 08:52:09"><input type=button value="E"><td>Senin<td>1629<td><input value="0283"><td>Yes`;
+		expect(readTopRow(html)).toEqual({ period: 1629, date: "2026-10-05", numbers: ["0283"] });
+	});
+	it("kalau tetap tak terbaca, pesan error menunjukkan apa yang terbaca", () => {
+		const html = `<h2>Silahkan isi Angka baru FLORIDAEVE</h2>` + "x";
+		expect(readTopRow(html)).toBeNull();
 	});
 });
 
