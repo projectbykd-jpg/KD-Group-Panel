@@ -4,6 +4,7 @@
 import { getSys } from "./settings";
 import { getMaintenance, UserProfile } from "./db";
 import { dateKeyNow } from "./time";
+import { JADWAL_PREDIKSI_CONFIG, CLOSING_PREDICTION_SLOTS } from "./prediction";
 
 export interface DashOptions {
 	page: number;
@@ -122,6 +123,62 @@ async function buildActivitySummary(env: Env, profile: UserProfile) {
 		},
 		maintenance,
 	};
+}
+
+// ---------------------------------------------------------------------------
+// Wawasan untuk halaman Dashboard: aktivitas per jam hari ini (+ yang gagal), top operator (admin), dan jadwal
+// prediksi hari ini. Dua query agregat ringan, di-cache per-isolate selama TTL ringkasan (sama seperti _sumCache).
+// ---------------------------------------------------------------------------
+export interface HomeInsights {
+	hourly: number[];
+	hourlyFailed: number[];
+	topUsers: { username: string; n: number }[];
+	schedule: { jam: string; nama: string; total: number }[];
+	closing: string[];
+	nowMinutes: number;
+}
+const _insightCache = new Map<string, { ts: number; data: HomeInsights }>();
+
+export async function getHomeInsights(env: Env, profile: UserProfile): Promise<HomeInsights> {
+	const isAdmin = profile.role === "ADMIN";
+	const key = isAdmin ? "__admin__" : profile.username;
+	const hit = _insightCache.get(key);
+	const ttl = (await getSys(env, "sys_dash_summary_ttl_sec")) * 1000;
+	const nowMinutes = (() => { const d = new Date(Date.now() + 7 * 3600_000); return d.getUTCHours() * 60 + d.getUTCMinutes(); })();
+	if (hit && Date.now() - hit.ts < ttl) return { ...hit.data, nowMinutes };
+
+	const today = dateKeyNow();
+	const scope = isAdmin ? "ts >= ? AND ts < ?" : "ts >= ? AND ts < ? AND username = ?";
+	const args: unknown[] = isAdmin ? [dayLo(today), dayHi(today)] : [dayLo(today), dayHi(today), profile.username];
+	const [hr, top] = await Promise.all([
+		env.DB.prepare(
+			`SELECT substr(ts, 12, 2) AS h, COUNT(*) AS n,
+			        SUM(CASE WHEN upper(status) IN ('GAGAL','ERROR') THEN 1 ELSE 0 END) AS f
+			 FROM activity_log WHERE ${scope} GROUP BY h`,
+		).bind(...args).all<{ h: string; n: number; f: number }>(),
+		isAdmin
+			? env.DB.prepare(`SELECT username, COUNT(*) AS n FROM activity_log WHERE ${scope} GROUP BY username ORDER BY n DESC LIMIT 5`)
+				.bind(...args).all<{ username: string; n: number }>()
+			: Promise.resolve({ results: [] as { username: string; n: number }[] }),
+	]);
+	const hourly = Array(24).fill(0), hourlyFailed = Array(24).fill(0);
+	for (const r of hr.results ?? []) {
+		const h = Number(r.h);
+		if (h >= 0 && h < 24) { hourly[h] = Number(r.n || 0); hourlyFailed[h] = Number(r.f || 0); }
+	}
+	const data: HomeInsights = {
+		hourly, hourlyFailed,
+		topUsers: (top.results ?? []).map((r) => ({ username: String(r.username || ""), n: Number(r.n || 0) })),
+		schedule: JADWAL_PREDIKSI_CONFIG.map((x) => ({ jam: x.jam, nama: x.nama, total: x.pasaran.length })),
+		closing: [...CLOSING_PREDICTION_SLOTS],
+		nowMinutes,
+	};
+	_insightCache.set(key, { ts: Date.now(), data });
+	if (_insightCache.size > 64) {
+		const oldest = [..._insightCache.entries()].sort((a, b) => a[1].ts - b[1].ts)[0];
+		if (oldest) _insightCache.delete(oldest[0]);
+	}
+	return data;
 }
 
 export interface ActivityRow {

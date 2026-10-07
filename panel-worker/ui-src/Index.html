@@ -287,16 +287,19 @@
       <div id="main-panel" class="flex flex-col gap-5 fade-in">
         <section class="dashboard-hero">
           <div class="dashboard-hero-main">
-            <h2 class="dashboard-hero-title">Selamat datang di KD-Group</h2>
+            <div id="homeGreetDate" class="dash-eyebrow">Memuat…</div>
+            <h2 id="homeGreeting" class="dashboard-hero-title">Selamat datang di KD-Group</h2>
             <p class="dashboard-hero-sub">Ringkasan aktivitas panel, status pengiriman, dan akses cepat ke modul operasional.</p>
             <div class="dashboard-chips">
               <span id="homeDashboardUser" class="dashboard-chip"><i class="fa-solid fa-user"></i>Memuat user…</span>
-              <span class="dashboard-chip"><i class="fa-solid fa-calendar-day"></i>Hari ini</span>
+              <span id="homeRoleChip" class="dashboard-chip"><i class="fa-solid fa-shield-halved"></i>Role</span>
+              <span id="homeNextSlot" class="dashboard-chip"><i class="fa-solid fa-hourglass-half"></i>Sesi berikutnya…</span>
               <span id="homeDashboardSync" class="dashboard-chip"><i class="fa-solid fa-rotate"></i>Sinkronisasi…</span>
             </div>
           </div>
           <div class="dashboard-hero-side">
             <span class="dashboard-status-pill"><span class="dashboard-live-dot"></span>Panel online</span>
+            <span id="homeMaintPill" class="dashboard-status-pill warn" hidden><i class="fa-solid fa-screwdriver-wrench"></i>Mode maintenance</span>
             <!-- Angka ini dipakai JS (homeMiniSends/homeMiniToday); tampil di kartu statistik di bawah, jadi disembunyikan di sini. -->
             <div class="dashboard-mini-grid" hidden>
               <div class="dashboard-mini-stat"><span>Pengiriman</span><b id="homeMiniSends">0</b></div>
@@ -306,7 +309,7 @@
         </section>
 
         <section id="homeDashboardStats" class="grid grid-cols-2 xl:grid-cols-4 gap-3.5">
-          <div class="home-stat-card glass-card rounded-2xl p-4">
+          <div class="home-stat-card glass-card rounded-2xl p-4 tone-success">
             <div class="home-stat-icon success"><i class="fa-solid fa-circle-check"></i></div>
             <div class="min-w-0">
               <div class="home-stat-label">Berhasil</div>
@@ -314,7 +317,7 @@
               <div class="home-stat-sub"><span class="dashboard-live-dot"></span>Pengiriman sukses</div>
             </div>
           </div>
-          <div class="home-stat-card glass-card rounded-2xl p-4">
+          <div class="home-stat-card glass-card rounded-2xl p-4 tone-danger">
             <div class="home-stat-icon danger"><i class="fa-solid fa-triangle-exclamation"></i></div>
             <div class="min-w-0">
               <div class="home-stat-label">Gagal</div>
@@ -322,7 +325,7 @@
               <div class="home-stat-sub">Perlu diperiksa</div>
             </div>
           </div>
-          <div class="home-stat-card glass-card rounded-2xl p-4">
+          <div class="home-stat-card glass-card rounded-2xl p-4 tone-info">
             <div class="home-stat-icon info"><i class="fa-solid fa-paper-plane"></i></div>
             <div class="min-w-0">
               <div class="home-stat-label">Pengiriman</div>
@@ -330,13 +333,36 @@
               <div class="home-stat-sub">Total proses kirim</div>
             </div>
           </div>
-          <div class="home-stat-card glass-card rounded-2xl p-4">
+          <div class="home-stat-card glass-card rounded-2xl p-4 tone-accent">
             <div class="home-stat-icon accent"><i class="fa-solid fa-chart-line"></i></div>
             <div class="min-w-0">
               <div class="home-stat-label">Aktivitas</div>
               <div id="homeStatToday" class="home-stat-value" data-fx-count="0">0</div>
               <div class="home-stat-sub">Aktivitas hari ini</div>
             </div>
+          </div>
+        </section>
+
+        <section class="grid grid-cols-1 xl:grid-cols-12 gap-5">
+          <div class="glass-card rounded-[1.8rem] p-5 xl:col-span-8">
+            <div class="flex items-start justify-between gap-4 mb-3">
+              <div>
+                <h2 class="card-title">Aktivitas hari ini per jam</h2>
+                <p class="card-sub">Jumlah aktivitas tiap jam (WIB). Batang merah = gagal.</p>
+              </div>
+              <div class="dash-donut" title="Rasio pengiriman berhasil terhadap gagal hari ini">
+                <svg viewBox="0 0 36 36" aria-hidden="true"><circle class="dash-donut-bg" cx="18" cy="18" r="15.9"/><circle id="homeDonutArc" class="dash-donut-arc" cx="18" cy="18" r="15.9" stroke-dasharray="0 100"/></svg>
+                <div class="dash-donut-txt"><b id="homeDonutPct">–</b><small>sukses</small></div>
+              </div>
+            </div>
+            <div id="homeHourly" class="dash-bars" role="img" aria-label="Grafik aktivitas per jam"></div>
+            <div class="dash-bars-axis"><span>00</span><span>03</span><span>06</span><span>09</span><span>12</span><span>15</span><span>18</span><span>21</span><span>23</span></div>
+          </div>
+
+          <div class="glass-card rounded-[1.8rem] p-5 xl:col-span-4">
+            <h2 class="card-title">Jadwal prediksi hari ini</h2>
+            <p class="card-sub">Sesi auto-posting &amp; kata penutup (WIB).</p>
+            <div id="homeSchedule" class="dash-timeline"><div class="home-activity-empty"><i class="fa-solid fa-spinner fa-spin"></i> Memuat jadwal…</div></div>
           </div>
         </section>
 
@@ -356,30 +382,33 @@
             </div>
           </div>
 
-          <div class="glass-card rounded-[1.8rem] p-5 xl:col-span-4">
-            <h2 class="card-title">Akses cepat</h2>
-            <p class="card-sub">Menu yang paling sering dipakai.</p>
-            <div class="mt-4 grid gap-2.5">
-              <button onclick="switchPage('result')" class="dashboard-action">
-                <span class="dashboard-action-icon result"><i class="fa-solid fa-trophy"></i></span>
-                <span><b>Result</b><small>Input & kirim result</small></span>
-                <i class="fa-solid fa-chevron-right ml-auto text-slate-600"></i>
-              </button>
-              <button onclick="switchPage('prediction')" class="dashboard-action">
-                <span class="dashboard-action-icon prediction"><i class="fa-solid fa-wand-magic-sparkles"></i></span>
-                <span><b>Prediksi</b><small>Jadwal & kata penutup</small></span>
-                <i class="fa-solid fa-chevron-right ml-auto text-slate-600"></i>
-              </button>
-              <button onclick="switchPage('invest')" class="dashboard-action nav-extra">
-                <span class="dashboard-action-icon invest"><i class="fa-solid fa-magnifying-glass-dollar"></i></span>
-                <span><b>AutoCheck Invest</b><small>Pemeriksaan otomatis</small></span>
-                <i class="fa-solid fa-chevron-right ml-auto text-slate-600"></i>
-              </button>
-              <button onclick="switchPage('activity')" class="dashboard-action">
-                <span class="dashboard-action-icon activity"><i class="fa-solid fa-clock-rotate-left"></i></span>
-                <span><b>Aktivitas</b><small>Riwayat pekerjaan akun</small></span>
-                <i class="fa-solid fa-chevron-right ml-auto text-slate-600"></i>
-              </button>
+          <div class="flex flex-col gap-5 xl:col-span-4">
+            <div class="glass-card rounded-[1.8rem] p-5">
+              <h2 class="card-title">Akses cepat</h2>
+              <p class="card-sub">Menu yang paling sering dipakai.</p>
+              <div class="mt-4 grid grid-cols-2 gap-2.5 dash-tiles">
+                <button onclick="switchPage('result')" class="dashboard-action">
+                  <span class="dashboard-action-icon result"><i class="fa-solid fa-trophy"></i></span>
+                  <span><b>Result</b><small>Input &amp; kirim result</small></span>
+                </button>
+                <button onclick="switchPage('prediction')" class="dashboard-action">
+                  <span class="dashboard-action-icon prediction"><i class="fa-solid fa-wand-magic-sparkles"></i></span>
+                  <span><b>Prediksi</b><small>Jadwal &amp; kata penutup</small></span>
+                </button>
+                <button onclick="switchPage('invest')" class="dashboard-action nav-extra">
+                  <span class="dashboard-action-icon invest"><i class="fa-solid fa-magnifying-glass-dollar"></i></span>
+                  <span><b>AutoCheck Invest</b><small>Pemeriksaan otomatis</small></span>
+                </button>
+                <button onclick="switchPage('activity')" class="dashboard-action">
+                  <span class="dashboard-action-icon activity"><i class="fa-solid fa-clock-rotate-left"></i></span>
+                  <span><b>Aktivitas</b><small>Riwayat pekerjaan akun</small></span>
+                </button>
+              </div>
+            </div>
+            <div id="homeTopCard" class="glass-card rounded-[1.8rem] p-5" hidden>
+              <h2 class="card-title">Operator teraktif hari ini</h2>
+              <p class="card-sub">Lima user dengan aktivitas terbanyak.</p>
+              <div id="homeTopUsers" class="dash-rank"></div>
             </div>
           </div>
         </section>

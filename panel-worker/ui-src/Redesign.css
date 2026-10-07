@@ -1134,6 +1134,70 @@ thead th:last-child, tbody td:last-child { padding-right: 14px !important; }
 .int-test.ok i { color: #34d399; } .int-test.bad i { color: #fb7185; }
 @media (max-width: 720px) { .int-groups { grid-template-columns: 1fr; } }
 
+/* ---- Dashboard v2 (datar, tanpa glow/blur; animasi pendek) ---- */
+.dash-eyebrow { font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ui-text-3); margin-bottom: 4px; }
+.dashboard-hero { padding-bottom: 2px !important; }
+.dashboard-hero-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.dashboard-status-pill.warn { color: #f59e0b !important; border-color: rgba(245,158,11,.4) !important; background: rgba(245,158,11,.08) !important; }
+.dashboard-chip.is-next { color: var(--ui-accent) !important; border-color: rgba(var(--ui-accent-rgb), .4) !important; }
+.dashboard-chip.is-next i { color: var(--ui-accent) !important; }
+
+/* kartu statistik: garis nada tipis di atas (bukan glow) */
+.home-stat-card { position: relative; overflow: hidden; }
+.home-stat-card::before { content: ""; position: absolute; left: 0; top: 0; right: 0; height: 2px; background: var(--tone, var(--ui-line-strong)); }
+.home-stat-card.tone-success { --tone: var(--ui-success); } .home-stat-card.tone-danger { --tone: var(--ui-danger); }
+.home-stat-card.tone-info { --tone: var(--ui-info); } .home-stat-card.tone-accent { --tone: var(--ui-accent); }
+
+/* grafik batang per jam */
+.dash-bars { display: grid; grid-template-columns: repeat(24, 1fr); gap: 4px; align-items: end; height: 210px; padding: 4px 0 0; border-bottom: 1px solid var(--ui-line); }
+.dash-bar { position: relative; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; border-radius: 4px 4px 0 0; min-width: 0; }
+.dash-bar > i { display: block; width: 100%; font-style: normal; min-height: 0; transition: height .28s ease; }
+.dash-bar .ok { background: rgba(var(--ui-accent-rgb), .75); border-radius: 4px 4px 0 0; }
+.dash-bar .bad { background: var(--ui-danger); }
+.dash-bar.empty::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--ui-line); border-radius: 2px; }
+.dash-bar.now { outline: 1px dashed var(--ui-line-strong); outline-offset: 1px; }
+.dash-bar.now .ok { background: var(--ui-accent); }
+.dash-bars-axis { display: flex; justify-content: space-between; margin-top: 6px; font-size: 10.5px; color: var(--ui-text-3); font-variant-numeric: tabular-nums; }
+
+/* donat rasio sukses */
+.dash-donut { position: relative; width: 74px; height: 74px; flex: 0 0 74px; }
+.dash-donut svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.dash-donut circle { fill: none; stroke-width: 3.6; }
+.dash-donut-bg { stroke: var(--ui-line); }
+.dash-donut-arc { stroke: var(--ui-success); stroke-linecap: round; transition: stroke-dasharray .35s ease; }
+.dash-donut-txt { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.05; }
+.dash-donut-txt b { font-size: 16px; color: var(--ui-text); font-variant-numeric: tabular-nums; }
+.dash-donut-txt small { font-size: 9.5px; color: var(--ui-text-3); }
+
+/* linimasa jadwal */
+.dash-timeline { display: flex; flex-direction: column; margin-top: 12px; max-height: 360px; overflow-y: auto; padding-right: 2px; }
+.dash-slot { display: grid; grid-template-columns: 52px 14px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 7px 0; font-size: 12.5px; }
+.dash-slot .t { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ui-text); }
+.dash-slot .dot { width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--ui-line-strong); background: transparent; justify-self: center; }
+.dash-slot .n { color: var(--ui-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-slot .b { font-size: 10px; font-weight: 700; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--ui-line-strong); color: var(--ui-text-3); white-space: nowrap; }
+.dash-slot.done .dot { background: var(--ui-success); border-color: var(--ui-success); }
+.dash-slot.done .t, .dash-slot.done .n { color: var(--ui-text-3); }
+.dash-slot.next .dot { border-color: var(--ui-accent); background: var(--ui-accent); }
+.dash-slot.next .b { color: var(--ui-accent); border-color: rgba(var(--ui-accent-rgb), .45); }
+.dash-slot.close .n { font-style: italic; }
+.dash-slot + .dash-slot { border-top: 1px solid var(--ui-line); }
+
+/* akses cepat sebagai ubin 2 kolom */
+.dash-tiles .dashboard-action { flex-direction: column; align-items: flex-start !important; gap: 10px; padding: 12px !important; text-align: left; }
+.dash-tiles .dashboard-action > span:last-child { display: flex; flex-direction: column; min-width: 0; }
+
+/* peringkat operator */
+.dash-rank { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.dash-rank-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; align-items: center; font-size: 12.5px; }
+.dash-rank-row .no { color: var(--ui-text-3); font-weight: 700; font-variant-numeric: tabular-nums; }
+.dash-rank-row .bar { position: relative; height: 24px; border-radius: 6px; background: var(--ui-surface-2); overflow: hidden; display: flex; align-items: center; padding: 0 8px; }
+.dash-rank-row .bar > i { position: absolute; inset: 0 auto 0 0; background: rgba(var(--ui-accent-rgb), .22); transition: width .28s ease; }
+.dash-rank-row .bar > span { position: relative; font-weight: 600; color: var(--ui-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-rank-row .v { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ui-text-2); }
+@media (max-width: 720px) { .dash-bars { height: 110px; gap: 2px; } .dashboard-hero-side { align-items: flex-start; } }
+@media (prefers-reduced-motion: reduce) { .dash-bar > i, .dash-donut-arc, .dash-rank-row .bar > i { transition: none; } }
+
 /* ---- LOGIN: background khas KD-Group (statis, tanpa blur/animasi) ---- */
 body { position: relative; }
 #login-bg { display: none; position: fixed; inset: 0; z-index: 0; pointer-events: none; background: #060a11 url("/LOGINBG.svg") center / cover no-repeat; }

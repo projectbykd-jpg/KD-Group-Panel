@@ -12,7 +12,7 @@ import { loadSession, migrateKvSessionsOnce, pruneExpiredSessions } from "./lib/
 import { getTurso } from "./lib/turso";
 import { constEq } from "./lib/crypto";
 import { checkLogin, logout, resumeSession } from "./api/auth";
-import { getBootstrapData, getDashboard } from "./api/dashboard";
+import { getBootstrapData, getDashboard, homeInsights } from "./api/dashboard";
 import { logClientActivity } from "./api/activity";
 import { retryFailedSystem, sendToPanelZOnly, smartAutoSendFast } from "./api/send";
 import {
@@ -169,6 +169,7 @@ const ROUTES: Record<string, Handler> = {
 	// dashboard / activity
 	getBootstrapData: (env, b) => getBootstrapData(env, s(b.token)),
 	getDashboardData: (env, b) => getDashboard(env, s(b.token), b.options ?? b.request),
+	homeInsights: (env, b) => homeInsights(env, s(b.token)),
 	logClientActivity: (env, b) =>
 		logClientActivity(env, s(b.token), s(b.action_name ?? b.act), s(b.detail), s(b.status), s(b.content)),
 
