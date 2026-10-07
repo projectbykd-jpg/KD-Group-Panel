@@ -30,11 +30,11 @@ describe("Dashboard: wawasan per jam / top operator / jadwal", () => {
 		expect(a.hourly[9]).toBe(3); expect(a.hourlyFailed[9]).toBe(1); expect(a.hourly[14]).toBe(1);
 		expect(a.hourly.reduce((x, y) => x + y, 0)).toBeGreaterThanOrEqual(4);
 		expect(a.topUsers.map((u) => u.username)).toContain("Opr");
-		expect(a.schedule).toHaveLength(7); expect(a.closing).toEqual(["06:15", "16:00"]);
+		expect((a as unknown as { scope: string }).scope).toBe("all"); expect(a.schedule).toHaveLength(7); expect(a.closing).toEqual(["06:15", "16:00"]);
 
 		const o = (await homeInsights(ctx.env, await tok("Opr", "pw-opr"))) as { hourly: number[]; topUsers: unknown[] };
 		expect(o.hourly[9]).toBe(2); expect(o.hourly[14]).toBe(0); // hanya aktivitas Opr
-		expect(o.topUsers).toEqual([]);
+		expect(o.topUsers).toEqual([]); expect((o as unknown as { scope: string }).scope).toBe("own");
 	});
 	it("wajib login", async () => {
 		await expect(homeInsights(ctx.env, "dg_tidak-valid")).rejects.toThrow();

@@ -136,6 +136,8 @@ export interface HomeInsights {
 	schedule: { jam: string; nama: string; total: number }[];
 	closing: string[];
 	nowMinutes: number;
+	/** 'all' = gabungan semua user (admin); 'own' = hanya akun sendiri. */
+	scope: "all" | "own";
 }
 const _insightCache = new Map<string, { ts: number; data: HomeInsights }>();
 
@@ -172,6 +174,7 @@ export async function getHomeInsights(env: Env, profile: UserProfile): Promise<H
 		schedule: JADWAL_PREDIKSI_CONFIG.map((x) => ({ jam: x.jam, nama: x.nama, total: x.pasaran.length })),
 		closing: [...CLOSING_PREDICTION_SLOTS],
 		nowMinutes,
+		scope: isAdmin ? "all" : "own",
 	};
 	_insightCache.set(key, { ts: Date.now(), data });
 	if (_insightCache.size > 64) {

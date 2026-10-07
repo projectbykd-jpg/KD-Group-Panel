@@ -712,7 +712,8 @@
     let homeInsightsSig = '';
     function renderHomeInsights(d) {
       if (!d || !d.success) return;
-      const sig = JSON.stringify([d.hourly, d.hourlyFailed, d.topUsers, d.schedule, d.closing, Math.floor((d.nowMinutes || 0) / 5)]);
+      const sc = document.getElementById('homeHourlyScope'); if (sc) sc.textContent = d.scope === 'all' ? 'Total semua user' : 'Akun Anda';
+      const sig = JSON.stringify([d.scope, d.hourly, d.hourlyFailed, d.topUsers, d.schedule, d.closing, Math.floor((d.nowMinutes || 0) / 5)]);
       if (sig === homeInsightsSig) return; // tidak ada yang berubah -> jangan gambar ulang
       homeInsightsSig = sig;
       const nowH = Math.floor((d.nowMinutes || 0) / 60);
