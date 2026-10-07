@@ -106,6 +106,32 @@ describe("API key KHUSUS Asisten KD (terpisah dari provider bot)", () => {
 		expect(t.success).toBe(true);
 	});
 
+	it("screenshot: dikirim sebagai image_url ke model, divalidasi, tidak dicatat; model tanpa dukungan gambar diberi pesan jelas", async () => {
+		const boss = await tok("Boss", "pw-boss");
+		await assistantSaveConfig(ctx.env, boss, { base_url: "https://generativelanguage.googleapis.com/v1beta/openai", key: KEY, model: "gemini-flash-latest" });
+		const opr = await tok("Opr", "pw-opr");
+		const PNG = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD=";
+		const r = (await assistantAsk(ctx.env, opr, "ini kenapa?", [], PNG)) as { success: boolean; answer: string };
+		expect(r.success).toBe(true);
+		const user = sent.at(-1)!.body.messages.at(-1);
+		expect(user.content).toEqual([{ type: "text", text: "ini kenapa?" }, { type: "image_url", image_url: { url: PNG } }]);
+		expect(sent.at(-1)!.body.messages[0].content).toMatch(/SCREENSHOT/);
+		// tanpa teks pun boleh bila ada gambar
+		expect(((await assistantAsk(ctx.env, opr, "", [], PNG)) as { success: boolean }).success).toBe(true);
+		// bukan gambar / terlalu besar / bukan data-URL -> ditolak sebelum memanggil AI
+		const n = sent.length;
+		await expect(assistantAsk(ctx.env, opr, "x", [], "https://evil.test/a.png")).rejects.toThrow(/Format gambar/);
+		await expect(assistantAsk(ctx.env, opr, "x", [], "data:text/html;base64,PGgxPg==")).rejects.toThrow(/Format gambar/);
+		await expect(assistantAsk(ctx.env, opr, "x", [], "data:image/jpeg;base64," + "A".repeat(800_000))).rejects.toThrow(/terlalu besar/);
+		expect(sent.length).toBe(n);
+		// tanpa gambar: isi pesan tetap teks biasa
+		await assistantAsk(ctx.env, opr, "halo", []);
+		expect(typeof sent.at(-1)!.body.messages.at(-1).content).toBe("string");
+		// model yang menolak gambar
+		vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ error: { message: "image input is not supported by this model" } }), { status: 400, headers: { "content-type": "application/json" } }));
+		await expect(assistantAsk(ctx.env, opr, "lihat", [], PNG)).rejects.toThrow(/tidak bisa membaca gambar/);
+	});
+
 	it("model berpikir di Groq dijawab cepat: reasoning_effort dikirim (gpt-oss=low, qwen=none)", async () => {
 		const boss = await tok("Boss", "pw-boss");
 		await assistantSaveConfig(ctx.env, boss, { base_url: "https://api.groq.com/openai/v1", key: KEY, model: "openai/gpt-oss-20b" });

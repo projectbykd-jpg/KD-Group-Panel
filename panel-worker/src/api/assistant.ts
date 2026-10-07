@@ -45,6 +45,16 @@ async function takeRateSlot(env: Env, username: string, limit: number): Promise<
 	return n <= limit;
 }
 
+/** Screenshot dari browser (sudah diperkecil di sisi klien): hanya data-URL gambar, ukuran dibatasi, tidak disimpan. */
+const MAX_IMG_CHARS = 700_000;
+function cleanImage(raw: unknown): string {
+	if (raw == null || raw === "") return "";
+	const v = String(raw);
+	if (v.length > MAX_IMG_CHARS) throw new Error("Screenshot terlalu besar. Potong bagian yang perlu saja lalu coba lagi.");
+	if (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(v)) throw new Error("Format gambar tidak didukung (hanya JPEG/PNG/WebP).");
+	return v;
+}
+
 export function cleanHistory(raw: unknown): { role: "user" | "assistant"; content: string }[] {
 	const out: { role: "user" | "assistant"; content: string }[] = [];
 	for (const it of Array.isArray(raw) ? raw.slice(-MAX_HISTORY) : []) {
@@ -61,10 +71,11 @@ export async function assistantStatus(env: Env, token: string) {
 	return { success: true, enabled: (await getSys(env, "sys_assistant_enabled")) === 1, kbVersion: ASSISTANT_KB_VERSION };
 }
 
-export async function assistantAsk(env: Env, token: string, message: unknown, history: unknown) {
+export async function assistantAsk(env: Env, token: string, message: unknown, history: unknown, image?: unknown) {
 	const s = await requireSession(env, token, { ignoreMaintenance: true, allowBot: true });
 	if ((await getSys(env, "sys_assistant_enabled")) !== 1) throw new Error("Asisten KD sedang dimatikan admin.");
-	const q = String(message ?? "").trim();
+	const img = cleanImage(image);
+	const q = String(message ?? "").trim() || (img ? "Tolong lihat screenshot ini dan bantu saya: apa yang terlihat dan apa langkah yang benar?" : "");
 	if (!q) throw new Error("Pertanyaan kosong.");
 	if (q.length > MAX_Q) throw new Error(`Pertanyaan terlalu panjang (maks ${MAX_Q} karakter).`);
 	if (!(await takeRateSlot(env, s.username, await getSys(env, "sys_assistant_per_hour")))) {
@@ -80,7 +91,10 @@ export async function assistantAsk(env: Env, token: string, message: unknown, hi
 			: menus.map((k) => MENU_ITEMS.find((m) => m.key === k)?.label ?? k).join(", ") || "(hanya Dashboard)";
 	const ctx = `KONTEKS PENANYA: role=${s.profile.role}; menu yang diizinkan=${allowed}.`;
 	const hist = cleanHistory(history);
-	const system = `${SYSTEM_RULES}\n\n${ctx}\n\nPENGETAHUAN PANEL (versi ${ASSISTANT_KB_VERSION}):\n${selectKnowledge(q, hist.map((h) => h.content))}`;
+	const imgRule = img
+		? "\n\nPENGGUNA MELAMPIRKAN SCREENSHOT. Jelaskan apa yang terlihat KHUSUS terkait panel ini lalu beri langkah yang benar. Jangan membacakan ulang password, cookie, token, key, atau saldo/data pribadi yang kebetulan terlihat; abaikan saja."
+		: "";
+	const system = `${SYSTEM_RULES}${imgRule}\n\n${ctx}\n\nPENGETAHUAN PANEL (versi ${ASSISTANT_KB_VERSION}):\n${selectKnowledge(q, hist.map((h) => h.content))}`;
 
 	let answer = "";
 	let via = "";
@@ -109,7 +123,7 @@ export async function assistantAsk(env: Env, token: string, message: unknown, hi
 					purpose: "assistant",
 					temperature: 0.2,
 					maxTokens,
-					messages: [{ role: "system", content: system }, ...hist, { role: "user", content: q }],
+					messages: [{ role: "system", content: system }, ...hist, { role: "user", content: img ? [{ type: "text" as const, text: q }, { type: "image_url" as const, image_url: { url: img } }] : q }],
 					// jangan menunggu lama: lebih baik pindah ke kandidat berikutnya
 					firstByteMs: 20_000,
 					idleMs: 12_000,
@@ -134,12 +148,15 @@ export async function assistantAsk(env: Env, token: string, message: unknown, hi
 		}
 		if (!answer) throw new Error(errs.join(" | ") || "tidak ada jawaban");
 	} catch (e) {
+		if (img && !(e instanceof AiUnavailableError) && /image|vision|multimodal|modalit|HTTP 400/i.test(e instanceof Error ? e.message : "")) {
+			throw new Error("Model asisten saat ini tidak bisa membaca gambar. Kirim pertanyaan tanpa screenshot, atau minta admin memakai model yang mendukung gambar (mis. Gemini).");
+		}
 		if (e instanceof AiUnavailableError) {
 			throw new Error("Asisten belum aktif: belum ada API key. Minta admin mengisinya di Admin → Pengaturan Sistem → Asisten KD (atau aktifkan AI Provider di Bot → Setting).");
 		}
 		throw new Error("Asisten sedang sibuk atau API key bermasalah. Coba lagi sebentar.");
 	}
-	await logActivity(env, s.username, "ASISTEN KD", `Tanya asisten (${q.length} karakter)`, "BERHASIL", "").catch(() => {});
+	await logActivity(env, s.username, "ASISTEN KD", `Tanya asisten (${q.length} karakter${img ? ", + screenshot" : ""})`, "BERHASIL", "").catch(() => {});
 	return { success: true, answer, via, ms, kbVersion: ASSISTANT_KB_VERSION, at: tsNow() };
 }
 

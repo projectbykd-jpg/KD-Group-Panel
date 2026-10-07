@@ -65,6 +65,14 @@ export function maskKey(key: string): string {
  * Beberapa provider (mis. Groq di balik Cloudflare) menolak permintaan tanpa User-Agent dengan
  * 403 "Forbidden". fetch() di Worker tidak mengirimnya sendiri, jadi kita set eksplisit.
  */
+/** Isi pesan: teks biasa, atau array bagian (teks + gambar data-URL) untuk model yang bisa membaca gambar. */
+export type AiMsgContent = string | ({ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } })[];
+
+/** Teks untuk perkiraan ukuran prompt; gambar dihitung tetap (isi base64-nya tidak ikut). */
+function msgChars(c: AiMsgContent): string {
+	return typeof c === "string" ? c : c.map((x) => (x.type === "text" ? x.text : "x".repeat(1200))).join("\n");
+}
+
 export const AI_USER_AGENT = "KD-Group-Panel/1.0";
 
 export function normalizeBaseUrl(raw: string): string {
@@ -464,7 +472,7 @@ export const AI_IDLE_MS = 60_000; // diam di tengah jawaban
 export const AI_TOTAL_MS = 8 * 60_000; // batas keseluruhan (job GitHub maks 15 menit)
 
 export interface AiCallOpts {
-	messages: { role: string; content: string }[];
+	messages: { role: string; content: AiMsgContent }[];
 	purpose: string;
 	temperature?: number;
 	maxTokens?: number;
@@ -668,7 +676,7 @@ export async function readChatStream(body: ReadableStream<Uint8Array>, onChunk: 
 async function postChat(
 	p: AiProvider,
 	model: string,
-	messages: { role: string; content: string }[],
+	messages: { role: string; content: AiMsgContent }[],
 	opts: { temperature?: number; maxTokens?: number; json?: boolean; extra?: Record<string, unknown>; firstByteMs?: number; idleMs?: number; totalMs?: number },
 ): Promise<{ status: number; body: any }> {
 	const firstByteMs = opts.firstByteMs ?? AI_FIRST_BYTE_MS;
@@ -779,7 +787,7 @@ export async function aiChatProvider(
 	opts: AiCallOpts,
 ): Promise<AiCallResult> {
 	const keyId = await aiKeyId(p.key);
-	const promptChars = opts.messages.map((m) => m.content).join("\n");
+	const promptChars = opts.messages.map((m) => msgChars(m.content)).join("\n");
 	const configured = modelChain(p)[0] || p.model;
 	let model = configured;
 	let callOpts = opts;
