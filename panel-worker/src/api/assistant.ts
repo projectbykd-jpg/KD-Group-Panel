@@ -228,7 +228,26 @@ export async function assistantTest(env: Env, token: string) {
 			: /404/.test(msg)
 				? " — Nama model/Base URL tidak ditemukan; klik DAFTAR MODEL."
 				: "";
-		return { success: false, message: "Gagal: " + msg + hint };
+		return { success: false, message: "Gagal: " + msg + hint + (await diagnose(p)) };
+	}
+}
+
+/**
+ * Bedakan "key/URL bermasalah" dari "model bermasalah": minta daftar model dengan key yang sama
+ * dan tampilkan alamat yang benar-benar dipanggil + 4 karakter terakhir key (bukan key-nya).
+ */
+async function diagnose(p: AiProvider): Promise<string> {
+	let url = "";
+	try {
+		url = normalizeBaseUrl(p.base_url);
+		const r = await fetch(url + "/models", { headers: { Authorization: `Bearer ${p.key}` } });
+		const raw = (await r.text()).replace(/\s+/g, " ").slice(0, 160);
+		const verdict = r.ok
+			? "Key & URL VALID (daftar model terbaca) -> masalahnya di MODEL: pilih lain lewat DAFTAR MODEL, atau model itu diblokir di Groq > Settings > Limits."
+			: "Key/URL ditolak juga saat membaca daftar model -> key salah/dicabut/dari akun lain, atau Base URL keliru.";
+		return ` | Diagnosa: ${url} model="${p.model}" key=...${p.key.slice(-4)} | /models -> HTTP ${r.status} ${raw} | ${verdict}`;
+	} catch (e) {
+		return ` | Diagnosa: ${url || p.base_url} tidak terjangkau (${e instanceof Error ? e.message : String(e)})`;
 	}
 }
 
