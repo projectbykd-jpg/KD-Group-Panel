@@ -6463,8 +6463,14 @@ Tindakan ini tidak dapat dibatalkan.`,
           if (btn) btn.disabled = false;
           if (apiFailed(res)) { toast(apiMessage(res, 'Tes Facebook gagal')); return; }
           if (res.success === false) { notifyCenter(res.message || 'Tes Facebook gagal', 'warning', 'Tes Facebook'); return; }
-          const lines = (res.steps || []).map(s => (s.ok ? '✅ ' : '❌ ') + s.name + ' — ' + s.detail);
-          notifyCenter(lines.join('\n') + '\n\n' + (res.ok ? '' : 'Penyebab: ') + res.verdict, res.ok ? 'success' : 'danger', res.ok ? 'Facebook sehat' : 'Facebook bermasalah');
+          const steps = res.steps || [];
+          const lines = steps.map(s => (s.ok ? '✅ ' : '❌ ') + s.name + ' — ' + s.detail);
+          // Vonis hanya ditambahkan bila berbeda dari keterangan langkah terakhir (dulu tampil dobel).
+          const last = steps.length ? steps[steps.length - 1].detail : '';
+          const extra = res.ok || res.verdict === last ? '' : '\n\nPenyebab: ' + res.verdict;
+          const hint = document.getElementById('botFbHint');
+          if (hint) hint.textContent = res.ok ? 'Facebook sehat ✓ (baru dites)' : 'Facebook bermasalah ✗ — lihat hasil tes';
+          notifyCenter(lines.join('\n') + extra, res.ok ? 'success' : 'warning', res.ok ? 'Facebook sehat' : 'Facebook bermasalah');
         })
         .withFailureHandler(e => { if (btn) btn.disabled = false; toast((e && e.message) || String(e)); })
         .botFbTest(currentSessionToken, { page_id: val('botFbPageId'), page_token: val('botFbToken') });
@@ -6608,7 +6614,7 @@ Tindakan ini tidak dapat dibatalkan.`,
       const hint = document.getElementById('botCredHint');
       if (hint) hint.textContent = (c.ai_providers_on ? c.ai_providers_on + ' AI provider aktif' : 'Belum ada AI provider aktif') + ' · ' + (c.has_blogger ? 'Blogger OK' : 'Blogger BELUM tersambung');
       const fbHint = document.getElementById('botFbHint');
-      if (fbHint) fbHint.textContent = c.has_facebook ? 'Facebook Page OK' : 'Facebook belum tersambung';
+      if (fbHint) fbHint.textContent = c.has_facebook ? 'Page ID & token tersimpan (belum dites) — klik TES FACEBOOK' : 'Facebook belum tersambung';
       renderBloggerStatus(c);
 
       // Template FB (siapkan gambar+caption utk posting manual)
