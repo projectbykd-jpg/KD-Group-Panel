@@ -25,7 +25,6 @@ export const SYS_SETTINGS: SysSettingDef[] = [
 	{ key: "sys_invest_limit_3d", group: "AutoCheck Invest (default)", label: "Batas line 3D", hint: "Default untuk user yang belum mengisi sendiri.", unit: "line", def: 250, min: 1, max: 100000 },
 	{ key: "sys_invest_limit_4d", group: "AutoCheck Invest (default)", label: "Batas line 4D", hint: "Default untuk user yang belum mengisi sendiri.", unit: "line", def: 1296, min: 1, max: 100000 },
 	{ key: "sys_assistant_enabled", group: "Asisten KD", label: "Asisten KD aktif", hint: "1 = widget chat bantuan tampil & menjawab; 0 = dimatikan.", unit: "1/0", def: 1, min: 0, max: 1 },
-	{ key: "sys_assistant_fallback", group: "Asisten KD", label: "Cadangan ke provider bot", hint: "1 = bila key khusus asisten gagal, boleh memakai AI Provider menu BOT; 0 = key khusus saja (kuota provider lain aman).", unit: "1/0", def: 0, min: 0, max: 1 },
 	{ key: "sys_assistant_per_hour", group: "Asisten KD", label: "Batas pertanyaan per user", hint: "Maks. pertanyaan per user tiap jam (menjaga kuota AI).", unit: "per jam", def: 40, min: 5, max: 500 },
 	{ key: "sys_assistant_max_tokens", group: "Asisten KD", label: "Panjang jawaban maks.", hint: "Batas token jawaban asisten (lebih besar = lebih panjang & lebih boros).", unit: "token", def: 800, min: 200, max: 2000 },
 ];

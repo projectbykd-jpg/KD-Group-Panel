@@ -9,7 +9,7 @@
 // Jangan menulis rahasia (password, key, token) di sini.
 // ============================================================================
 
-export const ASSISTANT_KB_VERSION = "2026-10-07.4";
+export const ASSISTANT_KB_VERSION = "2026-10-07.5";
 
 /** Penjelasan per menu. Kunci = id navigasi (nav-<kunci>) di ui-src/Index.html. */
 export const KB_PAGES: Record<string, { title: string; text: string }> = {
@@ -111,7 +111,7 @@ export const KB_ADMIN_TABS: Record<string, { title: string; text: string }> = {
 	},
 	lapops: {
 		title: "Pengaturan Sistem",
-		text: "Dua bagian. (1) 'Pengaturan Sistem': nilai angka dengan batas aman yang dipakai server — lama simpan log aktivitas, toleransi susulan auto-post, batas salah password & lama kunci akun, masa berlaku sesi & maks sesi per user, default limit AutoCheck Invest 2D/3D/4D, dan pengaturan Asisten KD (aktif/nonaktif, batas pertanyaan per jam, panjang jawaban, cadangan ke provider bot). Di bagian atas ada kartu 'Asisten KD': isi API KEY KHUSUS asisten (Base URL, Model, API key; contoh Groq https://api.groq.com/openai/v1 + llama-3.3-70b-versatile) supaya kuota terpisah dari AI Provider Bot News; tombol Simpan, Tes Koneksi, Hapus Key (key tidak pernah ditampilkan ulang). Di kartu yang sama ada pilihan provider cadangan dari menu BOT (Otomatis = Groq dulu); cadangan hanya dipakai bila pengaturan 'Cadangan ke provider bot' = 1 (bawaan 0 = key khusus saja). Klik SIMPAN (tombol DEFAULT mengembalikan nilai bawaan di form sebelum disimpan). Nilai di luar rentang dijepit otomatis; berlaku ±15 detik. (2) 'Lap Admin · Operator Khusus': daftar operator (label + nama operator) yang dipisahkan dari Total Deposit di Lap Admin, mis. Blazz, Khanpay. Nama operator cocok bila mengandung teks itu (tidak peka huruf besar/kecil), maks 10. Hanya ADMIN yang bisa menyimpan.",
+		text: "Dua bagian. (1) 'Pengaturan Sistem': nilai angka dengan batas aman yang dipakai server — lama simpan log aktivitas, toleransi susulan auto-post, batas salah password & lama kunci akun, masa berlaku sesi & maks sesi per user, default limit AutoCheck Invest 2D/3D/4D, dan pengaturan Asisten KD (aktif/nonaktif, batas pertanyaan per jam, panjang jawaban). Di bagian atas ada kartu 'Asisten KD': isi API KEY KHUSUS asisten (Base URL, Model, API key; contoh Groq https://api.groq.com/openai/v1 + llama-3.3-70b-versatile) supaya kuota terpisah dari AI Provider Bot News; tombol Simpan, Tes Koneksi, Hapus Key (key tidak pernah ditampilkan ulang). Gunakan model chat (mis. llama-3.3-70b-versatile), bukan model guard/whisper/tts; tombol 'Daftar Model' menampilkan model chat yang tersedia. Bila 'Tes Koneksi' gagal 403: key tidak punya izin atau modelnya bukan model chat. Key khusus dipakai sendiri dan tidak pernah jatuh ke provider Bot News; selama belum diisi, asisten sementara memakai AI Provider menu BOT. Klik SIMPAN (tombol DEFAULT mengembalikan nilai bawaan di form sebelum disimpan). Nilai di luar rentang dijepit otomatis; berlaku ±15 detik. (2) 'Lap Admin · Operator Khusus': daftar operator (label + nama operator) yang dipisahkan dari Total Deposit di Lap Admin, mis. Blazz, Khanpay. Nama operator cocok bila mengandung teks itu (tidak peka huruf besar/kecil), maks 10. Hanya ADMIN yang bisa menyimpan.",
 	},
 	maintenance: {
 		title: "Maintenance & Log",

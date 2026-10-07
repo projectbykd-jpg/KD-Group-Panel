@@ -627,22 +627,19 @@
           <div class="mini-card flex flex-col gap-3 mb-3" id="asstCfgCard">
             <div>
               <div class="font-extrabold text-base"><img src="/ASSIST.svg" width="22" height="22" alt="" class="inline-block mr-2 align-text-bottom">Asisten KD (chat bantuan)</div>
-              <div class="text-xs text-slate-400 mt-1">Isi <b>API key khusus</b> untuk asisten supaya kuota <b>terpisah</b> dari AI Provider Bot News &amp; lainnya. Kompatibel OpenAI (mis. Groq: <code>https://api.groq.com/openai/v1</code>, model <code>llama-3.3-70b-versatile</code>). Key tidak pernah ditampilkan ulang.</div>
+              <div class="text-xs text-slate-400 mt-1">Isi <b>API key khusus</b> untuk asisten supaya kuota <b>terpisah</b> dari AI Provider Bot News &amp; lainnya. Kompatibel OpenAI (mis. Groq: <code>https://api.groq.com/openai/v1</code>, model <code>llama-3.3-70b-versatile</code>). Pakai model <b>chat</b> (mis. llama-3.3-70b-versatile atau llama-3.1-8b-instant) &mdash; bukan model *guard*/whisper/tts. Klik <b>DAFTAR MODEL</b> untuk memilih. Key tidak pernah ditampilkan ulang dan <b>tidak pernah jatuh</b> ke provider Bot News.</div>
             </div>
             <div class="asst-key-grid">
               <label class="sys-field-col"><span>Base URL</span><input id="asstBase" class="glass-inner rounded-xl px-3 py-2 text-xs" placeholder="https://api.groq.com/openai/v1" autocomplete="off" spellcheck="false"></label>
-              <label class="sys-field-col"><span>Model</span><input id="asstModel" class="glass-inner rounded-xl px-3 py-2 text-xs" placeholder="llama-3.3-70b-versatile" autocomplete="off" spellcheck="false"></label>
+              <label class="sys-field-col"><span>Model</span><input id="asstModel" list="asstModelList" class="glass-inner rounded-xl px-3 py-2 text-xs" placeholder="llama-3.3-70b-versatile" autocomplete="off" spellcheck="false"><datalist id="asstModelList"></datalist></label>
               <label class="sys-field-col asst-key-wide"><span>API key <em id="asstKeyMask" class="not-italic text-slate-500"></em></span><input id="asstKey" type="password" class="glass-inner rounded-xl px-3 py-2 text-xs" placeholder="gsk_… (kosongkan bila tidak diganti)" autocomplete="new-password" spellcheck="false"></label>
             </div>
             <div class="flex flex-wrap items-center gap-2">
               <button type="button" onclick="asstCfgSave()" id="asstCfgBtn" class="bg-gradient-to-r from-cyan-400 to-blue-600 text-slate-950 px-4 py-2 rounded-xl text-xs font-extrabold"><i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN</button>
+              <button type="button" onclick="asstCfgModels()" id="asstModelsBtn" class="glass-inner px-4 py-2 rounded-xl text-xs font-bold"><i class="fa-solid fa-list mr-2"></i>DAFTAR MODEL</button>
               <button type="button" onclick="asstCfgTest()" id="asstTestBtn" class="glass-inner px-4 py-2 rounded-xl text-xs font-bold"><i class="fa-solid fa-plug mr-2"></i>TES KONEKSI</button>
               <button type="button" onclick="asstCfgClear(event)" class="glass-inner px-4 py-2 rounded-xl text-xs font-bold text-rose-300"><i class="fa-solid fa-trash mr-2"></i>HAPUS KEY</button>
               <span id="asstCfgStatus" class="text-xs text-slate-400">Memuat…</span>
-            </div>
-            <div class="flex flex-col md:flex-row md:items-center gap-2 pt-2 border-t border-white/5">
-              <div class="text-xs text-slate-400 flex-1">Cadangan bila key khusus kosong/gagal &mdash; provider bersama dari <b>BOT → Setting → AI Provider</b> (hanya dipakai jika &ldquo;Cadangan ke provider bot&rdquo; diaktifkan di bawah). <b>Otomatis</b> = Groq dulu.</div>
-              <select id="asstProvider" class="glass-inner rounded-xl px-3 py-2 text-xs" aria-label="Provider cadangan asisten"></select>
             </div>
           </div>
           <div class="mini-card flex flex-col gap-4 mb-3">
