@@ -4,7 +4,7 @@
 // dijalankan, tidak ada data/rahasia pengguna yang dikirim ke AI.
 import { requireSession } from "./auth";
 import { logActivity } from "../lib/activity";
-import { AI_USER_AGENT, aiChatProvider, aiCooldown, aiListModels, aiUsableProviders, AiUnavailableError, maskKey, modelChain, normalizeBaseUrl, type AiProvider } from "../lib/ai-provider";
+import { AI_USER_AGENT, aiChatProvider, aiClearCooldown, aiCooldown, aiListModels, aiUsableProviders, AiUnavailableError, maskKey, modelChain, normalizeBaseUrl, type AiProvider } from "../lib/ai-provider";
 import { ASSISTANT_KB_VERSION, selectKnowledge } from "../lib/assistant-kb";
 import { botCfg } from "../lib/bot-news";
 import { MENU_ITEMS, parseMenus } from "../lib/menus";
@@ -116,7 +116,9 @@ export async function assistantAsk(env: Env, token: string, message: unknown, hi
 		if (!candidates.length) throw new AiUnavailableError("tidak ada provider");
 		const errs: string[] = [];
 		for (const p of candidates) {
-			const model = modelChain(p).find((m) => !aiCooldown(cfg, { ...p, model: m }));
+			// Key khusus tidak punya cadangan: jeda otomatis (mis. 10 mnt setelah satu timeout) hanya membuat
+			// asisten "sibuk" tanpa mencoba apa pun, jadi diabaikan; provider bersama tetap menghormati jeda.
+			const model = dedicated ? modelChain(p)[0] : modelChain(p).find((m) => !aiCooldown(cfg, { ...p, model: m }));
 			if (!model) continue;
 			try {
 				const base = {
@@ -129,15 +131,7 @@ export async function assistantAsk(env: Env, token: string, message: unknown, hi
 					idleMs: 12_000,
 					totalMs: 40_000,
 				};
-				const extra = fastReasoning(p, model);
-				let call;
-				try {
-					call = await aiChatProvider(env, cfg, { ...p, model }, { ...base, extra });
-				} catch (e) {
-					// provider menolak parameter tambahan -> ulangi tanpa itu
-					if (extra && /reasoning|unknown|unsupported|invalid/i.test(e instanceof Error ? e.message : "")) call = await aiChatProvider(env, cfg, { ...p, model }, base);
-					else throw e;
-				}
+				const call = await callFast(env, cfg, { ...p, model }, base);
 				answer = call.text.trim();
 				via = `${call.providerName} · ${call.model}`;
 				ms = call.ms;
@@ -214,6 +208,7 @@ export async function assistantSaveConfig(env: Env, token: string, dedicated?: u
 			await env.DB.prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
 				.bind(DEDICATED_KEY, JSON.stringify({ base_url, key, model }))
 				.run();
+			await aiClearCooldown(env, await botCfg(env), "assistant-dedicated").catch(() => {});
 			note = `Key khusus asisten disimpan (${new URL(base_url).host}, ${model})`;
 		}
 	}
@@ -228,18 +223,22 @@ export async function assistantTest(env: Env, token: string) {
 	if (!p) throw new Error("Belum ada key khusus yang disimpan.");
 	const cfg = await botCfg(env);
 	try {
-		const call = await aiChatProvider(env, cfg, p, {
+		const call = await callFast(env, cfg, p, {
 			purpose: "assistant-test",
 			temperature: 0,
 			maxTokens: 40,
 			messages: [{ role: "user", content: "Balas hanya: OK" }],
-			firstByteMs: 15_000,
-			idleMs: 10_000,
-			totalMs: 25_000,
+			firstByteMs: 30_000,
+			idleMs: 15_000,
+			totalMs: 40_000,
 		});
 		return { success: true, ms: call.ms, model: call.model, reply: call.text.trim().slice(0, 60) };
 	} catch (e) {
 		const msg = (e instanceof Error ? e.message : String(e)).slice(0, 220);
+		// Timeout/lambat BUKAN key salah: jangan menyesatkan dgn vonis key/model; cukup sarankan model lebih cepat.
+		if (/belum mulai membalas|tidak ada data|melebihi|timeout|abort/i.test(msg)) {
+			return { success: false, message: `Gagal: model "${p.model}" terlalu lama membalas (${msg}). Key & alamat tidak dipersoalkan. Coba model yang lebih cepat dan bukan alias "*-latest" (mis. gemini-2.5-flash / openai/gpt-oss-20b) lewat DAFTAR MODEL.` };
+		}
 		const hint = /404/.test(msg) ? " — Nama model/Base URL tidak ditemukan; klik DAFTAR MODEL." : "";
 		return { success: false, message: "Gagal: " + msg + hint + (await diagnose(p)) };
 	}
@@ -265,7 +264,7 @@ async function diagnose(p: AiProvider): Promise<string> {
 		const ray = withUa.r.headers.get("cf-ray") || "-";
 		const verdict =
 			withUa.r.ok || bare.r.ok
-				? "Key & URL VALID -> masalahnya di MODEL: pilih lain lewat DAFTAR MODEL, atau model itu diblokir di Groq > Settings > Limits."
+				? "Key & URL VALID -> masalahnya di MODEL: pilih lain lewat DAFTAR MODEL, atau model itu tidak diizinkan untuk akunmu di penyedia AI."
 				: "Key/URL ditolak juga saat membaca daftar model -> key salah/dicabut/dibatasi, atau penyedia memblokir server panel (cf-ray di atas bisa dikirim ke dukungan penyedia).";
 		return ` | Diagnosa: ${url} model="${p.model}" key=...${p.key.slice(-4)} | /models dengan User-Agent -> HTTP ${withUa.r.status} ${withUa.raw} | tanpa User-Agent -> HTTP ${bare.r.status} | cf-ray ${ray} | ${verdict}`;
 	} catch (e) {
@@ -273,8 +272,21 @@ async function diagnose(p: AiProvider): Promise<string> {
 	}
 }
 
+/** Panggil dgn parameter percepat; bila provider menolak parameter itu, ulangi tanpa parameter. */
+async function callFast(env: Env, cfg: Record<string, string>, p: AiProvider, base: Parameters<typeof aiChatProvider>[3]) {
+	const extra = fastReasoning(p, p.model);
+	try {
+		return await aiChatProvider(env, cfg, p, { ...base, extra });
+	} catch (e) {
+		if (extra && /reasoning|unknown|unsupported|invalid|HTTP 400/i.test(e instanceof Error ? e.message : "")) return await aiChatProvider(env, cfg, p, base);
+		throw e;
+	}
+}
+
 /** Model "berpikir" di Groq dijawab jauh lebih cepat bila usaha berpikirnya dikecilkan. */
 function fastReasoning(p: AiProvider, model: string): Record<string, unknown> | undefined {
+	// Gemini (endpoint OpenAI-compat): usaha berpikir kecil -> balasan pertama jauh lebih cepat.
+	if (/generativelanguage\.googleapis\.com/i.test(p.base_url) && /gemini/i.test(model)) return { reasoning_effort: "low" };
 	if (!/groq\.com/i.test(p.base_url)) return undefined;
 	if (/gpt-oss/i.test(model)) return { reasoning_effort: "low" };
 	if (/qwen/i.test(model)) return { reasoning_effort: "none" };

@@ -132,6 +132,21 @@ describe("API key KHUSUS Asisten KD (terpisah dari provider bot)", () => {
 		await expect(assistantAsk(ctx.env, opr, "lihat", [], PNG)).rejects.toThrow(/tidak bisa membaca gambar/);
 	});
 
+	it("key khusus: satu kegagalan tidak memasang jeda yang membuat asisten 'sibuk'; Gemini memakai reasoning_effort rendah", async () => {
+		const boss = await tok("Boss", "pw-boss");
+		await assistantSaveConfig(ctx.env, boss, { base_url: "https://generativelanguage.googleapis.com/v1beta/openai", key: KEY, model: "gemini-flash-latest" });
+		const opr = await tok("Opr", "pw-opr");
+		vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ error: { message: "overloaded" } }), { status: 503, headers: { "content-type": "application/json" } }));
+		await expect(assistantAsk(ctx.env, opr, "halo", [])).rejects.toThrow(/sibuk/);
+		const bodies: any[] = [];
+		vi.stubGlobal("fetch", async (_u: unknown, init?: RequestInit) => {
+			bodies.push(JSON.parse(String(init!.body)));
+			return new Response(JSON.stringify({ model: "gemini-flash-latest", choices: [{ message: { content: "pulih" } }] }), { status: 200, headers: { "content-type": "application/json" } });
+		});
+		expect(((await assistantAsk(ctx.env, opr, "halo lagi", [])) as { answer: string }).answer).toBe("pulih");
+		expect(bodies[0].reasoning_effort).toBe("low");
+	});
+
 	it("model berpikir di Groq dijawab cepat: reasoning_effort dikirim (gpt-oss=low, qwen=none)", async () => {
 		const boss = await tok("Boss", "pw-boss");
 		await assistantSaveConfig(ctx.env, boss, { base_url: "https://api.groq.com/openai/v1", key: KEY, model: "openai/gpt-oss-20b" });
