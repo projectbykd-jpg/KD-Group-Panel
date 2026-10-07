@@ -25,6 +25,7 @@ import {
 	type AiProvider,
 } from "../lib/ai-provider";
 import { tsNow } from "../lib/time";
+import { fbDiagnose } from "../lib/fb-check";
 import {
 	BloggerAuthError,
 	bloggerAuthUrl,
@@ -508,6 +509,20 @@ export async function botAiTopUp(env: Env, token: string, data: Record<string, u
 	await aiSaveProviders(env, cfg, list);
 	await logActivity(env, s.username, "BOT AI PROVIDER", `Top-up ${p.name}: +${add} token, masa aktif mulai ulang`, "BERHASIL", "");
 	return aiListPayload(env, cfg);
+}
+
+/** Tes Facebook: periksa Page ID + token (yang diketik di form, atau yang tersimpan bila dikosongkan) dan jelaskan penyebab bila gagal. */
+export async function botFbTest(env: Env, token: string, data: Record<string, unknown>) {
+	const s = await gate(env, token);
+	const cfg = await botCfg(env);
+	const pageId = String(data.page_id ?? "").trim() || String(cfg.fb_page_id ?? "").trim();
+	const pageToken = String(data.page_token ?? "").trim() || String(cfg.fb_page_token ?? "").trim();
+	if (!/^\d{5,25}$/.test(pageId)) return { success: false, message: "Page ID harus berupa angka (5-25 digit). Isi Page ID lalu coba lagi." };
+	if (!pageToken) return { success: false, message: "Page Access Token belum diisi. Tempel token di kolom token lalu klik TES FACEBOOK." };
+	if (pageToken.length < 20 || pageToken.length > 700 || /\s/.test(pageToken)) return { success: false, message: "Format token tidak wajar (20-700 karakter tanpa spasi). Salin ulang token dengan utuh." };
+	const r = await fbDiagnose(pageId, pageToken);
+	await logActivity(env, s.username, "BOT FACEBOOK TES", r.ok ? `Tes Facebook OK (${r.page?.name ?? pageId})` : `Tes Facebook gagal: ${r.verdict}`.slice(0, 300), r.ok ? "BERHASIL" : "GAGAL", "");
+	return { success: true, ...r };
 }
 
 /** Tes koneksi: 1 panggilan kecil + daftar model yang tersedia (kalau provider mendukung /models). */

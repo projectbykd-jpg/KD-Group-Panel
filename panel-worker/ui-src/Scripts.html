@@ -6453,6 +6453,22 @@ Tindakan ini tidak dapat dibatalkan.`,
       if (!add) { toast('Jumlah token tidak valid'); return; }
       botAiCall('botAiTopUp', { id, add_tokens: add }, 'Top-up tersimpan: +' + fmtTok(add) + ' token');
     }
+    function botFbTest() {
+      const val = id => { const el = document.getElementById(id); return el ? String(el.value || '').trim() : ''; };
+      const btn = document.getElementById('botFbTestBtn');
+      if (btn) btn.disabled = true;
+      toast('Memeriksa koneksi Facebook…');
+      google.script.run
+        .withSuccessHandler(res => {
+          if (btn) btn.disabled = false;
+          if (apiFailed(res)) { toast(apiMessage(res, 'Tes Facebook gagal')); return; }
+          if (res.success === false) { notifyCenter(res.message || 'Tes Facebook gagal', 'warning', 'Tes Facebook'); return; }
+          const lines = (res.steps || []).map(s => (s.ok ? '✅ ' : '❌ ') + s.name + ' — ' + s.detail);
+          notifyCenter(lines.join('\n') + '\n\n' + (res.ok ? '' : 'Penyebab: ') + res.verdict, res.ok ? 'success' : 'danger', res.ok ? 'Facebook sehat' : 'Facebook bermasalah');
+        })
+        .withFailureHandler(e => { if (btn) btn.disabled = false; toast((e && e.message) || String(e)); })
+        .botFbTest(currentSessionToken, { page_id: val('botFbPageId'), page_token: val('botFbToken') });
+    }
     function botAiTest(id) {
       const p = (botAiData && botAiData.providers || []).find(x => x.id === id);
       toast('Mengetes ' + (p ? p.name : 'provider') + '…');

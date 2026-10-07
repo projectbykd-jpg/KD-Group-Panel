@@ -123,6 +123,7 @@ const ARG_MAP = {
 	botAiTopUp: ["token", "data"],
 	botAiTest: ["token", "data"],
 	botAiModels: ["token", "data"],
+	botFbTest: ["token", "data"],
 	livechatListSessions: ["token"],
 	livechatGetBotKey: ["token"],
 	livechatResetBotKey: ["token"],
