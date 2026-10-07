@@ -1307,38 +1307,19 @@
           </div>
 
           <div class="glass-card rounded-3xl p-6 flex flex-col gap-3">
-            <div class="panel-section-title"><i class="fa-solid fa-circle-info text-amber-300 text-sm"></i> PASANG BOT (TANPA EKSTENSI, TANPA UNDUH FILE)</div>
-            <p class="text-[11px] text-slate-500 -mt-1">DayLiveChat mengunci login CS ke IP tertentu dan browser melarang panel membaca situs lain, jadi bot dijalankan <b>di halaman DayLiveChat milikmu</b>. Kodenya selalu dimuat langsung dari panel ini (selalu versi terbaru), tidak ada file di laptop, dan tidak menyimpan password. Ada dua cara &mdash; coba <b>Cara A</b> dulu; bila tidak jalan, pakai <b>Cara B</b>.</p>
-
-            <div class="mini-card flex flex-col gap-2">
-              <div class="text-xs font-bold text-slate-100">CARA A &mdash; Bookmark (1 klik tiap sesi)</div>
-              <div class="flex items-center gap-3 flex-wrap">
-                <a id="livechatBookmarklet" href="#" onclick="event.preventDefault();toast('Jangan diklik di sini — SERET tombol ini ke bookmarks bar browser.');" draggable="true" class="btn-primary inline-flex items-center gap-2 text-xs font-bold px-4 py-2.5 rounded-xl" style="cursor:grab"><i class="fa-solid fa-robot"></i>🤖 KD Auto-Reply</a>
-                <a id="livechatTestBm" href="javascript:alert('✅ Bookmark BISA jalan di halaman ini. Kalau bot belum muncul, kabari admin.')" onclick="event.preventDefault();toast('Jangan diklik di sini — SERET ke bookmarks bar, lalu klik di halaman DayLiveChat.');" draggable="true" class="btn-secondary inline-flex items-center gap-2 text-xs font-bold px-4 py-2.5 rounded-xl" style="cursor:grab"><i class="fa-solid fa-flask"></i>🧪 Tes Bookmark</a>
-                <button type="button" onclick="livechatCopyBookmarklet()" class="btn-secondary text-xs font-bold px-4 py-2.5 rounded-xl"><i class="fa-regular fa-copy mr-1"></i>SALIN KODE BOOKMARK</button>
-              </div>
-              <ol class="text-[11px] text-slate-400 flex flex-col gap-1 list-decimal list-inside">
-                <li>Tampilkan bookmarks bar (Ctrl+Shift+B), lalu <b>seret kedua tombol di atas</b> ke bookmarks bar.</li>
-                <li>Buka halaman DayLiveChat CS &amp; login, lalu <b>klik bookmark 🧪 Tes Bookmark</b>. Muncul popup &ldquo;✅ Bookmark BISA jalan&rdquo;? Lanjut klik <b>🤖 KD Auto-Reply</b> &rarr; tombol kecil 🤖 muncul di pojok kanan bawah.</li>
-                <li><b>Tidak muncul popup apa pun?</b> Berarti bookmark tidak bisa berjalan di halaman itu (diblokir situs atau browser, bukan salahmu) &mdash; pakai <b>Cara B</b>. <b>Popup muncul tapi 🤖 tidak?</b> Hapus bookmark 🤖 lalu seret ulang dari tombol di atas (setelah menekan Ctrl+F5 di panel), atau pakai <b>Cara B</b>.</li>
-              </ol>
-            </div>
-
-            <div class="mini-card flex flex-col gap-2">
-              <div class="text-xs font-bold text-slate-100">CARA B &mdash; Snippet DevTools (tahan blokir; tempel sekali, jalankan tiap sesi)</div>
-              <div><button type="button" onclick="livechatCopyConsole()" class="btn-primary text-xs font-bold px-4 py-2.5 rounded-xl"><i class="fa-solid fa-terminal mr-1"></i>SALIN KODE SNIPPET</button></div>
-              <ol class="text-[11px] text-slate-400 flex flex-col gap-1 list-decimal list-inside">
-                <li><b>Sekali saja</b> (di halaman DayLiveChat): tekan <b>F12</b> &rarr; tab <b>Sources</b> (kalau tidak terlihat, klik <b>&raquo;</b>) &rarr; menu <b>Snippets</b> &rarr; <b>+ New snippet</b> &rarr; tempel kode tadi &rarr; <b>Ctrl+S</b>. Snippet tersimpan di Chrome-mu (tidak perlu unduh file, tidak hilang).</li>
-                <li><b>Tiap kali mau memulai bot:</b> F12 &rarr; <b>Ctrl+P</b> &rarr; ketik <code class="text-cyan-300">!</code> &rarr; pilih snippet &rarr; <b>Enter</b>. Tombol 🤖 muncul di pojok kanan bawah; F12 boleh ditutup setelahnya.</li>
-              </ol>
-            </div>
-
-            <ol class="text-[11px] text-slate-400 flex flex-col gap-1.5 list-decimal list-inside" start="1">
-              <li>Setelah tombol <b>🤖</b> muncul, klik &rarr; tempel <b>Kunci Bot</b> dari kartu di atas (URL Panel sudah terisi) &rarr; simpan &rarr; nyalakan. Pengaturan ini diingat browser.</li>
+            <div class="panel-section-title"><i class="fa-solid fa-terminal text-amber-300 text-sm"></i> PASANG BOT LEWAT CONSOLE (TANPA EKSTENSI, TANPA UNDUH FILE)</div>
+            <p class="text-[11px] text-slate-500 -mt-1">DayLiveChat mengunci login CS ke IP tertentu dan browser melarang panel membaca situs lain, jadi bot dijalankan <b>di halaman DayLiveChat milikmu</b> lewat Console browser. Kodenya dimuat langsung dari panel ini (selalu versi terbaru), tidak ada file di laptop, dan password tidak disimpan.</p>
+            <div><button type="button" onclick="livechatCopyConsole()" class="btn-primary text-xs font-bold px-4 py-2.5 rounded-xl"><i class="fa-solid fa-terminal mr-1"></i>SALIN KODE CONSOLE</button></div>
+            <ol class="text-[11px] text-slate-400 flex flex-col gap-1.5 list-decimal list-inside">
+              <li>Buka halaman <b>DayLiveChat CS</b> dan login seperti biasa.</li>
+              <li>Tekan <b>F12</b> &rarr; buka tab <b>Console</b>.</li>
+              <li>Pertama kali saja (Chrome meminta izin tempel): ketik <code class="text-cyan-300">allow pasting</code> lalu tekan <b>Enter</b>.</li>
+              <li>Klik tombol <b>Salin kode Console</b> di atas, lalu <b>tempel</b> (Ctrl+V) di Console dan tekan <b>Enter</b>. Tombol kecil <b>🤖</b> muncul di pojok kanan bawah halaman DayLiveChat. F12 boleh ditutup.</li>
+              <li>Klik <b>🤖</b> &rarr; tempel <b>Kunci Bot</b> dari kartu di atas (URL Panel sudah terisi) &rarr; simpan &rarr; nyalakan. Pengaturan ini diingat browser, jadi cukup sekali.</li>
               <li>Sesi chat muncul di daftar atas. Nyalakan switch pada sesi yang mau dibalas otomatis.</li>
             </ol>
-            <p class="text-[11px] text-amber-300/90"><b>Perlu diingat:</b> bot hanya hidup selama tab DayLiveChat CS terbuka. Kalau halaman di-refresh atau ditutup, ulangi langkah mulai (klik bookmark / jalankan snippet lagi). Tab itu jangan ditutup/di-sleep.</p>
-            <p class="text-[11px] text-slate-500">Alternatif untuk komputer yang menyala terus: Tampermonkey (<code class="text-cyan-300">userscripts/daylivechat-autobot.user.js</code>) atau Agent Node.js (<code class="text-cyan-300">livechat-agent/</code>). Jangan menjalankan lebih dari satu cara sekaligus.</p>
+            <p class="text-[11px] text-amber-300/90"><b>Perlu diingat:</b> bot hanya hidup selama tab DayLiveChat CS terbuka. Kalau halaman di-refresh atau ditutup, ulangi langkah 2&ndash;4 (tempel kode Console lagi; Kunci Bot tidak perlu diisi ulang). Tab itu jangan ditutup/di-sleep.</p>
+            <p class="text-[11px] text-slate-500">Alternatif: Tampermonkey (<code class="text-cyan-300">userscripts/daylivechat-autobot.user.js</code>, menyala otomatis tiap halaman dibuka) atau Agent Node.js (<code class="text-cyan-300">livechat-agent/</code>) untuk komputer yang menyala terus. Jangan menjalankan lebih dari satu cara sekaligus.</p>
           </div>
         </div>
 

@@ -9,7 +9,7 @@
 // Jangan menulis rahasia (password, key, token) di sini.
 // ============================================================================
 
-export const ASSISTANT_KB_VERSION = "2026-10-07.9";
+export const ASSISTANT_KB_VERSION = "2026-10-07.10";
 
 /** Penjelasan per menu. Kunci = id navigasi (nav-<kunci>) di ui-src/Index.html. */
 export const KB_PAGES: Record<string, { title: string; text: string }> = {
@@ -59,7 +59,7 @@ export const KB_PAGES: Record<string, { title: string; text: string }> = {
 	},
 	"livechat-sessions": {
 		title: "Sesi Chat (Live Chat)",
-		text: "Auto-reply DayLiveChat. Bot membalas otomatis member yang spam/kasar HANYA di sesi yang Anda aktifkan; sesi lain tetap dibalas manual oleh CS. Daftar sesi muncul otomatis begitu userscript 'daylivechat-autobot' terpasang di Tampermonkey dan Anda login CS di daylivechat.com/cs/chat. Nyalakan switch 'BOT AKTIF' pada sesi member yang ingin dibalas otomatis. 'Sinkron terakhir' menunjukkan kapan userscript terakhir mengirim data. Cara pasang TANPA ekstensi dan tanpa unduh file (kode dimuat dari panel, selalu terbaru): CARA A bookmark — seret tombol '🤖 KD Auto-Reply' dan '🧪 Tes Bookmark' ke bookmarks bar, buka halaman DayLiveChat CS & login, klik 'Tes Bookmark' (muncul popup ✅ = bookmark boleh jalan) lalu klik '🤖 KD Auto-Reply'. Bila TIDAK ada popup apa pun, bookmark tidak bisa berjalan di halaman itu (diblokir situs atau browser) — pakai CARA B; bila popup muncul tetapi 🤖 tidak, hapus bookmark lalu seret ulang dari panel setelah Ctrl+F5, atau pakai CARA B Snippet DevTools: tombol 'SALIN KODE SNIPPET', di halaman DayLiveChat F12 → Sources → Snippets → New snippet → tempel → Ctrl+S (sekali saja); tiap sesi: F12 → Ctrl+P → ketik '!' → pilih snippet → Enter. Setelah tombol 🤖 kecil muncul di pojok kanan bawah: klik, tempel Kunci Bot (salin dari kartu 'KUNCI BOT KAMU' di halaman Sesi Chat), simpan, nyalakan. Kunci Bot bersifat PER PENGGUNA: sesi chat, template balasan, dan riwayat tiap pengguna terpisah (tidak tampil di menu pengguna lain); tombol 'BUAT KUNCI BARU' mematikan kunci lama bila bocor; pengguna baru perlu menambah template sendiri di menu Template Balasan, kalau tidak bot tidak membalas. Bot hanya hidup selama tab DayLiveChat CS terbuka; bila di-refresh atau ditutup, ulangi langkah mulai. Bot tidak bisa jalan dari server atau dari halaman panel sendiri: login CS DayLiveChat dikunci ke IP tertentu dan browser melarang panel membaca situs lain. Alternatif: Tampermonkey (userscript) atau Agent Node.js (folder livechat-agent) — jangan dijalankan bersamaan. Hanya ADMIN/OPERATOR.",
+		text: "Auto-reply DayLiveChat. Bot membalas otomatis member yang spam/kasar HANYA di sesi yang Anda aktifkan; sesi lain tetap dibalas manual oleh CS. Daftar sesi muncul otomatis begitu userscript 'daylivechat-autobot' terpasang di Tampermonkey dan Anda login CS di daylivechat.com/cs/chat. Nyalakan switch 'BOT AKTIF' pada sesi member yang ingin dibalas otomatis. 'Sinkron terakhir' menunjukkan kapan userscript terakhir mengirim data. Cara pasang bot (lewat Console browser, tanpa ekstensi dan tanpa unduh file; kode dimuat dari panel jadi selalu terbaru): (1) buka halaman DayLiveChat CS dan login seperti biasa; (2) tekan F12 lalu buka tab Console; (3) pertama kali saja, ketik 'allow pasting' lalu Enter (Chrome meminta izin tempel); (4) di panel klik tombol 'SALIN KODE CONSOLE' (menu Live Chat > Sesi Chat), tempel (Ctrl+V) di Console, tekan Enter — tombol kecil 🤖 muncul di pojok kanan bawah halaman DayLiveChat, F12 boleh ditutup; (5) klik 🤖, tempel Kunci Bot (salin dari kartu 'KUNCI BOT KAMU' di halaman Sesi Chat; alamat panel sudah terisi), simpan, nyalakan — pengaturan diingat browser, cukup sekali; (6) sesi chat muncul di daftar Sesi Chat, nyalakan switch pada sesi yang mau dibalas otomatis. Bot hanya hidup selama tab DayLiveChat CS terbuka: bila halaman di-refresh atau ditutup, ulangi langkah 2-4 (tempel kode Console lagi; Kunci Bot tidak perlu diisi ulang). Kalau muncul popup 'Bot gagal dimuat', situs memblokir skrip dari luar — beri tahu admin. Bookmark/bookmarklet TIDAK bisa dipakai karena halaman DayLiveChat tidak menjalankannya. Kunci Bot bersifat PER PENGGUNA: sesi chat, template balasan, dan riwayat tiap pengguna terpisah (tidak tampil di menu pengguna lain); tombol 'BUAT KUNCI BARU' mematikan kunci lama bila bocor; pengguna baru perlu menambah template sendiri di menu Template Balasan, kalau tidak bot tidak membalas. Bot tidak bisa jalan dari server atau dari halaman panel sendiri: login CS DayLiveChat dikunci ke IP tertentu dan browser melarang panel membaca situs lain. Alternatif: Tampermonkey (userscript) atau Agent Node.js (folder livechat-agent) — jangan dijalankan bersamaan. Hanya ADMIN/OPERATOR.",
 	},
 	"livechat-templates": {
 		title: "Template Balasan (Live Chat)",
@@ -145,7 +145,8 @@ export function buildKnowledgeText(): string {
 // ---------------------------------------------------------------------------
 const STOP = new Set("yang dan di ke dari untuk dengan atau ini itu apa bagaimana gimana cara bisa tidak kok mau saya aku kita dong nih ya sih kalau agar supaya pada akan sudah belum lagi juga tapi karena adalah dalam oleh the".split(" "));
 // kata awam -> id bagian (menambah skor)
-const SYNONYMS: [RegExp, string[]][] = [
+// [pola, id bagian, bobot (bawaan 3)]. Pola yang sangat spesifik diberi bobot lebih tinggi supaya tidak kalah oleh kata umum (mis. 'bot').
+const SYNONYMS: [RegExp, string[], number?][] = [
 	[/kirim|send|telegram|linktree|panel-?z|duplikat|tempel|paste/, ["result", "prediction"]],
 	[/prediksi|penutup|jadwal|sesi jam/, ["prediction", "autopost", "auto-input"]],
 	[/cookie|phpsessid|session|expired|kedaluwarsa|token/, ["lap-setting", "auto-input", "invest", "lap-admin"]],
@@ -158,7 +159,8 @@ const SYNONYMS: [RegExp, string[]][] = [
 	[/maintenance|retensi/, ["maintenance"]],
 	[/pengaturan|setting|batas|limit|durasi|sesi login/, ["lapops", "lap-setting", "invest"]],
 	[/bot|berita|blogger|artikel|rss|sumber|facebook|fb|ai provider|api key|groq/, ["bot-dashboard", "bot-sources", "bot-config", "bot-history", "bot-fbdirect"]],
-	[/live ?chat|balas|template|userscript|tampermonkey/, ["livechat-sessions", "livechat-templates"]],
+	[/live ?chat|auto-?reply|userscript|tampermonkey|console|f12|kunci ?bot|bot ?key|bookmark|snippet|daylivechat|cs chat/, ["livechat-sessions", "livechat-templates"], 9],
+	[/balas|template/, ["livechat-sessions", "livechat-templates"]],
 	[/dashboard|beranda|ringkasan/, ["home"]],
 	[/invest|line|pasaran/, ["invest"]],
 ];
@@ -176,7 +178,7 @@ export function selectKnowledge(question: string, history: string[] = [], top = 
 		...Object.entries(KB_ADMIN_TABS).map(([id, v]) => ({ id, tab: true, title: v.title, text: v.text })),
 	];
 	const boost = new Map<string, number>();
-	for (const [re, ids] of SYNONYMS) if (re.test(q)) for (const id of ids) boost.set(id, (boost.get(id) ?? 0) + 3);
+	for (const [re, ids, w] of SYNONYMS) if (re.test(q)) for (const id of ids) boost.set(id, (boost.get(id) ?? 0) + (w ?? 3));
 	const scored = entries
 		.map((e) => {
 			const hay = (e.title + " " + e.text).toLowerCase();
