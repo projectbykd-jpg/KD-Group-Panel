@@ -6527,23 +6527,13 @@ Tindakan ini tidak dapat dibatalkan.`,
     let livechatTemplatesCache = [];
     let livechatPollTimer = null;
 
-    // Bookmarklet pemuat bot: alamat panel diambil dari halaman ini, jadi selalu cocok dengan domain yang dipakai.
-    function livechatBookmarkletCode() {
-      return "javascript:(function(){var s=document.createElement('script');s.src='" + location.origin + "/daylivechat-autobot.js?t='+Date.now();s.onerror=function(){alert('Bot gagal dimuat. Situs mungkin memblokir skrip dari luar; beri tahu admin panel.')};document.documentElement.appendChild(s)})();";
-    }
-    function livechatInitBookmarklet() {
-      const a = document.getElementById('livechatBookmarklet');
-      if (a) a.setAttribute('href', livechatBookmarkletCode());
+    // Kode Console pemuat bot: alamat panel diambil dari halaman ini, jadi selalu cocok dengan domain yang dipakai.
+    function livechatConsoleCode() {
+      return "(function(){var s=document.createElement('script');s.src='" + location.origin + "/daylivechat-autobot.js?t='+Date.now();s.onerror=function(){alert('Bot gagal dimuat. Situs mungkin memblokir skrip dari luar; beri tahu admin panel.')};document.documentElement.appendChild(s)})();";
     }
     function livechatCopyConsole() {
-      const code = livechatBookmarkletCode().replace(/^javascript:/, '');
-      const done = () => toast('Kode snippet disalin. Tempel di F12 → Sources → Snippets → New snippet (lihat Cara B).');
-      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code).then(done, () => prompt('Salin perintah ini:', code));
-      else prompt('Salin perintah ini:', code);
-    }
-    function livechatCopyBookmarklet() {
-      const code = livechatBookmarkletCode();
-      const done = () => toast('Kode bookmark disalin. Buat bookmark baru lalu tempel di kolom alamat (URL).');
+      const code = livechatConsoleCode();
+      const done = () => toast('Kode disalin. Di halaman DayLiveChat: F12 → Console → tempel (Ctrl+V) → Enter.');
       if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code).then(done, () => prompt('Salin kode ini:', code));
       else prompt('Salin kode ini:', code);
     }
@@ -6596,7 +6586,7 @@ Tindakan ini tidak dapat dibatalkan.`,
         const el = document.getElementById('livechat-sec-' + p.replace('livechat-', ''));
         if (el) el.style.display = (p === page) ? 'flex' : 'none';
       });
-      if (page === 'livechat-sessions') { loadLivechatSessions(); startLivechatPolling(); livechatInitBookmarklet(); }
+      if (page === 'livechat-sessions') { loadLivechatSessions(); startLivechatPolling(); }
       if (page === 'livechat-templates') { stopLivechatPolling(); loadLivechatTemplates(); }
     }
     function startLivechatPolling() {

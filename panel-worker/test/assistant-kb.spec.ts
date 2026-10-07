@@ -93,4 +93,12 @@ describe("API asisten", () => {
 		await adminSaveSystemSettings(ctx.env, boss, { sys_assistant_enabled: 0 });
 		await expect(assistantAsk(ctx.env, opr, "halo", [])).rejects.toThrow(/dimatikan/);
 	});
+
+	it("pertanyaan cara pasang bot Live Chat (Console / Kunci Bot / bookmark) memuat bagian Sesi Chat", () => {
+		for (const q of ["cara pasang bot livechat lewat console", "kunci bot saya dimana", "kenapa bookmark tidak jalan", "f12 apa yang harus ditempel"]) {
+			const kb = selectKnowledge(q, []);
+			expect(kb, q).toContain("SALIN KODE CONSOLE");
+			expect(kb, q).toContain("KUNCI BOT KAMU");
+		}
+	});
 });
