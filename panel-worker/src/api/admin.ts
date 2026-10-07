@@ -8,6 +8,7 @@ import { getUserProfiles, withUserMenusColumn } from "../lib/db";
 import { MENU_ITEMS, parseMenus, serializeMenus } from "../lib/menus";
 import { listActiveSessions, migrateKvSessionsOnce, revokeUserSessions } from "../lib/session";
 import { tsNow } from "../lib/time";
+import { SYS_SETTINGS, getAllSys, getSys, saveSys } from "../lib/settings";
 
 const OFFSET_MS = 7 * 60 * 60 * 1000;
 const msToWIB = (ms: number): string =>
@@ -324,11 +325,10 @@ export async function adminSetAutoPost(env: Env, token: string, enabled: boolean
 }
 
 // --- Retensi Activity Log (pengganti "backup" sheet Apps Script) ----------
-const LOG_RETENTION_DAYS = 7;
 
 export async function adminPruneActivityLog(env: Env, token: string) {
 	const s = await requireSession(env, token, { admin: true });
-	const cutoff = new Date(Date.now() + OFFSET_MS - LOG_RETENTION_DAYS * 864e5).toISOString().slice(0, 10);
+	const cutoff = new Date(Date.now() + OFFSET_MS - (await getSys(env, "sys_log_retention_days")) * 864e5).toISOString().slice(0, 10);
 	const before = await env.DB.prepare(`SELECT COUNT(*) n FROM activity_log`).first<{ n: number }>();
 	// `ts < cutoff` (bukan substr(ts,1,10) < cutoff) supaya index ix_activity_ts
 	// kepakai -- hasilnya sama persis karena ts selalu "yyyy-MM-dd HH:mm:ss".
@@ -348,15 +348,37 @@ export async function adminPruneActivityLog(env: Env, token: string) {
 		success: true,
 		removed,
 		remaining: Number(after?.n ?? 0),
-		message: `${removed} baris log lama (> ${LOG_RETENTION_DAYS} hari) dihapus. Tersisa ${after?.n ?? 0} baris.`,
+		message: `${removed} baris log lama (> ${await getSys(env, "sys_log_retention_days")} hari) dihapus. Tersisa ${after?.n ?? 0} baris.`,
 	};
 }
 
 /** Dipanggil dari cron harian (index.ts) — hening, tanpa sesi. */
 export async function pruneActivityLogCron(env: Env): Promise<number> {
 	if (String(await getSetting(env, "log_retention_enabled") || "TRUE").toUpperCase() === "FALSE") return 0;
-	const cutoff = new Date(Date.now() + OFFSET_MS - LOG_RETENTION_DAYS * 864e5).toISOString().slice(0, 10);
+	const cutoff = new Date(Date.now() + OFFSET_MS - (await getSys(env, "sys_log_retention_days")) * 864e5).toISOString().slice(0, 10);
 	const res = await env.DB.prepare(`DELETE FROM activity_log WHERE ts < ?`).bind(cutoff).run();
 	await setSetting(env, "log_pruned_at", tsNow());
 	return res.meta?.changes ?? 0;
 }
+
+// --- Pengaturan Sistem (nilai angka dengan batas aman; lihat lib/settings.ts) ---
+export async function adminGetSystemSettings(env: Env, token: string) {
+	await requireSession(env, token, { admin: true });
+	const items = await getAllSys(env);
+	return {
+		success: true,
+		settings: items.map(({ def, value }) => ({
+			key: def.key, group: def.group, label: def.label, hint: def.hint, unit: def.unit ?? "",
+			value, def: def.def, min: def.min, max: def.max,
+		})),
+	};
+}
+
+export async function adminSaveSystemSettings(env: Env, token: string, values: unknown) {
+	const s = await requireSession(env, token, { admin: true });
+	const v = (values && typeof values === "object" ? values : {}) as Record<string, unknown>;
+	const changed = await saveSys(env, v);
+	await logActivity(env, s.username, "PENGATURAN SISTEM", changed.length ? changed.join(", ") : "Tidak ada perubahan", "BERHASIL", "");
+	return { ...(await adminGetSystemSettings(env, token)), message: "Pengaturan sistem tersimpan." };
+}
+export const SYSTEM_SETTING_KEYS = SYS_SETTINGS.map((d) => d.key);

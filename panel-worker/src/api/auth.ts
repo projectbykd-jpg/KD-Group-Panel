@@ -1,4 +1,5 @@
 // Port checkLogin / resumeSession / requireSession_ / logout dari V6Core.gs.
+import { getSys } from "../lib/settings";
 import { getMaintenance, getUserProfile, Maintenance, UserProfile } from "../lib/db";
 import { hashPassword, isHashed, verifyPassword } from "../lib/crypto";
 import { createSession, deleteSession, loadSession } from "../lib/session";
@@ -59,7 +60,7 @@ export async function checkLogin(env: Env, username: string, password: string, i
 			// berikutnya langsung mengunci akun 10 menit lagi.
 			const prevFails = p.lockedUntil && p.lockedUntil <= tsNow() ? 0 : p.failedLogin;
 			const n = prevFails + 1;
-			const lock = n >= 5 ? tsPlusMinutes(10) : null;
+			const lock = n >= (await getSys(env, "sys_login_max_fails")) ? tsPlusMinutes(await getSys(env, "sys_login_lock_minutes")) : null;
 			await env.DB.prepare(`UPDATE users SET failed_login = ?, locked_until = ? WHERE id = ?`)
 				.bind(n, lock, p.id)
 				.run();

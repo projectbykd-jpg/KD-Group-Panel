@@ -130,11 +130,13 @@ body { min-height: 100vh; }
   border-radius: 16px;
   padding: 36px 32px 28px;
   max-width: 420px !important;
-  box-shadow: var(--ui-shadow-lg);
+  box-shadow: 0 24px 60px -16px rgba(0,0,0,.8), 0 0 0 1px rgba(42,140,255,.08);
   margin: auto;
+  position: relative; z-index: 2; overflow: hidden;
 }
+.login-card::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: linear-gradient(90deg, #2a8cff, #35d0ff 45%, #ff8a1f); }
 .login-head { text-align: center; }
-.login-logo { width: 72px; height: 72px; margin: 0 auto 18px; display: flex; align-items: center; justify-content: center; }
+.login-logo { width: 88px; height: 88px; margin: 0 auto 12px; display: flex; align-items: center; justify-content: center; }
 .login-logo img { width: 100%; height: 100%; object-fit: contain; }
 .login-title { font-size: 20px; font-weight: 700; color: var(--ui-text); letter-spacing: -.01em; }
 .login-sub { margin-top: 6px; font-size: 13px; color: var(--ui-text-2); }
@@ -1072,3 +1074,38 @@ thead th:last-child, tbody td:last-child { padding-right: 14px !important; }
 #activity-page .status-legend { margin: 0 !important; gap: 14px; font-size: 11.5px; }
 #activity-page .activity-filter-card { padding: 10px 12px !important; }
 #activity-page .activity-meta-bar { padding: 6px 12px !important; }
+
+/* ---- Pengaturan Sistem (admin) ---- */
+.sys-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; }
+.sys-group { border: 1px solid var(--ui-line); border-radius: 10px; background: var(--ui-surface); overflow: hidden; }
+.sys-group-title { padding: 8px 14px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ui-text-3); background: var(--ui-surface-2); border-bottom: 1px solid var(--ui-line); }
+.sys-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: center; padding: 9px 14px; border-bottom: 1px solid var(--ui-line); }
+.sys-field:last-child { border-bottom: 0; }
+.sys-label { font-size: 13px; font-weight: 600; color: var(--ui-text); display: flex; flex-direction: column; gap: 1px; }
+.sys-label small { font-size: 11.5px; font-weight: 400; color: var(--ui-text-3); line-height: 1.3; }
+.sys-input { display: inline-flex; align-items: center; gap: 6px; grid-row: 1; grid-column: 2; }
+.sys-input input { width: 92px; height: 34px; text-align: right; font-variant-numeric: tabular-nums; background: var(--ui-surface-2) !important; border: 1px solid var(--ui-line-strong) !important; border-radius: 8px !important; padding: 0 10px !important; color: var(--ui-text) !important; font-size: 13px !important; }
+.sys-input em { font-style: normal; font-size: 11.5px; color: var(--ui-text-3); min-width: 34px; }
+.sys-range { grid-column: 2; font-size: 10.5px; color: var(--ui-text-3); text-align: right; }
+
+/* ---- LOGIN: background khas KD-Group (statis, tanpa blur/animasi) ---- */
+body { position: relative; }
+#login-bg { display: none; position: fixed; inset: 0; z-index: 0; pointer-events: none; background: #060a11 url("/LOGINBG.svg") center / cover no-repeat; }
+#login-screen:not([style*="none"]) ~ #login-bg { display: block; }
+#login-screen { z-index: 2; }
+.login-bg-mark { position: absolute; top: 50%; width: min(34vw, 520px); aspect-ratio: 1; transform: translateY(-50%); background: url("/logo.png") center / contain no-repeat; opacity: .10; }
+.login-bg-mark-l { left: -6vw; }
+.login-bg-mark-r { right: -6vw; opacity: .08; filter: hue-rotate(160deg) saturate(1.2); }
+.login-bg-badge { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; }
+.login-bg-badge b { font-size: 13px; letter-spacing: .32em; color: rgba(232,237,245,.55); font-weight: 700; }
+.login-bg-badge span { font-size: 11.5px; color: rgba(163,175,194,.5); }
+.login-kicker { font-size: 11px; font-weight: 700; letter-spacing: .28em; color: #35d0ff; margin-bottom: 6px; }
+.login-sites { border-top: 1px solid var(--ui-line); padding-top: 14px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.login-sites-title { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ui-text-3); font-weight: 600; }
+.login-sites-row { display: grid; grid-template-columns: repeat(6, 34px); gap: 8px 10px; justify-content: center; }
+.login-sites-row img { width: 34px; height: 34px; opacity: .8; transition: opacity .15s ease, transform .15s ease; }
+.login-sites-row img:hover { opacity: 1; transform: translateY(-1px); }
+.login-foot { border-top: 0 !important; padding-top: 0 !important; }
+@media (max-width: 760px) { .login-bg-mark, .login-bg-badge { display: none; } #login-bg { background-position: 40% center; } }
+
+.login-caps[hidden], [hidden] { display: none !important; }

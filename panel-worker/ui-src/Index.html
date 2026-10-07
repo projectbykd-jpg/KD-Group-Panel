@@ -54,6 +54,7 @@
       <div class="login-logo">
         <img src="/logo.png" width="72" height="72" decoding="async" fetchpriority="high" alt="KD-Group" onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('span'),{className:'kd-logo-fallback',textContent:'KD'}))">
       </div>
+      <div class="login-kicker">PROJECT BY KD</div>
       <h2 class="login-title">Masuk ke KD-Group Panel</h2>
       <p class="login-sub">Gunakan akun operator yang diberikan admin.</p>
     </div>
@@ -78,8 +79,10 @@
       <button onclick="handleLogin()" id="btnLogin" class="login-btn">Masuk</button>
     </div>
     <p id="login-err" class="login-err" role="alert" aria-live="assertive"></p>
+    <div class="login-sites" aria-label="Website terhubung"><span class="login-sites-title">12 website terhubung</span><div class="login-sites-row"><img src="/HUGO.svg" width="34" height="34" alt="HUGO" loading="lazy" decoding="async"><img src="/FOLA.svg" width="34" height="34" alt="FOLA" loading="lazy" decoding="async"><img src="/LIMA.svg" width="34" height="34" alt="LIMA" loading="lazy" decoding="async"><img src="/SOHO.svg" width="34" height="34" alt="SOHO" loading="lazy" decoding="async"><img src="/RETRO.svg" width="34" height="34" alt="RETRO" loading="lazy" decoding="async"><img src="/YEL.svg" width="34" height="34" alt="YEL" loading="lazy" decoding="async"><img src="/DODO.svg" width="34" height="34" alt="DODO" loading="lazy" decoding="async"><img src="/AXIS.svg" width="34" height="34" alt="AXIS" loading="lazy" decoding="async"><img src="/REMBO.svg" width="34" height="34" alt="REMBO" loading="lazy" decoding="async"><img src="/HELEN.svg" width="34" height="34" alt="HELEN" loading="lazy" decoding="async"><img src="/XO.svg" width="34" height="34" alt="XO" loading="lazy" decoding="async"><img src="/SENJA.svg" width="34" height="34" alt="SENJA" loading="lazy" decoding="async"></div></div>
     <p class="login-foot">KD Group Panel · Design by KD</p>
   </div>
+  <div id="login-bg" aria-hidden="true"><div class="login-bg-mark login-bg-mark-l"></div><div class="login-bg-mark login-bg-mark-r"></div><div class="login-bg-badge"><b>KD-GROUP</b><span>Project by KD &middot; Panel Operasional</span></div></div>
 
   <!-- MAIN WRAPPER -->
   <div id="app-container" class="w-full max-w-[1680px] flex flex-col lg:flex-row gap-5 items-start" style="display: none;">
@@ -608,7 +611,7 @@
             <button class="admin-tab" data-admin-tab="sites" onclick="switchAdminPanel('sites')"><i class="fa-solid fa-globe"></i>Website</button>
             <button class="admin-tab" data-admin-tab="sesi" onclick="switchAdminPanel('sesi')"><i class="fa-solid fa-users-viewfinder"></i>Sesi Aktif</button>
             <button class="admin-tab" data-admin-tab="autopost" onclick="switchAdminPanel('autopost')"><i class="fa-solid fa-robot"></i>Auto Posting</button>
-            <button class="admin-tab" data-admin-tab="lapops" onclick="switchAdminPanel('lapops')"><i class="fa-solid fa-table-list"></i>Lap Admin</button>
+            <button class="admin-tab" data-admin-tab="lapops" onclick="switchAdminPanel('lapops')"><i class="fa-solid fa-sliders"></i>Pengaturan</button>
             <button class="admin-tab" data-admin-tab="maintenance" onclick="switchAdminPanel('maintenance')"><i class="fa-solid fa-screwdriver-wrench"></i>Maintenance &amp; Log</button>
           </div>
           <select class="admin-tab-select" id="adminTabSelect" aria-label="Pilih panel admin" onchange="switchAdminPanel(this.value)">
@@ -616,11 +619,25 @@
             <option value="sites">Kelola Website</option>
             <option value="sesi">Sesi Login Aktif</option>
             <option value="autopost">Auto Posting Prediksi</option>
-            <option value="lapops">Lap Admin &middot; Operator Khusus</option>
+            <option value="lapops">Pengaturan Sistem</option>
             <option value="maintenance">Maintenance &amp; Retensi Log</option>
           </select>
 
           <div class="admin-panel" data-admin-panel="lapops">
+          <div class="mini-card flex flex-col gap-4 mb-3">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-2">
+              <div>
+                <div class="font-extrabold text-base"><i class="fa-solid fa-sliders mr-2 text-cyan-300"></i>Pengaturan Sistem</div>
+                <div class="text-xs text-slate-400 mt-1">Batas &amp; durasi yang dipakai server. Nilai di luar rentang otomatis dibatasi. Perubahan berlaku dalam ±15 detik.</div>
+              </div>
+              <div class="flex items-center gap-2">
+                <span id="sysStatus" class="text-xs text-slate-400">Memuat…</span>
+                <button type="button" onclick="sysReset()" class="glass-inner px-3 py-2 rounded-xl text-xs font-bold">DEFAULT</button>
+                <button type="button" onclick="sysSave()" id="sysSaveBtn" class="bg-gradient-to-r from-cyan-400 to-blue-600 text-slate-950 px-4 py-2 rounded-xl text-xs font-extrabold"><i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN</button>
+              </div>
+            </div>
+            <div id="sysGroups" class="sys-groups"></div>
+          </div>
           <div class="mini-card flex flex-col gap-4">
             <div>
               <div class="font-extrabold text-base"><i class="fa-solid fa-table-list mr-2 text-cyan-300"></i>Lap Admin &middot; Operator Khusus</div>

@@ -12,6 +12,8 @@ import { retryFailedSystem, sendToPanelZOnly, smartAutoSendFast } from "./api/se
 import {
 	adminDeleteUser,
 	adminListActiveSessions,
+	adminGetSystemSettings,
+	adminSaveSystemSettings,
 	adminListUsers,
 	adminPruneActivityLog,
 	adminResetUserLock,
@@ -179,6 +181,8 @@ const ROUTES: Record<string, Handler> = {
 	adminDeleteUser: (env, b) => adminDeleteUser(env, s(b.token), s(b.targetUsername)),
 	adminResetUserLock: (env, b) => adminResetUserLock(env, s(b.token), s(b.targetUsername)),
 	adminListActiveSessions: (env, b) => adminListActiveSessions(env, s(b.token)),
+	adminGetSystemSettings: (env, b) => adminGetSystemSettings(env, s(b.token)),
+	adminSaveSystemSettings: (env, b) => adminSaveSystemSettings(env, s(b.token), b.values),
 	setMaintenance: (env, b) => setMaintenance(env, s(b.token), !!b.enabled, s(b.message)),
 
 	// kelola website (site_accounts)

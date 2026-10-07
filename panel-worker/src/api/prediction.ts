@@ -23,6 +23,7 @@ import {
 	readPredictionRegistryForDate,
 } from "../lib/prediction";
 import { listActiveSessions } from "../lib/session";
+import { getSys } from "../lib/settings";
 
 const now7 = () => new Date(Date.now() + 7 * 60 * 60 * 1000);
 
@@ -87,7 +88,6 @@ export async function sendClosingPredictionAuto(env: Env, token: string, onlyWeb
 // ---------------------------------------------------------------------------
 // Auto-post router (dipakai Cron Trigger + tombol admin "JALANKAN SEKARANG")
 // ---------------------------------------------------------------------------
-const CATCHUP_MINUTES = 25; // susulan maksimal 25 menit dari jam sesi
 const GUARD_TTL = 21600; // 6 jam
 
 async function isAutoPostEnabled(env: Env): Promise<boolean> {
@@ -126,9 +126,9 @@ async function autoPostWebsites(env: Env, usernames: string[]): Promise<string[]
 	return eligible;
 }
 
-function slotDue(nowMinutes: number, slotMinutes: number, windowMinutes?: number): boolean {
+function slotDue(nowMinutes: number, slotMinutes: number, catchup: number, windowMinutes?: number): boolean {
 	const diff = nowMinutes - slotMinutes;
-	const maxAfter = windowMinutes != null && windowMinutes > 0 ? windowMinutes : CATCHUP_MINUTES;
+	const maxAfter = windowMinutes != null && windowMinutes > 0 ? windowMinutes : catchup;
 	return diff >= -1 && diff <= maxAfter && nowMinutes <= 1435;
 }
 
@@ -249,9 +249,10 @@ export async function runAutoPostRouter(env: Env, opts: { force?: boolean; windo
 		}
 	};
 
+	const catchup = await getSys(env, "sys_catchup_minutes");
 	for (let index = 0; index < JADWAL_PREDIKSI_CONFIG.length; index++) {
 		const [hh, mm] = JADWAL_PREDIKSI_CONFIG[index].jam.split(":").map(Number);
-		if (!slotDue(nowMinutes, hh * 60 + mm, opts.windowMinutes)) continue;
+		if (!slotDue(nowMinutes, hh * 60 + mm, catchup, opts.windowMinutes)) continue;
 		const scheduleId = predictionScheduleId(index);
 		await runSlot(`autopost:${dateKey}:${scheduleId}`, scheduleId, async () => {
 			const config = JADWAL_PREDIKSI_CONFIG[index];
@@ -273,7 +274,7 @@ export async function runAutoPostRouter(env: Env, opts: { force?: boolean; windo
 
 	for (const slot of CLOSING_PREDICTION_SLOTS) {
 		const [hh, mm] = slot.split(":").map(Number);
-		if (!slotDue(nowMinutes, hh * 60 + mm, opts.windowMinutes)) continue;
+		if (!slotDue(nowMinutes, hh * 60 + mm, catchup, opts.windowMinutes)) continue;
 		await runSlot(`autopost:${dateKey}:${closingScheduleId(slot)}`, closingScheduleId(slot), () =>
 			sendPredictionJob({
 				env,
