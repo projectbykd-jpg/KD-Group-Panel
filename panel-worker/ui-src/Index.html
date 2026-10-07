@@ -1288,9 +1288,21 @@
               <div class="mini-card text-[10px] text-slate-400 font-semibold px-3 py-2" id="livechatSyncHint">Menunggu sinkron dari userscript...</div>
             </div>
             <p class="text-[11px] text-slate-500 -mt-2">Daftar ini muncul otomatis begitu userscript <b>daylivechat-autobot</b> terpasang &amp; kamu login seperti biasa di daylivechat.com/cs/chat. Nyalakan switch pada sesi member yang ingin dibalas otomatis (mis. yang lagi spam/kasar) -- begitu ON, bot langsung mendeteksi pesan masuk dari member itu.</p>
+            <div id="livechatNoTpl" class="mini-card text-[11px] text-amber-300" style="display:none"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Kamu belum punya <b>template balasan aktif</b> &mdash; bot tidak akan membalas apa pun. Tambahkan di menu <b>Template Balasan</b> (setiap pengguna punya template sendiri).</div>
             <div id="livechatSessionList" class="flex flex-col gap-2"></div>
             <div id="livechatSessionEmpty" class="mini-card text-xs text-slate-400 text-center py-8" style="display:none">
               Belum ada sesi chat tersinkron. Pasang userscript terlebih dulu (lihat panduan di bawah).
+            </div>
+          </div>
+
+          <div class="glass-card rounded-3xl p-6 flex flex-col gap-3">
+            <div class="panel-section-title"><i class="fa-solid fa-key text-cyan-400 text-sm"></i> KUNCI BOT KAMU</div>
+            <p class="text-[11px] text-slate-500 -mt-1">Kunci ini <b>khusus akunmu</b>. Sesi chat, template balasan, dan riwayat yang tersinkron dengan kunci ini <b>hanya muncul di menu Live Chat milikmu</b>; pengguna lain punya kunci dan data sendiri. Jangan dibagikan. Bila bocor, klik <i>Buat kunci baru</i> (kunci lama langsung mati dan bot perlu diisi ulang).</p>
+            <div class="flex items-center gap-2 flex-wrap">
+              <input id="livechatKeyBox" type="password" readonly placeholder="Klik Tampilkan untuk memuat kunci" class="flex-1 min-w-[220px] bg-slate-900/60 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono text-slate-200" autocomplete="off">
+              <button type="button" id="livechatKeyShow" onclick="livechatKeyToggle()" class="btn-secondary text-xs font-bold px-4 py-2.5 rounded-xl"><i class="fa-regular fa-eye mr-1"></i>TAMPILKAN</button>
+              <button type="button" onclick="livechatKeyCopy()" class="btn-secondary text-xs font-bold px-4 py-2.5 rounded-xl"><i class="fa-regular fa-copy mr-1"></i>SALIN</button>
+              <button type="button" id="livechatKeyReset" onclick="livechatKeyReset()" class="btn-secondary text-xs font-bold px-4 py-2.5 rounded-xl text-rose-300"><i class="fa-solid fa-rotate mr-1"></i>BUAT KUNCI BARU</button>
             </div>
           </div>
 
@@ -1300,11 +1312,12 @@
             <div class="flex items-center gap-3 flex-wrap">
               <a id="livechatBookmarklet" href="#" onclick="event.preventDefault();toast('Jangan diklik di sini — SERET tombol ini ke bookmarks bar browser.');" draggable="true" class="btn-primary inline-flex items-center gap-2 text-xs font-bold px-4 py-2.5 rounded-xl" style="cursor:grab"><i class="fa-solid fa-robot"></i>🤖 KD Auto-Reply</a>
               <button type="button" onclick="livechatCopyBookmarklet()" class="btn-secondary text-xs font-bold px-4 py-2.5 rounded-xl"><i class="fa-regular fa-copy mr-1"></i>SALIN KODE BOOKMARK</button>
+              <button type="button" onclick="livechatCopyConsole()" class="btn-secondary text-xs font-bold px-4 py-2.5 rounded-xl"><i class="fa-solid fa-terminal mr-1"></i>SALIN PERINTAH CONSOLE</button>
             </div>
             <ol class="text-[11px] text-slate-400 flex flex-col gap-1.5 list-decimal list-inside">
-              <li><b>Sekali saja:</b> tampilkan bookmarks bar (Ctrl+Shift+B), lalu <b>seret tombol biru di atas</b> ke bookmarks bar. (Kalau tidak bisa diseret: buat bookmark baru, isi alamat/URL dengan kode dari tombol <i>Salin kode bookmark</i>.)</li>
+              <li><b>Sekali saja:</b> tampilkan bookmarks bar (Ctrl+Shift+B), lalu <b>seret tombol biru di atas</b> ke bookmarks bar. (Kalau tidak bisa diseret: buat bookmark baru, isi alamat/URL dengan kode dari tombol <i>Salin kode bookmark</i>.) <b>Cadangan bila bookmark tidak jalan:</b> di halaman DayLiveChat tekan F12 &rarr; Console &rarr; ketik <code class="text-cyan-300">allow pasting</code> &rarr; tempel perintah dari tombol <i>Salin perintah Console</i> &rarr; Enter.</li>
               <li>Buka <b>daylivechat.com/cs/chat</b> &amp; login CS seperti biasa, <b>lalu klik bookmark 🤖 KD Auto-Reply</b> &rarr; muncul tombol kecil <b>🤖</b> di pojok kanan bawah halaman itu.</li>
-              <li>Klik 🤖 &rarr; isi <b>Kunci Bot</b> (minta ke admin; URL Panel sudah terisi) &rarr; simpan &rarr; nyalakan. Pengaturan ini diingat browser.</li>
+              <li>Klik 🤖 &rarr; tempel <b>Kunci Bot</b> dari kartu di atas (URL Panel sudah terisi) &rarr; simpan &rarr; nyalakan. Pengaturan ini diingat browser.</li>
               <li>Sesi chat muncul di daftar atas. Nyalakan switch pada sesi yang mau dibalas otomatis.</li>
             </ol>
             <p class="text-[11px] text-amber-300/90"><b>Perlu diingat:</b> bot hanya hidup selama tab daylivechat.com/cs/chat terbuka. Kalau halaman di-refresh atau ditutup, <b>klik bookmark-nya lagi</b>. Tab itu jangan ditutup/di-sleep.</p>
