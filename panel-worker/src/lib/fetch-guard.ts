@@ -2,7 +2,11 @@
 // feed berita, GitHub, dst). Dulu hampir semuanya tanpa timeout: satu situs yang menggantung menahan seluruh invocation, lock
 // pump kedaluwarsa sehingga scan berjalan ganda, dan cron berita macet. Panggilan yang SUDAH punya signal (mis. provider AI
 // yang mengatur timeout sendiri, streaming) tidak disentuh.
-const DEFAULT_TIMEOUT_MS = 25_000;
+let timeoutMs = 25_000; // bisa diatur admin (Pengaturan Sistem > Jaringan), 5-60 dtk
+
+export function setFetchTimeoutMs(ms: number): void {
+	if (Number.isFinite(ms) && ms >= 1000) timeoutMs = ms;
+}
 
 type Guarded = typeof globalThis & { __kdFetchGuard?: boolean };
 
@@ -13,6 +17,6 @@ export function installFetchGuard(): void {
 	const orig = g.fetch.bind(globalThis);
 	g.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
 		if (init?.signal || (typeof Request !== "undefined" && input instanceof Request)) return orig(input, init);
-		return orig(input, { ...init, signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS) });
+		return orig(input, { ...init, signal: AbortSignal.timeout(timeoutMs) });
 	}) as typeof fetch;
 }

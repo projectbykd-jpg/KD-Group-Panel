@@ -19,6 +19,13 @@ Untuk SETIAP perubahan menu, tombol, kartu, tab Admin, pengaturan, alur kerja, p
 
 Detail dan alasan: `claude-memory/assistant-kb-wajib-update.md`.
 
+## 2b. Nilai yang bisa diatur harus masuk menu Admin -- jangan ditanam di kode
+Perintah pemilik: semua pengaturan yang masuk akal diubah admin harus ada di menu Admin.
+- Angka (batas, durasi, TTL): daftarkan di `SYS_SETTINGS` (`src/lib/settings.ts`, min/max aman), baca lewat `getSys()`. Tampil otomatis di Admin > Pengaturan Sistem.
+- Daftar/peta (jadwal, shio, pasaran, teks): daftarkan di `MASTER_DEFS` (`src/lib/master-data.ts`) dengan validasi ketat + bawaan; tampil di Admin > Data Master. Nilai tersimpan harus selalu bisa kembali ke bawaan.
+- Jangan menambah konstanta yang bisa diubah pemilik langsung di kode tanpa jalur ke Admin. Lalu perbarui KB asisten (aturan nomor 1).
+- Sengaja TIDAK dijadikan pengaturan (merusak data/keamanan): iterasi hash password, zona waktu, batas subrequest/waktu pump, nama tabel, regex parser.
+
 ## 2. Aturan lain pemilik
 - Jangan ubah logika bisnis yang sudah jalan (`claude-memory/dont-break-working-logic.md`).
 - Desain: tanpa neon/glow, tanpa backdrop-filter di elemen besar, animasi pendek, popup minimal (`claude-memory/panel-*.md`).

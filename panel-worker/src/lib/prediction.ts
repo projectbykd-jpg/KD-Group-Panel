@@ -21,7 +21,7 @@ export const JADWAL_PREDIKSI_CONFIG: { jam: string; nama: string; pasaran: strin
 	{ jam: "23:25", nama: "PREDIKSI COLORADO s/d KENTUCKY EVE", pasaran: ["ARIZONA POOLS", "COLORADO", "OREGON 03", "CANADA POOLS", "INDIA MORNING", "ATHENS", "OREGON 06", "CALIFORNIA", "FLORIDA EVE", "OREGON 09", "NEWYORK EVE", "KENTUCKY EVE"] },
 ];
 
-const DAFTAR_SHIO = [
+export const DAFTAR_SHIO = [
 	"ANJING - KUDA", "KERBAU - AYAM", "ANJING - ANJING", "HARIMAU - AYAM",
 	"BABI - AYAM", "MONYET - HARIMAU", "NAGA - KELINCI", "ULAR - TIKUS",
 	"KAMBING - KUDA", "BABI - TIKUS", "KERBAU - NAGA", "MONYET - AYAM",
@@ -29,7 +29,7 @@ const DAFTAR_SHIO = [
 
 export const CLOSING_PREDICTION_NAME = "KATA-KATA PENUTUP PREDIKSI";
 export const CLOSING_PREDICTION_SLOTS = ["06:15", "16:00"];
-const CLOSING_PREDICTION_VARIANTS = [
+export const CLOSING_PREDICTION_VARIANTS = [
 	"Prediksi di atas hanyalah referensi angka hari ini. Tepat atau tidaknya tetap bergantung pada hoki anda bosku.",
 	"Gunakan prediksi ini sebagai bahan pertimbangan saja. Hasil akhirnya tetap bergantung pada keberuntungan anda bosku.",
 	"Angka di atas merupakan prediksi untuk hari ini, bukan jaminan hasil. Semoga hoki selalu menyertai anda bosku.",
@@ -81,8 +81,17 @@ export function normalizeClosingSlot(slot: string): string {
 	const clean = String(slot || "").trim();
 	return CLOSING_PREDICTION_SLOTS.indexOf(clean) >= 0 ? clean : getActiveClosingSlot();
 }
+// Slot penutup aktif = slot terakhir yang jamnya sudah lewat; sebelum slot pertama -> slot pertama
+// (bawaan 06:15 & 16:00: sebelum 16:00 -> 06:15, sesudahnya 16:00 -- sama seperti aturan lama).
 export function getActiveClosingSlot(): string {
-	return nowMinutes7() < 16 * 60 ? "06:15" : "16:00";
+	const slots = CLOSING_PREDICTION_SLOTS;
+	const nowMin = nowMinutes7();
+	let active = slots[0];
+	for (const s of slots) {
+		const [h, m] = s.split(":").map(Number);
+		if (h * 60 + m <= nowMin) active = s;
+	}
+	return active;
 }
 export function closingScheduleId(slot: string): string {
 	return "CLOSING-" + normalizeClosingSlot(slot).replace(":", "");

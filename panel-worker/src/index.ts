@@ -2,6 +2,10 @@
 // Semua panggilan frontend lama google.script.run.<fn>(...) dipetakan ke
 // POST /api  body: { "action": "<fn>", ...args }
 import { installFetchGuard } from "./lib/fetch-guard";
+import { getSys } from "./lib/settings";
+import { loadMasterData } from "./lib/master-data";
+import { adminGetMasterData, adminSaveMasterData, shioMapGet } from "./api/master-data";
+
 import { assistantAsk, assistantClearGaps, assistantGetConfig, assistantModels, assistantSaveConfig, assistantStatus, assistantTest } from "./api/assistant";
 import { CORS_HEADERS, json } from "./lib/respond";
 import { loadSession, migrateKvSessionsOnce, pruneExpiredSessions } from "./lib/session";
@@ -187,6 +191,9 @@ const ROUTES: Record<string, Handler> = {
 	adminListActiveSessions: (env, b) => adminListActiveSessions(env, s(b.token)),
 	adminGetSystemSettings: (env, b) => adminGetSystemSettings(env, s(b.token)),
 	adminSaveSystemSettings: (env, b) => adminSaveSystemSettings(env, s(b.token), b.values),
+	adminGetMasterData: (env, b) => adminGetMasterData(env, s(b.token)),
+	adminSaveMasterData: (env, b) => adminSaveMasterData(env, s(b.token), s(b.key), b.value),
+	shioMapGet: (env, b) => shioMapGet(env, s(b.token)),
 	setMaintenance: (env, b) => setMaintenance(env, s(b.token), !!b.enabled, s(b.message)),
 
 	// kelola website (site_accounts)
@@ -343,6 +350,8 @@ installFetchGuard();
 export default {
 	async fetch(request, env, ctx): Promise<Response> {
 		const url = new URL(request.url);
+		// Data master (jadwal, shio, pasaran) & batas jaringan dari Admin > Data Master / Pengaturan Sistem. Cache 15 dtk.
+		await loadMasterData(env);
 
 		if (request.method === "OPTIONS" && url.pathname === "/api") {
 			return new Response(null, { status: 204, headers: CORS_HEADERS });
@@ -447,7 +456,8 @@ export default {
 				const idParam = url.searchParams.get("id");
 				// Daftar/banner/acak/populer di-cache di tepi 60 dtk (dulu tiap kunjungan anonim memindai tabel artikel di Turso:
 				// ORDER BY RANDOM(), COUNT, dst). Detail (?id=) TIDAK di-cache karena menambah counter views.
-				const cacheable = !idParam && request.method === "GET";
+				const newsTtl = await getSys(env, "sys_news_public_cache_sec"); // diatur admin; 0 = tanpa cache
+				const cacheable = !idParam && request.method === "GET" && newsTtl > 0;
 				const cache = (globalThis as unknown as { caches?: { default: Cache } }).caches?.default;
 				const cacheKey = new Request(url.toString(), { method: "GET" });
 				if (cacheable && cache) {
@@ -457,7 +467,7 @@ export default {
 				const reply = (data: unknown, status = 200): Response => {
 					const res = json(data, status);
 					if (cacheable && cache && status === 200) {
-						res.headers.set("cache-control", "public, max-age=60");
+						res.headers.set("cache-control", `public, max-age=${newsTtl}`);
 						ctx.waitUntil(cache.put(cacheKey, res.clone()));
 					}
 					return res;
@@ -656,6 +666,7 @@ export default {
 	//   "*/5 * * * *" -> router auto-post prediksi
 	//   "* * * * *"   -> pump scan INVEST (lanjutkan user yang state-nya 'running')
 	async scheduled(event, env, _ctx): Promise<void> {
+		await loadMasterData(env);
 		try {
 			await env.DB.prepare(
 				`INSERT INTO settings (key, value) VALUES ('cron_heartbeat', ?)
