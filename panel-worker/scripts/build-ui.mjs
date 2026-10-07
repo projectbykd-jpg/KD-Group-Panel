@@ -267,5 +267,14 @@ for (const f of ["logo.png", "favicon.png"]) copyFileSync(resolve(root, "ui-src"
 for (const f of readdirSync(resolve(root, "ui-src"))) {
 	if (/^[A-Z]{2,8}\.(png|svg)$/.test(f)) copyFileSync(resolve(root, "ui-src", f), resolve(outDir, f));
 }
+// Bot Live Chat untuk BOOKMARKLET (tanpa Tampermonkey, tanpa file di laptop): kode yang sama dengan userscript,
+// dilengkapi shim GM_getValue/GM_setValue berbasis localStorage & penjaga agar tidak dimuat dua kali.
+{
+	const shim = `if(typeof window.GM_getValue==="undefined"){window.GM_getValue=function(k,d){try{var v=localStorage.getItem("gm_"+k);return v===null?d:v}catch(e){return d}};window.GM_setValue=function(k,v){try{localStorage.setItem("gm_"+k,v)}catch(e){}};}`;
+	const body = readFileSync(resolve(root, "userscripts", "daylivechat-autobot.user.js"), "utf8");
+	// Dimuat lagi (bookmark diklik ulang) -> cukup buka/tutup panel kecil bot, jangan jalankan dua bot.
+	const wrapped = `(function(){var f=document.getElementById("dgb-fab");if(window.__dgbLoaded||f){if(f)f.click();return;}window.__dgbLoaded=1;\n${shim}\n${body}\n})();`;
+	writeFileSync(resolve(outDir, "daylivechat-autobot.js"), wrapped, "utf8");
+}
 writeFileSync(resolve(outDir, "index.html"), out, "utf8");
 console.log("OK -> public/index.html (" + out.length + " bytes)");

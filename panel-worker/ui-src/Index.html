@@ -1295,16 +1295,20 @@
           </div>
 
           <div class="glass-card rounded-3xl p-6 flex flex-col gap-3">
-            <div class="panel-section-title"><i class="fa-solid fa-circle-info text-amber-300 text-sm"></i> CARA PASANG USERSCRIPT</div>
-            <p class="text-[11px] text-slate-500 -mt-1">DayLiveChat mengunci login CS ke IP tertentu, jadi bot ini jalan dari browser tempat kamu SUDAH login CS seperti biasa (bukan dari server) -- cukup dipasang sekali.</p>
+            <div class="panel-section-title"><i class="fa-solid fa-circle-info text-amber-300 text-sm"></i> PASANG BOT (TANPA EKSTENSI, TANPA UNDUH FILE)</div>
+            <p class="text-[11px] text-slate-500 -mt-1">DayLiveChat mengunci login CS ke IP tertentu dan browser melarang panel membaca situs lain, jadi bot dijalankan <b>di halaman DayLiveChat milikmu</b> lewat sebuah <b>bookmark</b>. Kodenya selalu dimuat langsung dari panel ini (selalu versi terbaru), tidak ada file di laptop, dan tidak menyimpan password.</p>
+            <div class="flex items-center gap-3 flex-wrap">
+              <a id="livechatBookmarklet" href="#" onclick="event.preventDefault();toast('Jangan diklik di sini — SERET tombol ini ke bookmarks bar browser.');" draggable="true" class="btn-primary inline-flex items-center gap-2 text-xs font-bold px-4 py-2.5 rounded-xl" style="cursor:grab"><i class="fa-solid fa-robot"></i>🤖 KD Auto-Reply</a>
+              <button type="button" onclick="livechatCopyBookmarklet()" class="btn-secondary text-xs font-bold px-4 py-2.5 rounded-xl"><i class="fa-regular fa-copy mr-1"></i>SALIN KODE BOOKMARK</button>
+            </div>
             <ol class="text-[11px] text-slate-400 flex flex-col gap-1.5 list-decimal list-inside">
-              <li>Pasang ekstensi <b>Tampermonkey</b> di Chrome/Edge yang dipakai buka DayLiveChat.</li>
-              <li>Buka menu Tampermonkey &rarr; <i>Create a new script</i> &rarr; tempel isi file <code class="text-cyan-300">panel-worker/userscripts/daylivechat-autobot.user.js</code> &rarr; simpan.</li>
-              <li>Buka/refresh <b>daylivechat.com/cs/chat</b> &amp; login CS seperti biasa -- akan muncul tombol mengambang kecil <b>🤖</b> di pojok kanan bawah.</li>
-              <li>Klik tombol itu &rarr; isi <b>URL Panel</b> (<code class="text-cyan-300">https://panel-worker.projectbykd.workers.dev</code>) &amp; <b>Kunci Bot</b> (minta ke admin) &rarr; simpan &rarr; nyalakan.</li>
-              <li>Sesi chat yang terlihat userscript akan otomatis muncul di daftar atas. Nyalakan switch pada sesi yang mau dibalas otomatis.</li>
+              <li><b>Sekali saja:</b> tampilkan bookmarks bar (Ctrl+Shift+B), lalu <b>seret tombol biru di atas</b> ke bookmarks bar. (Kalau tidak bisa diseret: buat bookmark baru, isi alamat/URL dengan kode dari tombol <i>Salin kode bookmark</i>.)</li>
+              <li>Buka <b>daylivechat.com/cs/chat</b> &amp; login CS seperti biasa, <b>lalu klik bookmark 🤖 KD Auto-Reply</b> &rarr; muncul tombol kecil <b>🤖</b> di pojok kanan bawah halaman itu.</li>
+              <li>Klik 🤖 &rarr; isi <b>Kunci Bot</b> (minta ke admin; URL Panel sudah terisi) &rarr; simpan &rarr; nyalakan. Pengaturan ini diingat browser.</li>
+              <li>Sesi chat muncul di daftar atas. Nyalakan switch pada sesi yang mau dibalas otomatis.</li>
             </ol>
-            <p class="text-[11px] text-slate-500 mt-1"><b>Tanpa Tampermonkey:</b> pakai <b>Agent Live Chat</b> (program Node.js di komputer CS yang IP-nya diizinkan DayLiveChat; login memakai email &amp; password CS dari file <code class="text-cyan-300">.env</code> lokal, tidak dikirim ke panel). Folder &amp; panduan: <code class="text-cyan-300">panel-worker/livechat-agent/</code> (README.md). Jangan jalankan agent dan userscript bersamaan.</p>
+            <p class="text-[11px] text-amber-300/90"><b>Perlu diingat:</b> bot hanya hidup selama tab daylivechat.com/cs/chat terbuka. Kalau halaman di-refresh atau ditutup, <b>klik bookmark-nya lagi</b>. Tab itu jangan ditutup/di-sleep.</p>
+            <p class="text-[11px] text-slate-500">Alternatif untuk komputer yang menyala terus: Tampermonkey (<code class="text-cyan-300">userscripts/daylivechat-autobot.user.js</code>) atau Agent Node.js (<code class="text-cyan-300">livechat-agent/</code>). Jangan menjalankan lebih dari satu cara sekaligus.</p>
           </div>
         </div>
 
