@@ -1378,13 +1378,13 @@
       if (b) { b.disabled = on; b.innerHTML = on ? '<i class="fa-solid fa-spinner fa-spin mr-2"></i>MENARIK...' : '<i class="fa-solid fa-cloud-arrow-down mr-2"></i>TARIK DATA'; }
       if (s) s.textContent = msg || '';
     }
-    function lapStatCard(label, val, color) {
+    function lapStatCard(label, val, color, extra) {
       // count-up HANYA kalau val = satu angka bersih (mis. "1,234"), BUKAN string
       // gabungan seperti "2 (2,632,014,000)" — jangan sampai formatnya rusak.
       const s = String(val).trim();
       const cnt = /^-?[0-9][0-9,]*(\.[0-9]+)?$/.test(s)
         ? ` data-fx-count="${s.replace(/,/g, '')}"` : '';
-      return `<div class="glass-inner rounded-2xl p-3.5 border border-white/[0.05]"><div class="text-[9.5px] font-bold text-slate-400 uppercase tracking-[0.1em]">${label}</div><div class="text-[19px] font-black mt-1.5 tabular-nums ${color||'text-slate-50'}"${cnt}>${val}</div></div>`;
+      return `<div class="glass-inner rounded-2xl p-3.5 border border-white/[0.05]"><div class="lap-stat-label text-[9.5px] font-bold text-slate-400 uppercase tracking-[0.1em]"><span>${label}</span>${extra||''}</div><div class="text-[19px] font-black mt-1.5 tabular-nums ${color||'text-slate-50'}"${cnt}>${val}</div></div>`;
     }
 
     // Tabel collapsible + search bawaan. rows = array; rowFn(r,i)->'<tr>...'; copyFn(r,i)->string;
@@ -2020,7 +2020,7 @@
       const code = pgaPendingConsoleScript();
       const escCode = c => c.replace(/[&<>]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]));
       host.innerHTML = lapHeaderCard('fa-tower-broadcast', 'PGA Pending', 'Live sync withdraw berstatus PGA Pending dari motionv2.com/withdraw-request.', `
-        <details class="glass-inner rounded-2xl border border-rose-500/20 text-[11px] text-slate-300 leading-relaxed pga-collapse" open>
+        <details class="glass-inner rounded-2xl border border-rose-500/20 text-[11px] text-slate-300 leading-relaxed pga-collapse">
           <summary class="p-4 flex items-center gap-2 cursor-pointer select-none">
             <span class="font-bold text-rose-300 flex-1"><i class="fa-solid fa-satellite-dish mr-1"></i>Cara pakai</span>
             <i class="fa-solid fa-chevron-down pga-collapse-caret"></i>
@@ -2177,6 +2177,7 @@
         ${lapJobsCardHtml('motion')}
         <div class="glass-inner rounded-2xl p-4 border border-amber-500/20 text-[11px] text-slate-300 leading-relaxed">
           <div class="font-bold text-amber-300 mb-1"><i class="fa-solid fa-shield-halved mr-1"></i>Motion kadang menolak trafik server</div>
+          <details class="lap-help"><summary>Lihat cara pakai</summary>
           motionv2.com sesekali menantang/menolak request dari Worker (WAF) -- hasilnya data bisa muncul 0 padahal aslinya ada.
           Tarik data Motion sekarang lewat <b>Console</b> tab Motion (browser asli, bukan server), sama seperti Lap Mozart --
           Deposit &amp; Withdraw pakai <b>2 skrip terpisah</b> (endpoint deposit cuma mau nyaut kalau dibuka dari menu <b>RIWAYAT PGA</b>,
@@ -2189,7 +2190,7 @@
             <li>Tempel (Ctrl+V) → <b>Enter</b> → isi tanggal → tunggu muncul “terkirim ke panel OK”.</li>
             <li>Boleh dijalankan salah satu dulu (mis. Withdraw saja) — yang belum dijalankan tetap simpan data lama, tidak ketimpa kosong.</li>
             <li>Balik ke sini → <b>Muat Ulang</b>.</li>
-          </ol>
+          </ol></details>
           <div class="flex flex-wrap gap-2 mt-3">
             <button onclick="lapMotionCopyScript('deposit')" class="bg-gradient-to-r from-cyan-400 to-blue-500 text-slate-950 font-extrabold px-4 py-2 rounded-xl text-xs"><i class="fa-regular fa-copy mr-1"></i>Salin Skrip Deposit</button>
             <button onclick="lapMotionCopyScript('withdraw')" class="bg-gradient-to-r from-purple-400 to-fuchsia-500 text-slate-950 font-extrabold px-4 py-2 rounded-xl text-xs"><i class="fa-regular fa-copy mr-1"></i>Salin Skrip Withdraw</button>
@@ -2203,7 +2204,7 @@
             <textarea id="lapMotionCodeWithdraw" readonly onclick="this.select()" class="w-full h-32 glass-inner rounded-xl p-2 text-[10px] font-mono text-slate-200 leading-tight">${escCode(codeWd)}</textarea>
           </div>
         </div>
-        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 mt-3">
+        <div class="lap-stat-grid mt-2">
           ${lapStatCard('Transaksi Paid', lapFmt(sm.totalTransaksiPaid), 'text-cyan-400')}
           ${lapStatCard('Total By Paid At', lapFmt(sm.totalNominalPaidAt), 'text-emerald-400')}
           ${lapStatCard('Transaksi Create', lapFmt(sm.totalTransaksiCreate), 'text-indigo-400')}
@@ -2315,6 +2316,7 @@
         ${lapJobsCardHtml('mozart')}
         <div class="glass-inner rounded-2xl p-4 border border-amber-500/20 text-[11px] text-slate-300 leading-relaxed">
           <div class="font-bold text-amber-300 mb-1"><i class="fa-solid fa-shield-halved mr-1"></i>Mozart diproteksi Cloudflare</div>
+          <details class="lap-help"><summary>Lihat cara pakai</summary>
           Server tidak bisa menarik data Mozart (semua IP server diblokir), dan bookmarklet ditolak proteksi situs Mozart (<code>about:blank#blocked</code>).
           Cara yang jalan — tempel skrip di <b>Console</b> tab Mozart:
           <ol class="list-decimal ml-4 mt-1.5 space-y-1">
@@ -2323,7 +2325,7 @@
             <li>Tekan <b>F12</b> → tab <b>Console</b>. (Pertama kali Chrome minta ketik <code>allow pasting</code> lalu Enter.)</li>
             <li>Tempel (Ctrl+V) → <b>Enter</b> → isi tanggal → tunggu muncul “terkirim ke panel OK”.</li>
             <li>Balik ke sini → <b>Muat Ulang</b>.</li>
-          </ol>
+          </ol></details>
           <div class="flex flex-wrap gap-2 mt-3">
             <button onclick="lapMozartCopyScript()" class="bg-gradient-to-r from-cyan-400 to-blue-500 text-slate-950 font-extrabold px-4 py-2 rounded-xl text-xs"><i class="fa-regular fa-copy mr-1"></i>Salin Skrip</button>
             <button onclick="lapRefresh('lap-mozart')" class="glass-inner px-4 py-2 rounded-xl text-xs font-bold"><i class="fa-solid fa-rotate mr-1"></i>Muat Ulang</button>
@@ -2336,7 +2338,7 @@
         <div id="lapMozartProgress" class="text-[11px] text-cyan-300 mt-1"></div>
         ${meta.truncated ? '<div class="text-[11px] text-amber-300 mt-1">⚠ Data terpotong.</div>' : ''}
         ${panelBar}
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-3">
+        <div class="lap-stat-grid mt-2">
           ${lapStatCard('DP Done By Bot', lapFmt(dpBot.length), 'text-emerald-400')}
           ${lapStatCard('Nominal DP Bot', lapFmt(dpBotSum), 'text-emerald-400')}
           ${lapStatCard('WD Selesai', lapFmt(wdOk.length), 'text-rose-400')}
@@ -2398,6 +2400,39 @@
       return (!b || a === b) ? f(a) : f(a) + ' – ' + f(b);
     }
 
+    // ---------- Total Deposit / Withdraw per operator (tabel History Operator) ----------
+    // Operator khusus (Blazz, Khanpay, ...) diatur admin di menu Admin > Lap Admin.
+    // Total Deposit = total History Operator DIKURANGI deposit operator khusus.
+    let lapSpecialOps = null, lapSpecialOpsAt = 0;
+    function lapLoadSpecialOps(done) {
+      if (lapSpecialOps && Date.now() - lapSpecialOpsAt < 60000) { done(); return; }
+      google.script.run.withSuccessHandler(r => {
+        lapSpecialOps = (r && r.success && Array.isArray(r.operators)) ? r.operators : (lapSpecialOps || []);
+        lapSpecialOpsAt = Date.now(); done();
+      }).withFailureHandler(() => { lapSpecialOps = lapSpecialOps || []; done(); }).lapGetSpecialOps(currentSessionToken);
+    }
+    function lapOpTotals() {
+      const meta = (lapResults.reportAgentMeta && lapResults.reportAgentMeta[0]) || {};
+      const sum = meta.summary;
+      if (!sum || !sum.total || !Array.isArray(sum.rows)) return null;
+      const cfg = lapSpecialOps || [];
+      const per = cfg.map(c => ({ label: c.label || c.operator, deposit: 0 }));
+      sum.rows.forEach(r => {
+        const name = String(r.operator || '').toLowerCase();
+        const i = cfg.findIndex(c => c.operator && name.includes(String(c.operator).toLowerCase()));
+        if (i >= 0) per[i].deposit += Number(r.deposit || 0);
+      });
+      const special = per.reduce((n, x) => n + x.deposit, 0);
+      return { deposit: Number(sum.total.deposit || 0) - special, withdraw: Number(sum.total.withdraw || 0), per };
+    }
+    function lapOpCardsHtml() {
+      const t = lapOpTotals();
+      if (!t) return `<div class="lap-stat-empty">Total Deposit &amp; Withdraw belum ada untuk periode ini. Klik <b>TARIK DATA</b> (data lama belum memuat tabel History Operator).</div>`;
+      return lapStatCard('Total Deposit', lapFmt(t.deposit), 'text-emerald-400')
+        + t.per.map(x => lapStatCard('Total ' + escapeHtml(x.label), lapFmt(x.deposit), 'text-amber-300')).join('')
+        + lapStatCard('Total Withdraw', lapFmt(t.withdraw), 'text-rose-400');
+    }
+
     // ---------- ADMIN (via GitHub Actions) ----------
     function lapRenderAdmin(host) {
       const reg = lapResults.register || [];
@@ -2411,6 +2446,12 @@
       const laporan = rmeta.dateLabel
         ? `Tanggal ${rmeta.dateLabel}\n~ DAFTAR Non Reff = ${rsum.daftarNonRef||0}\n~ DAFTAR Menggunakan Reff = ${rsum.daftarWithRef||0}\n~ NDP Non Reff = ${rsum.ndpNonRef||0}\n~ NDP Menggunakan Reff = ${rsum.ndpWithRef||0}` : '';
       window.__lapCopyLaporan = () => { if (!laporan) { toast('Belum ada'); return; } navigator.clipboard.writeText(laporan).then(() => toast('Laporan disalin')); };
+      // Hasil sama persis dengan tombol COPY pada tabel ID Selisih.
+      window.__lapCopyIdSelisih = () => {
+        if (!idS.length) { toast('ID Selisih kosong'); return; }
+        navigator.clipboard.writeText(idS.map((r,i) => [i+1,r.userId,r.nominal].join('\t')).join('\n')).then(() => toast(idS.length + ' baris disalin'));
+      };
+      lapLoadSpecialOps(() => { const el = document.getElementById('lapOpCards'); if (el) el.innerHTML = lapOpCardsHtml(); });
       const acts = [...new Set(ra.map(r => (r.action||'').trim()).filter(Boolean))].sort();
       const ops  = [...new Set(ra.map(r => (r.operator||'').trim()).filter(Boolean))].sort();
       lapAdminF = { refType:'all', actions:new Set(acts), agents:new Set(ops) };
@@ -2423,11 +2464,11 @@
             <button onclick="window.__lapCopyLaporan()" class="glass-inner px-3 py-1 rounded-lg text-[10px] font-bold"><i class="fa-regular fa-copy mr-1"></i>COPY</button></div>
           <pre class="text-[11px] text-slate-300 whitespace-pre-wrap font-mono">${laporan || 'Belum ada data. Klik TARIK DATA.'}</pre>
         </div>
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-3">
+        <div class="lap-stat-grid mt-3" id="lapOpCards">${lapOpCardsHtml()}</div>
+        <div class="lap-stat-grid mt-2">
           ${lapStatCard('Total Selisih', lapFmt(ccmeta.totalSelisih), 'text-rose-400')}
-          ${lapStatCard('ID Selisih', lapFmt(idS.length), 'text-rose-400')}
+          ${lapStatCard('ID Selisih', lapFmt(idS.length), 'text-rose-400', `<button type="button" class="lap-stat-copy" onclick="window.__lapCopyIdSelisih()" title="Salin daftar ID Selisih"><i class="fa-regular fa-copy"></i> COPY</button>`)}
           ${lapStatCard('WD PGA-IDF', lapFmt(wd.length) + ' (' + lapFmt(ccmeta.totalNominalWdPgaIdf) + ')', 'text-cyan-400')}
-          ${lapStatCard('Baris Riwayat Koin', lapFmt(cc.length), 'text-slate-100')}
         </div>
         <div class="mt-1">
           <div class="flex flex-wrap gap-1.5 items-center mt-3 mb-1">
@@ -2625,7 +2666,51 @@
     }
 
     /* Menu admin: tampilkan satu panel per waktu (tidak numpuk scroll). */
-    const ADMIN_PANELS = ['users','sites','sesi','autopost','maintenance'];
+    const ADMIN_PANELS = ['users','sites','sesi','autopost','lapops','maintenance'];
+    // ---------- Admin: operator khusus Lap Admin ----------
+    function lapOpsRowHtml(o) {
+      const v = x => escapeHtml(String(x == null ? '' : x));
+      return `<div class="lapops-row">
+        <input class="glass-inner rounded-xl px-3 py-2 text-xs" data-f="label" maxlength="24" placeholder="Label (mis. Blazz)" value="${v(o && o.label)}" aria-label="Label">
+        <input class="glass-inner rounded-xl px-3 py-2 text-xs" data-f="operator" maxlength="64" placeholder="Nama operator (mis. blazz)" value="${v(o && o.operator)}" aria-label="Nama operator">
+        <button type="button" class="admin-icon-btn admin-icon-delete" onclick="this.closest('.lapops-row').remove()" title="Hapus"><i class="fa-solid fa-trash"></i></button>
+      </div>`;
+    }
+    function lapOpsAddRow(o) {
+      const box = document.getElementById('lapOpsRows'); if (!box) return;
+      if (box.children.length >= 10) { toast('Maksimal 10 operator khusus'); return; }
+      box.insertAdjacentHTML('beforeend', lapOpsRowHtml(o));
+    }
+    function lapOpsLoad() {
+      const st = document.getElementById('lapOpsStatus'), box = document.getElementById('lapOpsRows');
+      if (!box) return;
+      if (st) st.textContent = 'Memuat…';
+      google.script.run.withSuccessHandler(r => {
+        if (!r || !r.success) { if (st) st.textContent = 'Gagal memuat: ' + ((r && r.message) || '-'); return; }
+        box.innerHTML = '';
+        (r.operators || []).forEach(o => lapOpsAddRow(o));
+        if (!box.children.length) lapOpsAddRow({});
+        if (st) st.textContent = (r.operators || []).length + ' operator khusus';
+      }).withFailureHandler(e => { if (st) st.textContent = 'Gagal memuat: ' + ((e && e.message) || e); }).lapGetSpecialOps(currentSessionToken);
+    }
+    function lapOpsSave() {
+      const box = document.getElementById('lapOpsRows'), st = document.getElementById('lapOpsStatus'), btn = document.getElementById('lapOpsSaveBtn');
+      if (!box) return;
+      const list = Array.from(box.querySelectorAll('.lapops-row')).map(r => ({
+        label: r.querySelector('[data-f="label"]').value.trim(),
+        operator: r.querySelector('[data-f="operator"]').value.trim(),
+      })).filter(o => o.operator);
+      if (btn) btn.disabled = true;
+      google.script.run.withSuccessHandler(r => {
+        if (btn) btn.disabled = false;
+        if (!r || !r.success) { toast((r && r.message) || 'Gagal menyimpan'); return; }
+        lapSpecialOps = r.operators; lapSpecialOpsAt = Date.now();
+        box.innerHTML = ''; (r.operators || []).forEach(o => lapOpsAddRow(o)); if (!box.children.length) lapOpsAddRow({});
+        if (st) st.textContent = 'Tersimpan — ' + (r.operators || []).length + ' operator khusus';
+        toast('Operator khusus tersimpan');
+      }).withFailureHandler(e => { if (btn) btn.disabled = false; toast('Gagal menyimpan: ' + ((e && e.message) || e)); }).lapSaveSpecialOps(currentSessionToken, list);
+    }
+
     function switchAdminPanel(key, fromNav) {
       // Tab lama yang tersimpan di localStorage: 'backup' kini bagian dari
       // Maintenance, 'dashboard' sudah jadi menu Aktivitas.
@@ -2650,6 +2735,8 @@
         if (Date.now() - pageFetchedAt.sesi > NAV_FRESH_MS) { loadActiveSessions(); pageFetchedAt.sesi = Date.now(); }
       } else if (key === 'autopost') {
         loadAutoPostStatus();
+      } else if (key === 'lapops') {
+        lapOpsLoad();
       } else if (key === 'maintenance') {
         loadMaintenanceState();
       }

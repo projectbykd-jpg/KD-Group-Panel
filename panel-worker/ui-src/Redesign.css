@@ -1018,3 +1018,57 @@ table:has(> #activeSessionsBody) { min-width: 900px !important; }
 
 /* Tabel user: tinggi dibatasi (62vh) -> HARUS bisa digulir vertikal, header tetap terlihat */
 .admin-users-table-wrap { overflow: auto !important; max-height: 62vh; scrollbar-width: thin; scrollbar-color: var(--ui-line-strong) transparent; }
+
+/* ---- Lap Admin: kartu total rapat, tanpa ruang terbuang ---- */
+.lap-stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.lap-stat-grid > div:not(.lap-stat-empty) { padding: 10px 12px !important; border-radius: 10px !important; }
+.lap-stat-label { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.lap-stat-copy { font-size: 10.5px; font-weight: 600; letter-spacing: .03em; color: var(--ui-text-2); background: var(--ui-surface-3); border: 1px solid var(--ui-line-strong); border-radius: 6px; padding: 2px 8px; cursor: pointer; text-transform: none; }
+.lap-stat-copy:hover { color: var(--ui-text); border-color: rgba(var(--ui-accent-rgb), .55); }
+.lap-stat-empty { grid-column: 1 / -1; padding: 10px 14px; border-radius: 10px; background: var(--ui-surface-2); border: 1px dashed var(--ui-line-strong); color: var(--ui-text-2); font-size: 12.5px; }
+.lapops-rows { display: flex; flex-direction: column; gap: 8px; }
+.lapops-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) auto; gap: 8px; align-items: center; }
+@media (max-width: 560px) { .lapops-row { grid-template-columns: 1fr auto; } .lapops-row input:first-child { grid-column: 1 / -1; } }
+
+/* ============================================================
+   KEPADATAN TABEL -- rapat, tidak membuang ruang
+   ============================================================ */
+thead th, .pretty-table thead th, .log-table thead th, .admin-users-table thead th, .lap-tbl thead th, .lap-jobs-table thead th { height: 34px; font-size: 10.5px !important; letter-spacing: .05em !important; }
+tbody td, .pretty-table tbody td, .log-table td, .admin-users-table tbody td, .lap-jobs-table td { padding: 8px 14px !important; line-height: 1.35; }
+thead th:first-child, tbody td:first-child { padding-left: 14px !important; }
+thead th:last-child, tbody td:last-child { padding-right: 14px !important; }
+.log-table td { padding-top: 10px !important; padding-bottom: 10px !important; }
+.admin-users-table tbody td { padding-top: 7px !important; padding-bottom: 7px !important; }
+.pretty-table tbody td { padding-top: 9px !important; padding-bottom: 9px !important; }
+.lap-tbl-head { min-height: 44px; }
+.lap-tbl { margin-top: 8px; }
+.lap-tbl-body > .p-2 { padding: 8px 12px !important; }
+.lap-tbl-body > .p-2 input { height: 34px; }
+.lap-tbl-body > .flex.justify-between { padding: 7px 14px !important; }
+.lap-tbl-body tfoot td, .lap-tbl-body tbody td.lap-foot { padding: 8px 14px !important; }
+.lap-tbl-body tbody td { white-space: nowrap; }
+.table-empty-cell, .table-loading-cell { padding: 24px 14px !important; }
+.table-empty-inner i { width: 32px; height: 32px; font-size: 14px; }
+.lap-jobs-table-wrap { margin: 2px 0 0; }
+.log-details summary { padding: 6px 9px !important; }
+.user-menu-chip { margin-top: 3px !important; }
+.admin-users-table td:nth-child(4) > span.rounded-full, .admin-users-table td:nth-child(5) > span.rounded-full { min-height: 22px; padding: 2px 9px !important; }
+/* ringkasan Lap & kartu statistik */
+.lap-stat-grid > div:not(.lap-stat-empty) { padding: 8px 12px !important; }
+.lap-stat-grid .text-\[19px\] { font-size: 18px !important; margin-top: 2px !important; }
+.lap-help { margin: 2px 0 0; }
+.lap-help > summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--ui-accent); padding: 2px 0; list-style: none; }
+.lap-help > summary::-webkit-details-marker { display: none; }
+.lap-help > summary::before { content: "▸ "; }
+.lap-help[open] > summary::before { content: "▾ "; }
+.lap-help > ol { margin-top: 6px; }
+
+/* Aktivitas: ringkas di atas supaya tabel naik ke layar pertama */
+#activity-page > .glass-card { gap: 10px !important; }
+#userStats { gap: 8px !important; }
+#userStats > * { display: flex !important; align-items: center !important; justify-content: space-between; gap: 8px; padding: 8px 12px !important; min-height: 0 !important; border-radius: 10px !important; }
+#userStats > * > * { margin: 0 !important; }
+#userStats .text-2xl, #userStats .text-3xl, #userStats [class*="text-[2"] { font-size: 18px !important; line-height: 1.2 !important; }
+#activity-page .status-legend { margin: 0 !important; gap: 14px; font-size: 11.5px; }
+#activity-page .activity-filter-card { padding: 10px 12px !important; }
+#activity-page .activity-meta-bar { padding: 6px 12px !important; }
