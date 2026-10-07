@@ -1171,7 +1171,15 @@ body { position: relative; }
   #kd-assistant .kda-panel { height: min(520px, calc(100vh - 170px)); }
 }
 @media (prefers-reduced-motion: reduce) { #kd-assistant * { animation: none !important; transition: none !important; } }
-.kda-meta { margin-top: 6px; font-size: 10.5px; color: var(--ui-text-3); }
+.kda-attach { display: flex; align-items: center; gap: 8px; margin: 0 12px; padding: 6px 8px; background: var(--ui-surface-2); border: 1px solid var(--ui-line-strong); border-radius: 10px; font-size: 11.5px; color: var(--ui-text-2); }
+.kda-attach[hidden] { display: none; }
+.kda-attach img { width: 44px; height: 32px; object-fit: cover; border-radius: 6px; border: 1px solid var(--ui-line); }
+.kda-attach span { flex: 1; }
+.kda-attach button { width: 22px; height: 22px; border-radius: 50%; border: 0; background: var(--ui-surface-3); color: var(--ui-text); cursor: pointer; font-size: 15px; line-height: 1; }
+.kda-clip { width: 34px; height: 38px; flex: none; border: 0; background: transparent; color: var(--ui-text-3); cursor: pointer; border-radius: 8px; }
+.kda-clip:hover { color: var(--ui-text); background: var(--ui-surface-2); }
+.kda-shot { display: block; max-width: 100%; width: 190px; border-radius: 8px; margin-bottom: 6px; border: 1px solid var(--ui-line); }
+.kda-shot-tag { font-size: 11px; color: var(--ui-text-3); margin-bottom: 4px; }
 
 /* Kartu key khusus Asisten KD */
 .asst-key-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }

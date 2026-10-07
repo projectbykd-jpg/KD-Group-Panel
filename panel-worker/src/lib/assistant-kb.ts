@@ -9,7 +9,7 @@
 // Jangan menulis rahasia (password, key, token) di sini.
 // ============================================================================
 
-export const ASSISTANT_KB_VERSION = "2026-10-07.6";
+export const ASSISTANT_KB_VERSION = "2026-10-07.7";
 
 /** Penjelasan per menu. Kunci = id navigasi (nav-<kunci>) di ui-src/Index.html. */
 export const KB_PAGES: Record<string, { title: string; text: string }> = {
@@ -128,7 +128,7 @@ TAMPILAN: sidebar kiri berisi menu per grup (Utama, Laporan Harian, Live Chat, A
 MAINTENANCE: bila mode maintenance aktif, operator tidak bisa kirim/login; hanya admin.
 UMUM PENYEBAB GAGAL: (1) cookie/PHPSESSID/token kedaluwarsa — ambil yang baru dari browser yang sedang login; (2) website belum punya token Telegram/LinkTree/Panel-Z di Admin > Website; (3) akun tidak punya akses website/menu; (4) kuota/layanan pihak ketiga (Telegram, GitHub Actions) sedang bermasalah — coba lagi nanti; (5) data duplikat diblokir sengaja agar tidak terkirim dua kali.
 KEAMANAN: jangan membagikan password, cookie, token, atau API key kepada siapa pun termasuk asisten ini; asisten tidak butuh dan tidak boleh meminta data itu.
-ASISTEN KD: widget chat melayang di kanan bawah, tersedia untuk SEMUA role (termasuk BOT). Tombol '−' menyembunyikan ke tepi kanan; tombol tab kecil di tepi memunculkannya lagi. Asisten hanya memberi panduan (tidak menjalankan aksi) dan memakai API key khusus yang diisi admin di Admin > Pengaturan Sistem (cadangan: AI Provider di Bot > Setting).
+ASISTEN KD: widget chat melayang di kanan bawah, tersedia untuk SEMUA role (termasuk BOT). Tombol '−' menyembunyikan ke tepi kanan; tombol tab kecil di tepi memunculkannya lagi. Asisten hanya memberi panduan (tidak menjalankan aksi) dan memakai API key khusus yang diisi admin di Admin > Pengaturan Sistem (cadangan: AI Provider di Bot > Setting). SCREENSHOT: pengguna bisa menempelkan gambar langsung ke kolom chat dengan Ctrl+V (atau tombol klip kertas) agar asisten ikut melihat tampilan/galat yang dimaksud; gambar diperkecil di browser, dikirim ke penyedia AI hanya untuk pertanyaan itu, dan tidak disimpan. Hanya model yang mendukung gambar (mis. Gemini) yang bisa membacanya; bila modelnya tidak mendukung, asisten memberi tahu dan pertanyaan teks tetap bisa dikirim. Jangan kirim screenshot yang menampilkan password, saldo, atau data pribadi.
 `.trim();
 
 export function buildKnowledgeText(): string {

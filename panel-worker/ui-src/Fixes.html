@@ -303,7 +303,7 @@
       chipsEl.innerHTML = SUGGEST.map(function (q) { return '<button type="button" class="kda-chip">' + esc(q) + '</button>'; }).join('');
     } else {
       msgsEl.innerHTML = hist.map(function (m) {
-        return '<div class="kda-msg ' + (m.role === 'user' ? 'me' : 'bot') + (m.err ? ' err' : '') + '"><div class="kda-bubble">' + (m.role === 'user' ? '<p>' + esc(m.content) + '</p>' : md(m.content) + (m.meta ? '<div class="kda-meta">' + esc(m.meta) + '</div>' : '')) + '</div></div>';
+        return '<div class="kda-msg ' + (m.role === 'user' ? 'me' : 'bot') + (m.err ? ' err' : '') + '"><div class="kda-bubble">' + (m.role === 'user' ? (m.shot ? '<div class="kda-shot-tag"><i class="fa-solid fa-image"></i> Screenshot terlampir</div>' : '') + '<p>' + esc(m.content) + '</p>' : md(m.content)) + '</div></div>';
       }).join('') + (busy ? '<div class="kda-msg bot"><div class="kda-bubble kda-typing"><span></span><span></span><span></span></div></div>' : '');
       chipsEl.innerHTML = '';
     }
@@ -312,21 +312,49 @@
   }
   function save() { try { sessionStorage.setItem(HKEY, JSON.stringify(hist.slice(-20))); } catch (e) {} }
 
+  var pendingImg = '';
   function ask(text) {
     text = String(text || '').trim();
-    if (!text || busy) return;
+    var img = pendingImg;
+    if ((!text && !img) || busy) return;
     if (typeof currentSessionToken === 'undefined' || !currentSessionToken) return;
     var past = hist.filter(function (m) { return !m.err; }).slice(-6).map(function (m) { return { role: m.role, content: m.content }; });
-    hist.push({ role: 'user', content: text }); busy = true; input.value = ''; autosize(); save(); render();
+    hist.push({ role: 'user', content: text || 'Tolong lihat screenshot ini.', shot: !!img }); setImg(''); busy = true; input.value = ''; autosize(); save(); render();
     google.script.run.withSuccessHandler(function (r) {
       busy = false;
-      if (r && r.success && r.answer) { hist.push({ role: 'assistant', content: r.answer, meta: r.via ? (r.via + ' · ' + ((r.ms || 0) / 1000).toFixed(1) + ' dtk') : '' }); kbVer = r.kbVersion || kbVer; }
+      if (r && r.success && r.answer) { hist.push({ role: 'assistant', content: r.answer, }); kbVer = r.kbVersion || kbVer; }
       else hist.push({ role: 'assistant', content: (r && r.message) || 'Maaf, belum bisa menjawab.', err: true });
       save(); render();
     }).withFailureHandler(function (e) {
       busy = false; hist.push({ role: 'assistant', content: (e && e.message) || 'Maaf, terjadi gangguan. Coba lagi.', err: true }); save(); render();
-    }).assistantAsk(currentSessionToken, text, past);
+    }).assistantAsk(currentSessionToken, text, past, img);
   }
+  var attachEl = document.getElementById('kdaAttach'), attachImg = document.getElementById('kdaAttachImg'), fileEl = document.getElementById('kdaFile');
+  function setImg(url) { pendingImg = url || ''; attachEl.hidden = !pendingImg; if (pendingImg) attachImg.src = pendingImg; }
+  // Perkecil di browser (maks 1280px, JPEG) supaya ringan & tidak melewati batas ukuran server.
+  function takeImage(file) {
+    if (!file || !/^image\//.test(file.type)) return;
+    var url = URL.createObjectURL(file), im = new Image();
+    im.onload = function () {
+      var sc = Math.min(1, 1280 / Math.max(im.width, im.height)), c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(im.width * sc)); c.height = Math.max(1, Math.round(im.height * sc));
+      var g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(im, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      var out = c.toDataURL('image/jpeg', 0.72);
+      if (out.length > 650000) out = c.toDataURL('image/jpeg', 0.5);
+      if (out.length > 650000) { try { toast('Screenshot terlalu besar, potong bagian yang perlu saja.'); } catch (e) {} return; }
+      setImg(out); try { input.focus(); } catch (e) {}
+    };
+    im.onerror = function () { URL.revokeObjectURL(url); };
+    im.src = url;
+  }
+  input.addEventListener('paste', function (e) {
+    var items = (e.clipboardData && e.clipboardData.items) || [];
+    for (var i = 0; i < items.length; i++) if (items[i].kind === 'file' && /^image\//.test(items[i].type)) { e.preventDefault(); takeImage(items[i].getAsFile()); return; }
+  });
+  document.getElementById('kdaClip').addEventListener('click', function () { fileEl.click(); });
+  fileEl.addEventListener('change', function () { takeImage(fileEl.files && fileEl.files[0]); fileEl.value = ''; });
+  document.getElementById('kdaAttachX').addEventListener('click', function () { setImg(''); });
   function autosize() { input.style.height = 'auto'; input.style.height = Math.min(110, input.scrollHeight) + 'px'; }
 
   document.getElementById('kdaOpen').addEventListener('click', function () { setState('open'); });

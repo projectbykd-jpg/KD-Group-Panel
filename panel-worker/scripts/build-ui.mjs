@@ -84,7 +84,7 @@ const ARG_MAP = {
 	assistantModels: ["token", "base_url", "key"],
 	assistantTest: ["token"],
 	assistantStatus: ["token"],
-	assistantAsk: ["token", "message", "history"],
+	assistantAsk: ["token", "message", "history", "image"],
 	lapGetSpecialOps: ["token"],
 	lapSaveSpecialOps: ["token", "operators"],
 	lapRunAdmin: ["token", "startDate", "endDate"],

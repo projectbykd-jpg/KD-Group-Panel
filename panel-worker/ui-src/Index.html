@@ -1531,11 +1531,14 @@
       </header>
       <div class="kda-msgs" id="kdaMsgs" aria-live="polite"></div>
       <div class="kda-chips" id="kdaChips"></div>
+      <div class="kda-attach" id="kdaAttach" hidden><img id="kdaAttachImg" alt="Screenshot terlampir"><span>Screenshot terlampir</span><button type="button" id="kdaAttachX" aria-label="Hapus screenshot">&times;</button></div>
       <form class="kda-form" id="kdaForm" autocomplete="off">
+        <input type="file" id="kdaFile" accept="image/*" hidden>
+        <button type="button" class="kda-clip" id="kdaClip" title="Lampirkan screenshot (atau tempel dengan Ctrl+V)" aria-label="Lampirkan screenshot"><i class="fa-solid fa-paperclip"></i></button>
         <textarea id="kdaInput" rows="1" maxlength="600" placeholder="Tulis pertanyaan… (Enter kirim)" aria-label="Pertanyaan untuk Asisten KD"></textarea>
         <button type="submit" class="kda-send" id="kdaSend" aria-label="Kirim"><i class="fa-solid fa-paper-plane"></i></button>
       </form>
-      <div class="kda-foot">Jangan kirim password, cookie, atau API key.</div>
+      <div class="kda-foot">Jangan kirim password, cookie, atau API key. Screenshot dikirim ke penyedia AI &mdash; hindari yang berisi data pribadi.</div>
     </section>
     <div class="kda-fab">
       <button type="button" class="kda-fab-main" id="kdaOpen" aria-label="Buka Asisten KD" title="Tanya Asisten KD"><img src="/ASSIST.svg" width="60" height="60" alt="" decoding="async"></button>

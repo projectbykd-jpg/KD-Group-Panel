@@ -250,7 +250,7 @@ const ROUTES: Record<string, Handler> = {
 	assistantModels: (env, b) => assistantModels(env, s(b.token), b.base_url, b.key),
 	assistantTest: (env, b) => assistantTest(env, s(b.token)),
 	assistantStatus: (env, b) => assistantStatus(env, s(b.token)),
-	assistantAsk: (env, b) => assistantAsk(env, s(b.token), b.message, b.history),
+	assistantAsk: (env, b) => assistantAsk(env, s(b.token), b.message, b.history, b.image),
 	lapGetSpecialOps: (env, b) => lapGetSpecialOps(env, s(b.token)),
 	lapSaveSpecialOps: (env, b) => lapSaveSpecialOps(env, s(b.token), b.operators),
 	// depoPaidRows/depoCreateRows/wdRows SENGAJA tidak di-default-kan ke [] --
