@@ -10,6 +10,7 @@
 //   * job yang gagal SETELAH form Kirim dikirim TIDAK PERNAH diulang otomatis;
 //   * satu result x satu website hanya boleh jalan SEKALI (UNIQUE di tabel);
 //   * ragu = berhenti dan minta input manual.
+import { adminDomain } from "./integrations";
 import { getTurso } from "./turso";
 import { tsNow, tsPlusMinutes } from "./time";
 import type { Processed } from "./parser";
@@ -194,17 +195,20 @@ export function sessionHint(stored: string): string {
  * punya akun agen sendiri), jadi host menentukan "server" tempat website itu berada, bukan identitasnya;
  * identitas dijaga lewat pengecekan nama website di sidebar (lihat runAutoInput).
  */
-export const ADMIN_DOMAIN = "suksesbogil.com";
+export const ADMIN_DOMAIN_DEFAULT = "suksesbogil.com";
 
 /** Server (host) admin tiap website, dari daftar pemilik panel. Kode website di panel = kode singkat. */
-const SITE_HOST: Record<string, string> = {};
-for (const [host, codes] of Object.entries({
+export const SITE_HOST_DEFAULT: Record<string, string[]> = {
 	"ag.suksesbogil.com": ["AXIS", "DODO", "XO", "SENJA", "HUGO", "RETRO"],
 	"agwl5.suksesbogil.com": ["LIMA", "SOHO"],
 	"agwl12.suksesbogil.com": ["YEL", "FOLA"],
-})) {
-	for (const c of codes) SITE_HOST[c] = host;
+};
+export const SITE_HOST: Record<string, string> = {}; // kode website -> host (diisi dari Data Master / bawaan)
+export function setSiteHosts(map: Record<string, string[]>): void {
+	for (const k of Object.keys(SITE_HOST)) delete SITE_HOST[k];
+	for (const [host, codes] of Object.entries(map)) for (const c of codes) SITE_HOST[c] = host;
 }
+setSiteHosts(SITE_HOST_DEFAULT);
 
 /** "HUGOTOGEL" / "hugo" -> "HUGO" (kode singkat panel); null kalau tidak dikenal. */
 export function siteCode(website: string): string | null {
@@ -235,8 +239,8 @@ export function adminBaseProblem(website: string, base: string): string | null {
 	} catch {
 		return "bukan URL yang valid";
 	}
-	if (host !== ADMIN_DOMAIN && !host.endsWith("." + ADMIN_DOMAIN)) {
-		return `host ${host} bukan admin yang diizinkan (hanya *.${ADMIN_DOMAIN})`;
+	if (host !== adminDomain() && !host.endsWith("." + adminDomain())) {
+		return `host ${host} bukan admin yang diizinkan (hanya *.${adminDomain()})`;
 	}
 	const k = siteCode(w);
 	const want = k ? SITE_HOST[k] : undefined;

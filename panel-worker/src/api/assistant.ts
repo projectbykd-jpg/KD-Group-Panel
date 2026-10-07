@@ -11,7 +11,6 @@ import { MENU_ITEMS, parseMenus } from "../lib/menus";
 import { getSys } from "../lib/settings";
 import { tsNow } from "../lib/time";
 
-const MAX_Q = 600;
 const MAX_HISTORY = 6;
 const MAX_HISTORY_CHARS = 1200;
 
@@ -79,7 +78,8 @@ export async function assistantAsk(env: Env, token: string, message: unknown, hi
 	const img = cleanImage(image);
 	const q = String(message ?? "").trim() || (img ? "Tolong lihat screenshot ini dan bantu saya: apa yang terlihat dan apa langkah yang benar?" : "");
 	if (!q) throw new Error("Pertanyaan kosong.");
-	if (q.length > MAX_Q) throw new Error(`Pertanyaan terlalu panjang (maks ${MAX_Q} karakter).`);
+	const maxQ = await getSys(env, "sys_assistant_max_q");
+	if (q.length > maxQ) throw new Error(`Pertanyaan terlalu panjang (maks ${maxQ} karakter).`);
 	if (!(await takeRateSlot(env, s.username, await getSys(env, "sys_assistant_per_hour")))) {
 		throw new Error("Batas pertanyaan per jam tercapai. Coba lagi sebentar lagi atau tanya admin.");
 	}

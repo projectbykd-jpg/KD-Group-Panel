@@ -1,4 +1,5 @@
 // Endpoint Role BOT — modul NEWS. Boleh diakses akun role BOT (allowBot) DAN Admin.
+import { ghToken, newsTurboRepo } from "../lib/integrations";
 import { requireSession } from "./auth";
 import { logActivity } from "../lib/activity";
 import { getTurso } from "../lib/turso";
@@ -149,7 +150,6 @@ export async function botNewsRunSiteNow(env: Env, token: string, count?: number)
 // fitur LAP ADMIN di lap.ts, bukan repo panel ini).
 // Nama repo SEKARANG (dulu "Day-Group-Panel"; GitHub masih mengalihkan nama
 // lama, tapi pengalihan itu putus kalau nama lama dipakai repo lain).
-const NEWS_TURBO_REPO = "projectbykd-jpg/KD-Group-Panel";
 
 /**
  * Tombol "PROSES BANYAK VIA GITHUB" -- alternatif dari botNewsRunNow/
@@ -178,8 +178,8 @@ const GH_HEADERS = (token: string) => ({
  * lewat CRON_KEY, bukan sesi login).
  */
 export async function dispatchNewsTurbo(env: Env, count?: number, target?: string, full?: boolean): Promise<{ targetLabel: string; n: number }> {
-	if (!env.GH_TOKEN) {
-		throw new Error("GitHub Actions belum dikonfigurasi (secret GH_TOKEN). Hubungi admin.");
+	if (!ghToken(env)) {
+		throw new Error("GitHub Actions belum dikonfigurasi (token GitHub). Isi di Admin > Integrasi.");
 	}
 	// count kosong/0 = kosongkan input di panel = ikuti Artikel/Proses di
 	// Setting -- kalau full=true (klik tombol panel dgn kolom Jumlah kosong)
@@ -192,9 +192,9 @@ export async function dispatchNewsTurbo(env: Env, count?: number, target?: strin
 	if (n) inputs.count = String(n);
 	if (tgt !== "both") inputs.target = tgt;
 	if (!n && full) inputs.full = "1";
-	const resp = await fetch(`https://api.github.com/repos/${NEWS_TURBO_REPO}/actions/workflows/news-turbo.yml/dispatches`, {
+	const resp = await fetch(`https://api.github.com/repos/${newsTurboRepo(env)}/actions/workflows/news-turbo.yml/dispatches`, {
 		method: "POST",
-		headers: GH_HEADERS(env.GH_TOKEN),
+		headers: GH_HEADERS(ghToken(env)),
 		body: JSON.stringify({ ref: "main", inputs }),
 	});
 	if (resp.status !== 204) {
@@ -238,11 +238,11 @@ export async function botNewsRunViaGithub(env: Env, token: string, count?: numbe
  */
 export async function botNewsGithubRunStatus(env: Env, token: string) {
 	await gate(env, token);
-	if (!env.GH_TOKEN) {
-		throw new Error("GitHub Actions belum dikonfigurasi (secret GH_TOKEN). Hubungi admin.");
+	if (!ghToken(env)) {
+		throw new Error("GitHub Actions belum dikonfigurasi (token GitHub). Isi di Admin > Integrasi.");
 	}
-	const resp = await fetch(`https://api.github.com/repos/${NEWS_TURBO_REPO}/actions/workflows/news-turbo.yml/runs?per_page=1`, {
-		headers: GH_HEADERS(env.GH_TOKEN),
+	const resp = await fetch(`https://api.github.com/repos/${newsTurboRepo(env)}/actions/workflows/news-turbo.yml/runs?per_page=1`, {
+		headers: GH_HEADERS(ghToken(env)),
 	});
 	if (!resp.ok) {
 		throw new Error(`Gagal ambil status GitHub Actions (HTTP ${resp.status}).`);

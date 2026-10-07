@@ -9,6 +9,7 @@
 // HUGOTOGEL (websites-nya di tabel users memuat HUGOTOGEL) otomatis ikut
 // lihat baris yang sama. Operator yang websites-nya tidak cocok TIDAK melihat
 // baris itu sama sekali.
+import { strukBaseUrl } from "./integrations";
 import { getTurso } from "./turso";
 import { tsNow } from "./time";
 
@@ -179,7 +180,6 @@ export async function wdListedList(env: Env, websites: string[]): Promise<WdList
 // lalu </div> penutup -- lihat contoh nyata yang sudah dites:
 //   <div ...>Failed</div>\n Status\n </div>
 //   <div ...>09 Mar 2026 13:02:36</div>\n Date\n </div>
-const STRUK_BASE = "https://dbb2b.q2checkout.com/struk/disbursement/";
 function parseStrukField(html: string, label: string): string {
 	const re = new RegExp("<div[^>]*>([^<]*)<\\/div>\\s*" + label + "\\s*<\\/div>", "i");
 	const m = html.match(re);
@@ -195,7 +195,7 @@ export async function wdListedCheckStatus(env: Env, id: number, websites: string
 	if (!hasWebsite(websites, website)) throw new Error("Kamu tidak punya akses ke website " + website + ".");
 	const refNo = String(row.pga_ref_no ?? "");
 	if (!refNo) throw new Error("PGA Ref No kosong, tidak bisa dicek.");
-	const resp = await fetch(STRUK_BASE + encodeURIComponent(refNo), { headers: { "user-agent": "Mozilla/5.0" } });
+	const resp = await fetch(strukBaseUrl() + encodeURIComponent(refNo), { headers: { "user-agent": "Mozilla/5.0" } });
 	if (!resp.ok) throw new Error("Gagal ambil struk dari q2checkout (HTTP " + resp.status + ").");
 	const html = await resp.text();
 	const status = parseStrukField(html, "Status");

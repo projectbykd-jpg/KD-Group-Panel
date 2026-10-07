@@ -615,6 +615,7 @@
             <button class="admin-tab" data-admin-tab="autopost" onclick="switchAdminPanel('autopost')"><i class="fa-solid fa-robot"></i>Auto Posting</button>
             <button class="admin-tab" data-admin-tab="lapops" onclick="switchAdminPanel('lapops')"><i class="fa-solid fa-sliders"></i>Pengaturan Sistem</button>
             <button class="admin-tab" data-admin-tab="datamaster" onclick="switchAdminPanel('datamaster')"><i class="fa-solid fa-database"></i>Data Master</button>
+            <button class="admin-tab" data-admin-tab="integrasi" onclick="switchAdminPanel('integrasi')"><i class="fa-solid fa-plug-circle-bolt"></i>Integrasi</button>
             <button class="admin-tab" data-admin-tab="maintenance" onclick="switchAdminPanel('maintenance')"><i class="fa-solid fa-screwdriver-wrench"></i>Maintenance &amp; Log</button>
           </div>
           <select class="admin-tab-select" id="adminTabSelect" aria-label="Pilih panel admin" onchange="switchAdminPanel(this.value)">
@@ -624,6 +625,7 @@
             <option value="autopost">Auto Posting Prediksi</option>
             <option value="lapops">Pengaturan Sistem</option>
             <option value="datamaster">Data Master (Jadwal, Shio, Pasaran)</option>
+            <option value="integrasi">Integrasi (GitHub, LinkTree, URL)</option>
             <option value="maintenance">Maintenance &amp; Retensi Log</option>
           </select>
 
@@ -694,6 +696,32 @@
             <div class="md-warn"><i class="fa-solid fa-triangle-exclamation"></i><span>Hati-hati pada <b>urutan sesi jadwal</b>: nomor sesi (PRED-1, PRED-2, …) dipakai penjaga anti-kirim-ganda. Ubah isi sesi boleh kapan saja; <b>tambah sesi di bagian bawah</b>, jangan menukar urutan di tengah hari.</span></div>
           </div>
           <div id="mdBody" class="md-list"></div>
+          </div>
+
+          <div class="admin-panel" data-admin-panel="integrasi">
+          <div class="mini-card flex flex-col gap-3 mb-3">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-2">
+              <div>
+                <div class="font-extrabold text-base"><i class="fa-solid fa-plug-circle-bolt mr-2 text-cyan-300"></i>Integrasi</div>
+                <div class="text-xs text-slate-400 mt-1">Koneksi ke layanan luar yang dulu tertanam di kode atau variabel Cloudflare: token &amp; repo GitHub, LinkTree, alamat web berita, dan domain admin. Kolom kosong = pakai bawaan. <b>Token &amp; kunci tidak pernah ditampilkan ulang</b> (hanya 4 karakter terakhir).</div>
+              </div>
+              <div class="flex items-center gap-2">
+                <span id="intStatus" class="text-xs text-slate-400">Memuat…</span>
+                <button type="button" onclick="intSave()" id="intSaveBtn" class="bg-gradient-to-r from-cyan-400 to-blue-600 text-slate-950 px-4 py-2 rounded-xl text-xs font-extrabold"><i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN</button>
+              </div>
+            </div>
+          </div>
+          <div id="intGroups" class="int-groups"></div>
+          <div class="mini-card flex flex-col gap-3 mt-3">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <div>
+                <div class="font-extrabold text-sm"><i class="fa-brands fa-github mr-2 text-cyan-300"></i>Tes Koneksi GitHub</div>
+                <div class="text-xs text-slate-400 mt-1">Memeriksa token terhadap tiga repo/workflow (Tarik Data, Bot News turbo, Invest turbo). Hanya membaca, tidak menjalankan apa pun. Simpan perubahan dulu sebelum mengetes.</div>
+              </div>
+              <button type="button" onclick="intTest()" id="intTestBtn" class="glass-inner px-4 py-2 rounded-xl text-xs font-bold"><i class="fa-solid fa-plug mr-2"></i>TES KONEKSI</button>
+            </div>
+            <div id="intTestOut" class="flex flex-col gap-1 text-xs"></div>
+          </div>
           </div>
 
           <div class="admin-panel" data-admin-panel="maintenance">

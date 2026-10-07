@@ -1,6 +1,7 @@
 // Port getDashboardDataFresh_ / normalizeDashboardRequest_ dari PanelCore.gs.
 // Jauh lebih ringkas: activity_log di D1 -> WHERE / ORDER BY / LIMIT langsung,
 // tidak perlu scan sheet + rollover + arsip seperti versi Apps Script.
+import { getSys } from "./settings";
 import { getMaintenance, UserProfile } from "./db";
 import { dateKeyNow } from "./time";
 
@@ -72,12 +73,11 @@ const dayHi = (dateKey: string): string => dateKey + "~";
 // Worker yang sama & hangat -> mayoritas poll dilayani dari memori, nol baca D1.
 type SumResult = Awaited<ReturnType<typeof buildActivitySummary>>;
 const _sumCache = new Map<string, { ts: number; data: SumResult }>();
-const SUM_TTL_MS = 25_000;
 
 export async function getActivitySummary(env: Env, profile: UserProfile): Promise<SumResult> {
 	const key = profile.role === "ADMIN" ? "__admin__" : profile.username;
 	const hit = _sumCache.get(key);
-	if (hit && Date.now() - hit.ts < SUM_TTL_MS) return hit.data;
+	if (hit && Date.now() - hit.ts < (await getSys(env, "sys_dash_summary_ttl_sec")) * 1000) return hit.data;
 	const data = await buildActivitySummary(env, profile);
 	_sumCache.set(key, { ts: Date.now(), data });
 	if (_sumCache.size > 64) {
@@ -145,7 +145,6 @@ interface FilterOptions {
 	statuses: string[];
 }
 const _facetCache = new Map<string, { ts: number; data: FilterOptions }>();
-const FACET_TTL_MS = 60_000;
 
 async function getFilterOptions(env: Env, profile: UserProfile, today: string): Promise<FilterOptions> {
 	const isAdmin = profile.role === "ADMIN";
@@ -153,7 +152,7 @@ async function getFilterOptions(env: Env, profile: UserProfile, today: string): 
 	// supaya entri kemarin tidak kebawa lewat pergantian hari.
 	const key = isAdmin ? "__admin__" : `${profile.username}|${today}`;
 	const hit = _facetCache.get(key);
-	if (hit && Date.now() - hit.ts < FACET_TTL_MS) return hit.data;
+	if (hit && Date.now() - hit.ts < (await getSys(env, "sys_dash_facet_ttl_sec")) * 1000) return hit.data;
 
 	const distinct = async (col: "username" | "action" | "status"): Promise<string[]> => {
 		if (isAdmin) {

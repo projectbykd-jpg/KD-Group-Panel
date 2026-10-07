@@ -1,13 +1,11 @@
 // Port loginAWSInternal_ + sendToAWSInternal_ (LinkTree / AWS notif).
 import type { LinktreeCfg } from "../lib/site";
 import type { Processed } from "../lib/parser";
+import { linktreeCfg } from "../lib/integrations";
 
-const LOGIN_URL = "http://ec2-13-250-131-148.ap-southeast-1.compute.amazonaws.com:8069/index";
-const POST_URL = "http://ec2-13-250-131-148.ap-southeast-1.compute.amazonaws.com:8069/notif_send_post";
-const API_KEY = "bbd53ebb-ba2b-11ec-9377-f2937b475656";
 
 async function loginLinktree(cfg: LinktreeCfg): Promise<string> {
-	const res = await fetch(LOGIN_URL, {
+	const res = await fetch(linktreeCfg().loginUrl, {
 		method: "POST",
 		redirect: "manual",
 		headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -32,11 +30,11 @@ export async function sendLinktree(cfg: LinktreeCfg, processed: Processed): Prom
 		if (processed.prize2) body += `  🅿️2️⃣ : ${processed.prize2}`;
 		if (processed.prize3) body += `  🅿️3️⃣ : ${processed.prize3}`;
 
-		const res = await fetch(POST_URL, {
+		const res = await fetch(linktreeCfg().postUrl, {
 			method: "POST",
 			redirect: "manual",
 			headers: { "content-type": "application/x-www-form-urlencoded", Cookie: cookie },
-			body: new URLSearchParams({ apikey: API_KEY, title, body }),
+			body: new URLSearchParams({ apikey: linktreeCfg().apiKey, title, body }),
 		});
 		const respBody = await res.text();
 		if (respBody.includes("LinkTree System")) return "Session Login Gagal";

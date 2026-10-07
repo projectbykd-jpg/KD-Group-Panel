@@ -1,3 +1,4 @@
+import { ghToken, ghRepo, publicUrl } from "../lib/integrations";
 import { getSys } from "../lib/settings";
 // Menu "Laporan Harian" — endpoint Worker.
 // Fase A: kredensial (Setting) + Lap Motion + Lap Mozart (API JSON, jalan langsung
@@ -577,8 +578,8 @@ async function dispatchScrapeJob(
 	endDate: string,
 	sourceUrl: string,
 ) {
-	if (!env.GH_TOKEN || !env.GH_REPO) {
-		return { success: false as const, message: "GitHub Actions belum dikonfigurasi (GH_TOKEN/GH_REPO). Hubungi admin." };
+	if (!ghToken(env) || !ghRepo(env)) {
+		return { success: false as const, message: "GitHub Actions belum dikonfigurasi (token/repo GitHub). Isi di Admin > Integrasi." };
 	}
 	const running = await getTurso(env).prepare(
 		`SELECT id FROM lap_job WHERE username = ? AND kind = ? AND status IN ('pending','running')
@@ -598,13 +599,13 @@ async function dispatchScrapeJob(
 		.bind(jobId, username, kind, params, tsNow(), tsNow())
 		.run();
 
-	const callback = env.PUBLIC_URL || "https://panel-worker.projectbykd.workers.dev";
+	const callback = publicUrl(env);
 	let resp: Response;
 	try {
-		resp = await fetch(`${GH_API}/repos/${env.GH_REPO}/actions/workflows/scrape.yml/dispatches`, {
+		resp = await fetch(`${GH_API}/repos/${ghRepo(env)}/actions/workflows/scrape.yml/dispatches`, {
 		method: "POST",
 		headers: {
-			Authorization: `Bearer ${env.GH_TOKEN}`,
+			Authorization: `Bearer ${ghToken(env)}`,
 			Accept: "application/vnd.github+json",
 			"User-Agent": "daygroup-panel",
 			"X-GitHub-Api-Version": "2022-11-28",
