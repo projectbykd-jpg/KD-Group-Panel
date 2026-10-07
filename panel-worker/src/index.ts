@@ -104,7 +104,7 @@ import {
 	botNewsStatus,
 	botNewsToggleSource,
 } from "./api/bot";
-import { botNewsRun, disableGnewsSources, fbDirectRun, newsPruneQueueDaily, newsPullSources, publicNewsBanner, publicNewsDetail, publicNewsList, publicNewsPopular, publicNewsRandom, publicNewsSitemapXml, seedCategorySources } from "./lib/bot-news";
+import { botNewsRun, disableGnewsSources, fbDirectRun, newsPruneQueueDaily, newsPullSources, publicNewsBanner, publicNewsDetail, publicNewsList, publicNewsPopular, publicNewsRandom, publicNewsRssXml, publicNewsSitemapXml, seedCategorySources } from "./lib/bot-news";
 import {
 	livechatBotPull,
 	livechatBotReport,
@@ -508,6 +508,16 @@ export default {
 			try {
 				const xml = await publicNewsSitemapXml(env);
 				return new Response(xml, { headers: { "content-type": "application/xml; charset=utf-8", "cache-control": "public, max-age=1800", ...CORS_HEADERS } });
+			} catch (e) {
+				return json({ success: false, message: e instanceof Error ? e.message : String(e) }, 500);
+			}
+		}
+
+		// Umpan RSS artikel situs sendiri -- sumber untuk layanan RSS-ke-Facebook Fanspage (tanpa token Meta di panel).
+		if (url.pathname === "/public/news-feed.xml") {
+			try {
+				const xml = await publicNewsRssXml(env);
+				return new Response(xml, { headers: { "content-type": "application/rss+xml; charset=utf-8", "cache-control": "public, max-age=300", ...CORS_HEADERS } });
 			} catch (e) {
 				return json({ success: false, message: e instanceof Error ? e.message : String(e) }, 500);
 			}
