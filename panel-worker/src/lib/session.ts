@@ -10,10 +10,12 @@
 
 // Sesi hidup 21 hari (dulu 180) — cukup panjang untuk CS yang login rutin,
 // cukup pendek supaya sesi yang ditinggalkan tidak menumpuk berbulan-bulan.
-const TTL_SECONDS = 60 * 60 * 24 * 21;
+
 // Maksimal token per user. Login ke-N+1 membuang token terlama. Mencegah
 // riwayat login (ganti browser/HP, clear cookie) menumpuk jadi puluhan.
-const MAX_SESSIONS_PER_USER = 30;
+
+
+import { getSys } from "./settings";
 
 export interface SessionRecord {
 	username: string;
@@ -26,6 +28,7 @@ export async function createSession(env: Env, username: string): Promise<string>
 		"dg_" +
 		crypto.randomUUID().replace(/-/g, "") +
 		crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+	const TTL_SECONDS = (await getSys(env, "sys_session_ttl_days")) * 86400;
 	const rec: SessionRecord = {
 		username,
 		createdAt: Date.now(),
@@ -52,7 +55,8 @@ export async function createSession(env: Env, username: string): Promise<string>
 
 // Sisakan hanya MAX_SESSIONS_PER_USER token terbaru milik user; sisanya
 // dihapus dari D1 dan (best-effort) dari KV.
-async function capUserSessions(env: Env, username: string, keep = MAX_SESSIONS_PER_USER): Promise<void> {
+async function capUserSessions(env: Env, username: string, keepArg?: number): Promise<void> {
+	const keep = keepArg ?? (await getSys(env, "sys_max_sessions"));
 	const old = await env.DB.prepare(
 		`SELECT token FROM sessions WHERE username = ?
 		 ORDER BY created_at DESC LIMIT -1 OFFSET ?`,
@@ -145,7 +149,7 @@ export async function pruneExpiredSessions(env: Env): Promise<void> {
 		const many = await env.DB.prepare(
 			`SELECT username FROM sessions GROUP BY username HAVING COUNT(*) > ?`,
 		)
-			.bind(MAX_SESSIONS_PER_USER)
+			.bind(await getSys(env, "sys_max_sessions"))
 			.all<{ username: string }>();
 		for (const r of many.results ?? []) await capUserSessions(env, r.username);
 	} catch {

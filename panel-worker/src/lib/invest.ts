@@ -2,6 +2,7 @@
 // Config + state per-user (invest_config / invest_state), hasil di invest_result.
 // Tabel invest_* ada di Turso (bukan D1) -> pakai getTurso(env).
 import { tsNow } from "./time";
+import { getSys } from "./settings";
 import { getTurso } from "./turso";
 
 export const INVEST_DEFAULT_CONFIG = {
@@ -113,15 +114,20 @@ export async function investLoadConfig(env: Env, user: string): Promise<InvestCo
 	const row = await getTurso(env).prepare(`SELECT * FROM invest_config WHERE username = ?`)
 		.bind(user)
 		.first<Record<string, unknown>>();
-	const cfg: InvestConfig = { ...INVEST_DEFAULT_CONFIG };
+	const cfg: InvestConfig = {
+		...INVEST_DEFAULT_CONFIG,
+		LIMIT_2D: await getSys(env, "sys_invest_limit_2d"),
+		LIMIT_3D: await getSys(env, "sys_invest_limit_3d"),
+		LIMIT_4D: await getSys(env, "sys_invest_limit_4d"),
+	};
 	if (row) {
 		cfg.BASE_URL = String(row.base_url || INVEST_DEFAULT_CONFIG.BASE_URL);
 		cfg.PHPSESSID = String(row.phpsessid || "");
 		cfg.KODEREDIS = String(row.koderedis || "");
 		cfg.COOKIE_EXTRA = String(row.cookie_extra || "");
-		cfg.LIMIT_2D = Number(row.limit_2d ?? INVEST_DEFAULT_CONFIG.LIMIT_2D);
-		cfg.LIMIT_3D = Number(row.limit_3d ?? INVEST_DEFAULT_CONFIG.LIMIT_3D);
-		cfg.LIMIT_4D = Number(row.limit_4d ?? INVEST_DEFAULT_CONFIG.LIMIT_4D);
+		cfg.LIMIT_2D = Number(row.limit_2d ?? cfg.LIMIT_2D);
+		cfg.LIMIT_3D = Number(row.limit_3d ?? cfg.LIMIT_3D);
+		cfg.LIMIT_4D = Number(row.limit_4d ?? cfg.LIMIT_4D);
 		cfg.PASARAN_JSON = String(row.pasaran_json || "");
 	}
 	cfg.BASE_URL = normalizeInvestBaseUrl(cfg.BASE_URL);

@@ -2667,6 +2667,36 @@
 
     /* Menu admin: tampilkan satu panel per waktu (tidak numpuk scroll). */
     const ADMIN_PANELS = ['users','sites','sesi','autopost','lapops','maintenance'];
+    // ---------- Admin: pengaturan sistem (angka dengan batas aman) ----------
+    let sysItems = [];
+    function sysRender() {
+      const box = document.getElementById('sysGroups'); if (!box) return;
+      const groups = {};
+      sysItems.forEach(i => (groups[i.group] = groups[i.group] || []).push(i));
+      box.innerHTML = Object.keys(groups).map(g => `<div class="sys-group"><div class="sys-group-title">${escapeHtml(g)}</div>${groups[g].map(i => `
+        <label class="sys-field" title="${escapeHtml(i.hint)}">
+          <span class="sys-label">${escapeHtml(i.label)}<small>${escapeHtml(i.hint)}</small></span>
+          <span class="sys-input"><input type="number" inputmode="numeric" data-key="${escapeHtml(i.key)}" min="${i.min}" max="${i.max}" value="${i.value}"><em>${escapeHtml(i.unit || '')}</em></span>
+          <span class="sys-range">${i.min}–${i.max} · default ${i.def}</span>
+        </label>`).join('')}</div>`).join('');
+    }
+    function sysLoad() {
+      const st = document.getElementById('sysStatus');
+      google.script.run.withSuccessHandler(r => {
+        if (!r || !r.success) { if (st) st.textContent = 'Gagal memuat: ' + ((r && r.message) || '-'); return; }
+        sysItems = r.settings || []; sysRender(); if (st) st.textContent = sysItems.length + ' pengaturan';
+      }).withFailureHandler(e => { if (st) st.textContent = 'Gagal memuat: ' + ((e && e.message) || e); }).adminGetSystemSettings(currentSessionToken);
+    }
+    function sysReset() { document.querySelectorAll('#sysGroups input[data-key]').forEach(inp => { const it = sysItems.find(x => x.key === inp.dataset.key); if (it) inp.value = it.def; }); }
+    function sysSave() {
+      const values = {}; document.querySelectorAll('#sysGroups input[data-key]').forEach(inp => { values[inp.dataset.key] = inp.value; });
+      const btn = document.getElementById('sysSaveBtn'), st = document.getElementById('sysStatus'); if (btn) btn.disabled = true;
+      google.script.run.withSuccessHandler(r => {
+        if (btn) btn.disabled = false;
+        if (!r || !r.success) { toast((r && r.message) || 'Gagal menyimpan'); return; }
+        sysItems = r.settings || []; sysRender(); if (st) st.textContent = 'Tersimpan'; toast('Pengaturan sistem tersimpan');
+      }).withFailureHandler(e => { if (btn) btn.disabled = false; toast('Gagal menyimpan: ' + ((e && e.message) || e)); }).adminSaveSystemSettings(currentSessionToken, values);
+    }
     // ---------- Admin: operator khusus Lap Admin ----------
     function lapOpsRowHtml(o) {
       const v = x => escapeHtml(String(x == null ? '' : x));
@@ -2736,7 +2766,7 @@
       } else if (key === 'autopost') {
         loadAutoPostStatus();
       } else if (key === 'lapops') {
-        lapOpsLoad();
+        lapOpsLoad(); sysLoad();
       } else if (key === 'maintenance') {
         loadMaintenanceState();
       }

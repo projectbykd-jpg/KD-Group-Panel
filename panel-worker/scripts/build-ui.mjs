@@ -77,6 +77,8 @@ const ARG_MAP = {
 	wdListedRemove: ["token", "id"],
 	lapGetConfig: ["token"],
 	lapSaveConfig: ["token", "data"],
+	adminGetSystemSettings: ["token"],
+	adminSaveSystemSettings: ["token", "values"],
 	lapGetSpecialOps: ["token"],
 	lapSaveSpecialOps: ["token", "operators"],
 	lapRunAdmin: ["token", "startDate", "endDate"],
