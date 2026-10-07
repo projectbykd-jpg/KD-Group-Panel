@@ -4,7 +4,7 @@
 // dijalankan, tidak ada data/rahasia pengguna yang dikirim ke AI.
 import { requireSession } from "./auth";
 import { logActivity } from "../lib/activity";
-import { aiChatProvider, aiCooldown, aiLoadProviders, aiUsableProviders, AiUnavailableError, maskKey, modelChain, normalizeBaseUrl, type AiProvider } from "../lib/ai-provider";
+import { aiChatProvider, aiCooldown, aiListModels, aiUsableProviders, AiUnavailableError, maskKey, modelChain, normalizeBaseUrl, type AiProvider } from "../lib/ai-provider";
 import { ASSISTANT_KB_VERSION, selectKnowledge } from "../lib/assistant-kb";
 import { botCfg } from "../lib/bot-news";
 import { MENU_ITEMS, parseMenus } from "../lib/menus";
@@ -89,16 +89,14 @@ export async function assistantAsk(env: Env, token: string, message: unknown, hi
 		const cfg = await botCfg(env);
 		const maxTokens = await getSys(env, "sys_assistant_max_tokens");
 		const dedicated = await loadDedicated(env);
-		const fallback = (await getSys(env, "sys_assistant_fallback")) === 1;
-		// Kandidat: key KHUSUS asisten dulu (terpisah dari provider bot/lainnya).
-		// Provider bersama hanya dipakai bila tidak ada key khusus, atau admin mengizinkan cadangan.
+		// Key khusus asisten DIPAKAI SENDIRI (tidak pernah jatuh ke provider Bot News/lainnya).
+		// Provider bersama hanya dipakai bila admin belum mengisi key khusus.
 		const candidates: AiProvider[] = [];
 		if (dedicated) candidates.push(dedicated);
-		if (!dedicated || fallback) {
+		else {
 			const providers = await aiUsableProviders(env, cfg);
-			const pref = await prefSetting(env);
-			// Urutan: pilihan admin -> Groq (cepat) -> urutan prioritas biasa.
-			const rank = (p: AiProvider) => (pref && p.id === pref ? 0 : /groq/i.test(p.base_url + p.name) ? 1 : 2);
+			// Urutan: Groq (cepat) dulu, lalu urutan prioritas biasa.
+			const rank = (p: AiProvider) => (/groq/i.test(p.base_url + p.name) ? 0 : 1);
 			candidates.push(...providers.map((p, i) => ({ p, i })).sort((x, y) => rank(x.p) - rank(y.p) || x.i - y.i).map((x) => x.p));
 		}
 		if (!candidates.length) throw new AiUnavailableError("tidak ada provider");
@@ -136,12 +134,6 @@ export async function assistantAsk(env: Env, token: string, message: unknown, hi
 	return { success: true, answer, via, ms, kbVersion: ASSISTANT_KB_VERSION, at: tsNow() };
 }
 
-// --- Pengaturan admin: provider mana yang dipakai asisten --------------------
-const PREF_KEY = "assistant_provider";
-async function prefSetting(env: Env): Promise<string> {
-	const r = await env.DB.prepare(`SELECT value FROM settings WHERE key = ?`).bind(PREF_KEY).first<{ value: string }>();
-	return String(r?.value ?? "").trim();
-}
 
 // Key KHUSUS asisten (terpisah dari AI Provider bot/lain agar kuota tidak saling ganggu).
 const DEDICATED_KEY = "assistant_ai";
@@ -169,33 +161,23 @@ async function loadDedicated(env: Env): Promise<AiProvider | null> {
 
 export async function assistantGetConfig(env: Env, token: string) {
 	await requireSession(env, token, { admin: true });
-	const cfg = await botCfg(env);
-	const list = await aiLoadProviders(env, cfg).catch(() => [] as AiProvider[]);
 	const d = await readDedicated(env);
 	return {
 		success: true,
-		provider: await prefSetting(env),
-		providers: list.map((p) => ({ id: p.id, name: p.name, model: modelChain(p)[0] || p.model, enabled: p.enabled, groq: /groq/i.test(p.base_url + p.name) })),
 		dedicated: d ? { configured: true, base_url: d.base_url, model: d.model, key_mask: maskKey(d.key) } : { configured: false, base_url: "", model: "", key_mask: "" },
 		kbVersion: ASSISTANT_KB_VERSION,
 	};
 }
 
-/** Simpan provider bersama pilihan + (opsional) key khusus. Key kosong = pertahankan yang lama; clear=true = hapus. */
-export async function assistantSaveConfig(env: Env, token: string, provider: unknown, dedicated?: unknown) {
+/** Simpan key khusus asisten. Key kosong = pertahankan yang lama; clear=true = hapus. */
+export async function assistantSaveConfig(env: Env, token: string, dedicated?: unknown) {
 	const s = await requireSession(env, token, { admin: true });
-	const id = String(provider ?? "").trim().slice(0, 64);
-	if (id) {
-		const list = await aiLoadProviders(env, await botCfg(env));
-		if (!list.some((p) => p.id === id)) throw new Error("Provider tidak ditemukan.");
-	}
-	await env.DB.prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).bind(PREF_KEY, id).run();
-	let note = id ? "Provider cadangan dipilih" : "Provider cadangan: otomatis (Groq dulu)";
+	let note = "Pengaturan asisten";
 	const o = (dedicated && typeof dedicated === "object" ? dedicated : null) as Record<string, unknown> | null;
 	if (o) {
 		if (o.clear === true) {
 			await env.DB.prepare(`DELETE FROM settings WHERE key = ?`).bind(DEDICATED_KEY).run();
-			note += "; key khusus dihapus";
+			note = "Key khusus asisten dihapus";
 		} else if (String(o.base_url ?? "").trim() || String(o.key ?? "").trim() || String(o.model ?? "").trim()) {
 			const old = await readDedicated(env);
 			const base_url = normalizeBaseUrl(String(o.base_url ?? "") || old?.base_url || "");
@@ -206,7 +188,7 @@ export async function assistantSaveConfig(env: Env, token: string, provider: unk
 			await env.DB.prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
 				.bind(DEDICATED_KEY, JSON.stringify({ base_url, key, model }))
 				.run();
-			note += `; key khusus disimpan (${new URL(base_url).host}, ${model})`;
+			note = `Key khusus asisten disimpan (${new URL(base_url).host}, ${model})`;
 		}
 	}
 	await logActivity(env, s.username, "ASISTEN KD", note, "BERHASIL", "");
@@ -231,6 +213,30 @@ export async function assistantTest(env: Env, token: string) {
 		});
 		return { success: true, ms: call.ms, model: call.model, reply: call.text.trim().slice(0, 60) };
 	} catch (e) {
-		return { success: false, message: "Gagal: " + (e instanceof Error ? e.message : String(e)).slice(0, 220) };
+		const msg = (e instanceof Error ? e.message : String(e)).slice(0, 220);
+		const hint = /40[13]/.test(msg)
+			? " — Biasanya: key salah/tidak punya izin, ATAU model bukan model chat (mis. *guard*, whisper, tts) — pilih model dari tombol DAFTAR MODEL, mis. llama-3.3-70b-versatile."
+			: /404/.test(msg)
+				? " — Nama model/Base URL tidak ditemukan; klik DAFTAR MODEL."
+				: "";
+		return { success: false, message: "Gagal: " + msg + hint };
+	}
+}
+
+const NOT_CHAT = /whisper|tts|speech|guard|safeguard|embed|orpheus|moderation|rerank|transcrib|playai|image|vision-preview/i;
+
+/** Daftar model chat dari provider (pakai key yang diketik, atau key khusus tersimpan bila kosong). */
+export async function assistantModels(env: Env, token: string, base_url: unknown, key: unknown) {
+	await requireSession(env, token, { admin: true });
+	const old = await readDedicated(env);
+	const base = normalizeBaseUrl(String(base_url ?? "") || old?.base_url || "");
+	const k = String(key ?? "").trim() || old?.key || "";
+	if (!k) throw new Error("Isi API key dulu (atau simpan key khusus lebih dulu).");
+	try {
+		const all = await aiListModels({ base_url: base, key: k });
+		const chat = all.filter((m) => !NOT_CHAT.test(m));
+		return { success: true, models: chat, hidden: all.length - chat.length };
+	} catch (e) {
+		return { success: false, message: "Gagal mengambil daftar model: " + (e instanceof Error ? e.message : String(e)).slice(0, 200) };
 	}
 }

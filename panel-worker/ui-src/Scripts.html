@@ -2669,29 +2669,40 @@
     const ADMIN_PANELS = ['users','sites','sesi','autopost','lapops','maintenance'];
     // ---------- Admin: API key KHUSUS Asisten KD + provider cadangan ----------
     function asstCfgLoad() {
-      const st = document.getElementById('asstCfgStatus'), sel = document.getElementById('asstProvider');
-      if (!sel) return;
+      const st = document.getElementById('asstCfgStatus');
+      if (!document.getElementById('asstBase')) return;
       google.script.run.withSuccessHandler(r => {
         if (!r || !r.success) { if (st) st.textContent = 'Gagal memuat: ' + ((r && r.message) || '-'); return; }
-        sel.innerHTML = '<option value="">Otomatis (Groq dulu)</option>' + (r.providers || []).map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)} · ${escapeHtml(p.model || '')}${p.enabled ? '' : ' (nonaktif)'}${p.groq ? ' ⚡' : ''}</option>`).join('');
-        sel.value = r.provider || '';
         const d = r.dedicated || {};
         const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
         set('asstBase', d.base_url); set('asstModel', d.model); set('asstKey', '');
         const km = document.getElementById('asstKeyMask'); if (km) km.textContent = d.configured ? '(tersimpan: ' + d.key_mask + ')' : '';
-        if (st) st.textContent = d.configured ? 'Key khusus aktif · pengetahuan asisten v' + (r.kbVersion || '-') : 'Belum ada key khusus — asisten memakai provider cadangan.';
+        if (st) st.textContent = d.configured ? 'Key khusus aktif · pengetahuan asisten v' + (r.kbVersion || '-') : 'Belum ada key khusus — sementara asisten memakai AI Provider menu BOT.';
       }).withFailureHandler(e => { if (st) st.textContent = 'Gagal memuat: ' + ((e && e.message) || e); }).assistantGetConfig(currentSessionToken);
     }
     function asstCfgSave(clear) {
-      const sel = document.getElementById('asstProvider'), st = document.getElementById('asstCfgStatus'), btn = document.getElementById('asstCfgBtn');
-      if (!sel) return; if (btn) btn.disabled = true;
+      const st = document.getElementById('asstCfgStatus'), btn = document.getElementById('asstCfgBtn');
+      if (btn) btn.disabled = true;
       const v = id => (document.getElementById(id) || {}).value || '';
       const dedicated = clear ? { clear: true } : { base_url: v('asstBase').trim(), model: v('asstModel').trim(), key: v('asstKey').trim() };
       google.script.run.withSuccessHandler(r => {
         if (btn) btn.disabled = false;
         if (!r || !r.success) { toast((r && r.message) || 'Gagal menyimpan'); return; }
         toast(clear ? 'Key khusus dihapus' : 'Pengaturan asisten tersimpan'); asstCfgLoad();
-      }).withFailureHandler(e => { if (btn) btn.disabled = false; toast('Gagal menyimpan: ' + ((e && e.message) || e)); }).assistantSaveConfig(currentSessionToken, sel.value, dedicated);
+      }).withFailureHandler(e => { if (btn) btn.disabled = false; toast('Gagal menyimpan: ' + ((e && e.message) || e)); }).assistantSaveConfig(currentSessionToken, dedicated);
+    }
+    function asstCfgModels() {
+      const st = document.getElementById('asstCfgStatus'), btn = document.getElementById('asstModelsBtn');
+      const v = id => (document.getElementById(id) || {}).value || '';
+      if (btn) btn.disabled = true; if (st) st.textContent = 'Mengambil daftar model…';
+      google.script.run.withSuccessHandler(r => {
+        if (btn) btn.disabled = false;
+        if (!r || !r.success) { if (st) st.textContent = (r && r.message) || 'Gagal'; return; }
+        const dl = document.getElementById('asstModelList');
+        if (dl) dl.innerHTML = (r.models || []).map(m => `<option value="${escapeHtml(m)}"></option>`).join('');
+        if (st) st.textContent = (r.models || []).length + ' model chat ditemukan (' + (r.hidden || 0) + ' non-chat disembunyikan) — klik kolom Model untuk memilih.';
+        const inp = document.getElementById('asstModel'); if (inp) { inp.value = ''; inp.focus(); }
+      }).withFailureHandler(e => { if (btn) btn.disabled = false; if (st) st.textContent = 'Gagal: ' + ((e && e.message) || e); }).assistantModels(currentSessionToken, v('asstBase').trim(), v('asstKey').trim());
     }
     let asstClearArm = 0;
     function asstCfgClear(ev) {
