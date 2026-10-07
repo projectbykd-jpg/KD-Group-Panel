@@ -54,7 +54,7 @@
 		"directory": "./public/",
 		"binding": "ASSETS",
 		"not_found_handling": "single-page-application",
-		"run_worker_first": ["/api", "/health", "/__cron", "/__scheduled", "/img", "/public/news", "/public/news-sitemap.xml"]
+		"run_worker_first": ["/api", "/health", "/__cron", "/__scheduled", "/img", "/public/news", "/public/news-sitemap.xml", "/public/news-feed.xml"]
 	},
 	"triggers": {
 		"crons": ["*/5 * * * *", "* * * * *"]
