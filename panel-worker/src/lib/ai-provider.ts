@@ -61,6 +61,12 @@ export function maskKey(key: string): string {
 	return k.slice(0, 7) + "…" + k.slice(-4);
 }
 
+/**
+ * Beberapa provider (mis. Groq di balik Cloudflare) menolak permintaan tanpa User-Agent dengan
+ * 403 "Forbidden". fetch() di Worker tidak mengirimnya sendiri, jadi kita set eksplisit.
+ */
+export const AI_USER_AGENT = "KD-Group-Panel/1.0";
+
 export function normalizeBaseUrl(raw: string): string {
 	let u = String(raw || "").trim().replace(/\/+$/, "");
 	if (!u) throw new Error("Base URL wajib diisi.");
@@ -702,7 +708,7 @@ async function postChat(
 		try {
 			const r = await fetch(normalizeBaseUrl(p.base_url) + "/chat/completions", {
 				method: "POST",
-				headers: { "Content-Type": "application/json", Authorization: `Bearer ${p.key}` },
+				headers: { "Content-Type": "application/json", Authorization: `Bearer ${p.key}`, "User-Agent": AI_USER_AGENT },
 				body: JSON.stringify(payload),
 				signal: ctl.signal,
 			});
@@ -865,7 +871,7 @@ export async function aiListModels(p: Pick<AiProvider, "base_url" | "key">): Pro
 	const ctl = new AbortController();
 	const timer = setTimeout(() => ctl.abort(), 20_000);
 	try {
-		const r = await fetch(normalizeBaseUrl(p.base_url) + "/models", { headers: { Authorization: `Bearer ${p.key}` }, signal: ctl.signal });
+		const r = await fetch(normalizeBaseUrl(p.base_url) + "/models", { headers: { Authorization: `Bearer ${p.key}`, "User-Agent": AI_USER_AGENT }, signal: ctl.signal });
 		const b: any = await r.json().catch(() => null);
 		if (!r.ok) throw new Error(errText(r.status, b));
 		const ids: string[] = Array.isArray(b?.data) ? b.data.map((m: any) => String(m?.id || "")).filter(Boolean) : [];

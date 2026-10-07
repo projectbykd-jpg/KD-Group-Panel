@@ -75,7 +75,7 @@ describe("API key KHUSUS Asisten KD (terpisah dari provider bot)", () => {
 		expect(sent.some((c) => c.url.includes("backup.test"))).toBe(false);
 	});
 
-	it("tanpa key khusus: sementara memakai provider bot; galat 403 diberi petunjuk model chat; daftar model menyaring non-chat", async () => {
+	it("tanpa key khusus: sementara memakai provider bot; galat 403 diberi diagnosa; daftar model menyaring non-chat", async () => {
 		const boss = await tok("Boss", "pw-boss");
 		await botAiSave(ctx.env, boss, { name: "Cadangan", base_url: "https://backup.test/v1", key: "sk-backup-rahasia-123456", model: "m1" });
 		expect(((await assistantAsk(ctx.env, await tok("Opr", "pw-opr"), "halo", [])) as { answer: string }).answer).toContain("backup.test");
@@ -87,10 +87,23 @@ describe("API key KHUSUS Asisten KD (terpisah dari provider bot)", () => {
 		});
 		const t = (await assistantTest(ctx.env, boss)) as { success: boolean; message: string };
 		expect(t.success).toBe(false);
-		expect(t.message).toMatch(/model chat/);
+		expect(t.message).toMatch(/Diagnosa/);
+		expect(t.message).toMatch(/Key & URL VALID/);
 		const m = (await assistantModels(ctx.env, boss, "", "")) as { models: string[]; hidden: number };
 		expect(m.models).toEqual(["llama-3.1-8b-instant", "llama-3.3-70b-versatile"].sort());
 		expect(m.hidden).toBe(2);
+	});
+
+	it("provider yang menolak permintaan tanpa User-Agent (403 Forbidden): Worker kini selalu mengirim User-Agent", async () => {
+		const boss = await tok("Boss", "pw-boss");
+		await assistantSaveConfig(ctx.env, boss, { base_url: "https://api.groq.com/openai/v1", key: KEY, model: "openai/gpt-oss-20b" });
+		vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+			const ua = new Headers(init?.headers).get("user-agent");
+			if (!ua) return new Response(JSON.stringify({ error: { message: "Forbidden" } }), { status: 403, headers: { "content-type": "application/json" } });
+			return new Response(JSON.stringify({ choices: [{ message: { content: "OK" } }], model: "openai/gpt-oss-20b" }), { status: 200, headers: { "content-type": "application/json" } });
+		});
+		const t = (await assistantTest(ctx.env, boss)) as { success: boolean };
+		expect(t.success).toBe(true);
 	});
 
 	it("model berpikir di Groq dijawab cepat: reasoning_effort dikirim (gpt-oss=low, qwen=none)", async () => {
