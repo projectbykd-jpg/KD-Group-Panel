@@ -2446,12 +2446,17 @@
         if (i >= 0) per[i].deposit += Number(r.deposit || 0);
       });
       const special = per.reduce((n, x) => n + x.deposit, 0);
-      return { deposit: Number(sum.total.deposit || 0) - special, withdraw: Number(sum.total.withdraw || 0), per };
+      // Jumlah dari baris operator tidak ambigu (angka baris "Total" tersimpan bisa bergeser kolom pada data lama) -> dipakai lebih dulu.
+      const rows = sum.rows;
+      const all = rows.length ? rows.reduce((n, r) => n + Number(r.deposit || 0), 0) : Number(sum.total.deposit || 0);
+      const wd = rows.length ? rows.reduce((n, r) => n + Number(r.withdraw || 0), 0) : Number(sum.total.withdraw || 0);
+      return { all, deposit: all - special, withdraw: wd, per };
     }
     function lapOpCardsHtml() {
       const t = lapOpTotals();
       if (!t) return `<div class="lap-stat-empty">Total Deposit &amp; Withdraw belum ada untuk periode ini. Klik <b>TARIK DATA</b> (data lama belum memuat tabel History Operator).</div>`;
-      return lapStatCard('Total Deposit', lapFmt(t.deposit), 'text-emerald-400')
+      return lapStatCard('Deposit Semua Operator', lapFmt(t.all), 'text-sky-300')
+        + lapStatCard('Total Deposit', lapFmt(t.deposit), 'text-emerald-400')
         + t.per.map(x => lapStatCard('Total ' + escapeHtml(x.label), lapFmt(x.deposit), 'text-amber-300')).join('')
         + lapStatCard('Total Withdraw', lapFmt(t.withdraw), 'text-rose-400');
     }
