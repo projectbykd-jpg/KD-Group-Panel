@@ -74,6 +74,64 @@ export async function lapSaveConfig(env: Env, token: string, data: Record<string
 }
 const str = (v: unknown) => (v === undefined ? undefined : String(v ?? "").trim());
 
+// --- Operator khusus Lap Admin (mis. Blazz / Khanpay) -----------------------
+// Daftar GLOBAL (settings.lap_special_operators) yang diatur admin. Total Deposit
+// di Lap Admin = total History Operator DIKURANGI deposit operator-operator ini,
+// yang masing-masing ditampilkan sebagai total sendiri.
+const LAP_SPECIAL_OPS_KEY = "lap_special_operators";
+const LAP_SPECIAL_OPS_MAX = 10;
+export type LapSpecialOp = { label: string; operator: string };
+
+function cleanSpecialOps(v: unknown): LapSpecialOp[] {
+	const out: LapSpecialOp[] = [];
+	const seen = new Set<string>();
+	for (const it of Array.isArray(v) ? v : []) {
+		const o = (it ?? {}) as Record<string, unknown>;
+		const operator = String(o.operator ?? "").trim().slice(0, 64);
+		const label = String(o.label ?? "").trim().slice(0, 24) || operator;
+		const key = operator.toLowerCase();
+		if (!operator || seen.has(key)) continue;
+		seen.add(key);
+		out.push({ label, operator });
+		if (out.length >= LAP_SPECIAL_OPS_MAX) break;
+	}
+	return out;
+}
+
+async function loadSpecialOps(env: Env): Promise<LapSpecialOp[]> {
+	const r = await env.DB.prepare(`SELECT value FROM settings WHERE key = ?`).bind(LAP_SPECIAL_OPS_KEY).first<{ value: string }>();
+	try {
+		return cleanSpecialOps(JSON.parse(String(r?.value ?? "[]")));
+	} catch {
+		return [];
+	}
+}
+
+export async function lapGetSpecialOps(env: Env, token: string) {
+	await requireSession(env, token, { ignoreMaintenance: true, menu: "lap-admin" });
+	return { success: true, operators: await loadSpecialOps(env) };
+}
+
+export async function lapSaveSpecialOps(env: Env, token: string, operators: unknown) {
+	const s = await requireSession(env, token, { admin: true });
+	const list = cleanSpecialOps(operators);
+	await env.DB.prepare(
+		`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+	)
+		.bind(LAP_SPECIAL_OPS_KEY, JSON.stringify(list))
+		.run();
+	await logActivity(
+		env,
+		s.username,
+		"LAP OPERATOR KHUSUS",
+		list.length ? "Operator khusus Lap Admin: " + list.map((o) => o.label + "=" + o.operator).join(", ") : "Operator khusus Lap Admin dikosongkan",
+		"BERHASIL",
+		"",
+	);
+	return { success: true, operators: list, message: "Operator khusus tersimpan." };
+}
+
+
 // =========================================================================
 // LAP MOTION -- impor dari browser (skrip Console, sama pola dengan Mozart)
 // motionv2.com KADANG menantang/menolak trafik IP datacenter Worker (WAF

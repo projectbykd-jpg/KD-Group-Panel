@@ -68,6 +68,8 @@ import {
 	lapMozartImport,
 	lapRunAdmin,
 	lapSaveConfig,
+	lapGetSpecialOps,
+	lapSaveSpecialOps,
 } from "./api/lap";
 import {
 	botBloggerAuthUrl,
@@ -238,6 +240,8 @@ const ROUTES: Record<string, Handler> = {
 	// laporan harian
 	lapGetConfig: (env, b) => lapGetConfig(env, s(b.token)),
 	lapSaveConfig: (env, b) => lapSaveConfig(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
+	lapGetSpecialOps: (env, b) => lapGetSpecialOps(env, s(b.token)),
+	lapSaveSpecialOps: (env, b) => lapSaveSpecialOps(env, s(b.token), b.operators),
 	// depoPaidRows/depoCreateRows/wdRows SENGAJA tidak di-default-kan ke [] --
 	// skrip Console sekarang bisa kirim salah satu SET saja per panggilan (lihat
 	// lapMotionConsoleScriptDeposit/Withdraw), dan `undefined` (field tidak

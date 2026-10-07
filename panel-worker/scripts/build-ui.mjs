@@ -77,6 +77,8 @@ const ARG_MAP = {
 	wdListedRemove: ["token", "id"],
 	lapGetConfig: ["token"],
 	lapSaveConfig: ["token", "data"],
+	lapGetSpecialOps: ["token"],
+	lapSaveSpecialOps: ["token", "operators"],
 	lapRunAdmin: ["token", "startDate", "endDate"],
 	lapMotionImport: ["token", "startDate", "endDate", "depoPaidRows", "depoCreateRows", "wdRows"],
 	lapMozartImport: ["token", "startDate", "endDate", "depositRows", "withdrawRows", "accountsRaw", "panelsRaw"],
