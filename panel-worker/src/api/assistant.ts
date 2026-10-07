@@ -4,7 +4,7 @@
 // dijalankan, tidak ada data/rahasia pengguna yang dikirim ke AI.
 import { requireSession } from "./auth";
 import { logActivity } from "../lib/activity";
-import { aiChatProvider, aiCooldown, aiListModels, aiUsableProviders, AiUnavailableError, maskKey, modelChain, normalizeBaseUrl, type AiProvider } from "../lib/ai-provider";
+import { AI_USER_AGENT, aiChatProvider, aiCooldown, aiListModels, aiUsableProviders, AiUnavailableError, maskKey, modelChain, normalizeBaseUrl, type AiProvider } from "../lib/ai-provider";
 import { ASSISTANT_KB_VERSION, selectKnowledge } from "../lib/assistant-kb";
 import { botCfg } from "../lib/bot-news";
 import { MENU_ITEMS, parseMenus } from "../lib/menus";
@@ -223,11 +223,7 @@ export async function assistantTest(env: Env, token: string) {
 		return { success: true, ms: call.ms, model: call.model, reply: call.text.trim().slice(0, 60) };
 	} catch (e) {
 		const msg = (e instanceof Error ? e.message : String(e)).slice(0, 220);
-		const hint = /40[13]/.test(msg)
-			? " — Biasanya: key salah/tidak punya izin, ATAU model bukan model chat (mis. *guard*, whisper, tts) — pilih model dari tombol DAFTAR MODEL, mis. openai/gpt-oss-20b."
-			: /404/.test(msg)
-				? " — Nama model/Base URL tidak ditemukan; klik DAFTAR MODEL."
-				: "";
+		const hint = /404/.test(msg) ? " — Nama model/Base URL tidak ditemukan; klik DAFTAR MODEL." : "";
 		return { success: false, message: "Gagal: " + msg + hint + (await diagnose(p)) };
 	}
 }
@@ -240,12 +236,21 @@ async function diagnose(p: AiProvider): Promise<string> {
 	let url = "";
 	try {
 		url = normalizeBaseUrl(p.base_url);
-		const r = await fetch(url + "/models", { headers: { Authorization: `Bearer ${p.key}` } });
-		const raw = (await r.text()).replace(/\s+/g, " ").slice(0, 160);
-		const verdict = r.ok
-			? "Key & URL VALID (daftar model terbaca) -> masalahnya di MODEL: pilih lain lewat DAFTAR MODEL, atau model itu diblokir di Groq > Settings > Limits."
-			: "Key/URL ditolak juga saat membaca daftar model -> key salah/dicabut/dari akun lain, atau Base URL keliru.";
-		return ` | Diagnosa: ${url} model="${p.model}" key=...${p.key.slice(-4)} | /models -> HTTP ${r.status} ${raw} | ${verdict}`;
+		const probe = async (ua: string | null) => {
+			const headers: Record<string, string> = { Authorization: `Bearer ${p.key}` };
+			if (ua) headers["User-Agent"] = ua;
+			const r = await fetch(url + "/models", { headers });
+			const raw = (await r.text()).replace(/\s+/g, " ").slice(0, 100);
+			return { r, raw };
+		};
+		const withUa = await probe(AI_USER_AGENT);
+		const bare = await probe(null);
+		const ray = withUa.r.headers.get("cf-ray") || "-";
+		const verdict =
+			withUa.r.ok || bare.r.ok
+				? "Key & URL VALID -> masalahnya di MODEL: pilih lain lewat DAFTAR MODEL, atau model itu diblokir di Groq > Settings > Limits."
+				: "Key/URL ditolak juga saat membaca daftar model -> key salah/dicabut/dibatasi, atau penyedia memblokir server panel (cf-ray di atas bisa dikirim ke dukungan penyedia).";
+		return ` | Diagnosa: ${url} model="${p.model}" key=...${p.key.slice(-4)} | /models dengan User-Agent -> HTTP ${withUa.r.status} ${withUa.raw} | tanpa User-Agent -> HTTP ${bare.r.status} | cf-ray ${ray} | ${verdict}`;
 	} catch (e) {
 		return ` | Diagnosa: ${url || p.base_url} tidak terjangkau (${e instanceof Error ? e.message : String(e)})`;
 	}
