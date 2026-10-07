@@ -13,6 +13,9 @@ import {
 } from "./prediction";
 import { SHIO_ORDER, SHIO_CONFIG, MARKET_TO_PANEL } from "./parser";
 import { INVEST_PASARAN } from "./invest";
+import { SITE_HOST_DEFAULT, setSiteHosts } from "./auto-input";
+import { ANCHOR_WORD_CANDIDATES, FB_TEMPLATE_EVERGREEN_HASHTAGS } from "./bot-news";
+import { loadIntegrations } from "./integrations";
 import { getSys } from "./settings";
 import { setFetchTimeoutMs } from "./fetch-guard";
 
@@ -142,6 +145,43 @@ function parseInvestPasaran(raw: unknown): Parsed<[string, string][]> {
 	return { ok: true, value: out };
 }
 
+
+// ---- 7. Server admin tiap website (Auto Input) -------------------------------------------------------------------
+function parseSiteHost(raw: unknown): Parsed<Record<string, string[]>> {
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return fail("Format tidak valid.");
+	const out: Record<string, string[]> = {};
+	const seen = new Set<string>();
+	for (const [h, codes] of Object.entries(raw as Record<string, unknown>)) {
+		const host = str(h).toLowerCase();
+		if (!host) continue;
+		if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host) || host.length > 100) return fail(`Host "${host.slice(0, 30)}" tidak valid (contoh: ag.suksesbogil.com).`);
+		const list = (Array.isArray(codes) ? codes : []).map((c) => str(c).toUpperCase()).filter(Boolean);
+		if (!list.length) return fail(`Host ${host}: isi minimal 1 kode website.`);
+		for (const c of list) {
+			if (!/^[A-Z0-9]{2,12}$/.test(c)) return fail(`Kode website "${c}" harus huruf/angka 2-12 karakter.`);
+			if (seen.has(c)) return fail(`Kode website ${c} dipakai di dua host.`);
+			seen.add(c);
+		}
+		out[host] = list;
+	}
+	if (!Object.keys(out).length || Object.keys(out).length > 30) return fail("Isi 1-30 host.");
+	return { ok: true, value: out };
+}
+
+// ---- 8. Kata anchor backlink & hashtag Facebook ---------------------------------------------------------------------
+function parseWords(raw: unknown): Parsed<string[]> {
+	const list = [...new Set((Array.isArray(raw) ? raw : []).map((x) => str(x).toLowerCase()).filter(Boolean))];
+	if (list.length < 3 || list.length > 40) return fail("Isi 3-40 kata.");
+	for (const w of list) if (!/^[a-z\u00c0-\u024f]{3,20}$/.test(w)) return fail(`Kata "${w.slice(0, 20)}" harus huruf saja, 3-20 huruf, tanpa spasi.`);
+	return { ok: true, value: list };
+}
+function parseHashtags(raw: unknown): Parsed<string[]> {
+	const list = [...new Set((Array.isArray(raw) ? raw : []).map((x) => str(x)).filter(Boolean).map((x) => (x.startsWith("#") ? x : "#" + x)))];
+	if (list.length > 15) return fail("Maksimal 15 hashtag.");
+	for (const h of list) if (!/^#[A-Za-z0-9_]{2,40}$/.test(h)) return fail(`Hashtag "${h.slice(0, 20)}" hanya boleh huruf, angka, garis bawah.`);
+	return { ok: true, value: list };
+}
+
 export const MASTER_DEFS: MasterDef<any>[] = [
 	{
 		key: "md_jadwal", group: "Auto Posting", title: "Jadwal Prediksi",
@@ -182,6 +222,24 @@ export const MASTER_DEFS: MasterDef<any>[] = [
 		def: clone(INVEST_PASARAN), parse: parseInvestPasaran,
 		apply: (v: [string, string][]) => replaceArray(INVEST_PASARAN, v),
 	},
+	{
+		key: "md_site_host", group: "Auto Input", title: "Server Admin per Website",
+		hint: "Host admin tempat tiap website berada (host -> kode website). Host wajib berada di domain yang diizinkan (Admin > Integrasi > Domain admin).",
+		def: clone(SITE_HOST_DEFAULT), parse: parseSiteHost,
+		apply: (v: Record<string, string[]>) => setSiteHosts(v),
+	},
+	{
+		key: "md_anchor_words", group: "Bot News", title: "Kata Anchor Backlink",
+		hint: "Kata di dalam artikel yang boleh dijadikan tautan backlink (hanya kemunculan pertama).",
+		def: clone(ANCHOR_WORD_CANDIDATES), parse: parseWords,
+		apply: (v: string[]) => replaceArray(ANCHOR_WORD_CANDIDATES, v),
+	},
+	{
+		key: "md_fb_hashtags", group: "Bot News", title: "Hashtag Tetap Caption Facebook",
+		hint: "Hashtag yang selalu dipasang di caption template Facebook (0-15).",
+		def: clone(FB_TEMPLATE_EVERGREEN_HASHTAGS), parse: parseHashtags,
+		apply: (v: string[]) => replaceArray(FB_TEMPLATE_EVERGREEN_HASHTAGS, v),
+	},
 ];
 
 const BY_KEY = new Map(MASTER_DEFS.map((d) => [d.key, d]));
@@ -218,6 +276,7 @@ export async function loadMasterData(env: Env): Promise<void> {
 	inflight = (async () => {
 		try {
 			await doLoad(env);
+			await loadIntegrations(env);
 			setFetchTimeoutMs((await getSys(env, "sys_fetch_timeout_sec")) * 1000);
 		} catch {
 			/* tabel settings belum siap -> pakai yang sedang berlaku (bawaan) */

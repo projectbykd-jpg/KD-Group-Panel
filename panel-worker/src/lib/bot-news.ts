@@ -1,5 +1,7 @@
 // Modul NEWS untuk Role BOT: tarik feed berita -> rewrite via Gemini ->
 // posting ke Blogger. Semua state di Turso (bot_kv / news_source / news_article).
+import { newsSiteUrl } from "./integrations";
+import { getSys } from "./settings";
 import { getTurso } from "./turso";
 import { aiGenerate, aiNextReadyInMs, aiUsableProviders, AiUnavailableError, legacyProviders, parseProviders } from "./ai-provider";
 import { tsNow, tsNowIndonesianDate, tsPlusMinutes } from "./time";
@@ -387,7 +389,7 @@ export async function newsPullSources(env: Env, perSource = 6): Promise<{ added:
 	// gnews) di sini, dan tulis hasil lewat batch (bukan 1 query per artikel) —
 	// dulu 10 sumber x 12 item x 1 query = ratusan subrequest -> "Too many
 	// subrequests" -> exception tak tertangkap -> auto-post diam tanpa error.
-	const EXTERNAL_FETCH_BUDGET = 14;
+	const EXTERNAL_FETCH_BUDGET = await getSys(env, "sys_news_ext_fetch_budget"); // diatur admin (bawaan 14)
 	let extFetches = 0;
 	let scanned = 0;
 	const rows: { source: string; url: string; hash: string; title: string; excerpt: string; image: string; category: string }[] = [];
@@ -885,7 +887,6 @@ export async function bloggerCreatePost(
 // setiap posting Facebook Page bersama link Blogger & toko, sesuai permintaan
 // pemilik supaya ketiga aset (Blogger, situs berita sendiri, toko) selalu
 // saling mempromosikan satu sama lain.
-const LAPAKSTORE_SITE_URL = "https://lokalstore88.online";
 
 // ---------------------------------------------------------------------------
 // Backlink acak (foto + kata dalam kalimat) -- pemilik minta tiap artikel yang
@@ -895,9 +896,9 @@ const LAPAKSTORE_SITE_URL = "https://lokalstore88.online";
 // ---------------------------------------------------------------------------
 function ownLinkTargets(cfg: Record<string, string>): { url: string; label: string }[] {
 	const targets = [
-		{ url: `${LAPAKSTORE_SITE_URL}/`, label: "LapakStore88" },
-		{ url: `${LAPAKSTORE_SITE_URL}/produk.html`, label: "Katalog Produk" },
-		{ url: `${LAPAKSTORE_SITE_URL}/berita.html`, label: "Berita Terkini" },
+		{ url: `${newsSiteUrl()}/`, label: "LapakStore88" },
+		{ url: `${newsSiteUrl()}/produk.html`, label: "Katalog Produk" },
+		{ url: `${newsSiteUrl()}/berita.html`, label: "Berita Terkini" },
 	];
 	const bloggerSite = (cfg.blogger_site_url || "").trim();
 	if (bloggerSite) targets.push({ url: bloggerSite, label: "Blog Resmi" });
@@ -913,7 +914,7 @@ function pickOwnLink(cfg: Record<string, string>): { url: string; label: string 
 // kandidat yang MEMANG muncul di artikel, hanya kemunculan PERTAMA yang
 // ditautkan. Kalau tidak ada satu pun kandidat yang cocok, artikel dibiarkan
 // apa adanya (tidak dipaksakan menyisipkan kata baru).
-const ANCHOR_WORD_CANDIDATES = [
+export const ANCHOR_WORD_CANDIDATES = [
 	"informasi", "resmi", "terkini", "selengkapnya", "terbaru",
 	"kabar", "laporan", "diketahui", "tersebut", "berlangsung",
 ];
@@ -1016,7 +1017,7 @@ export async function fbDirectProcessOne(env: Env): Promise<{ done: boolean; tit
 			metaDescription: caption,
 			postUrl: String(linkUrl),
 			imageUrl,
-			siteUrl: `${LAPAKSTORE_SITE_URL}/berita/artikel/?id=${id}`,
+			siteUrl: `${newsSiteUrl()}/berita/artikel/?id=${id}`,
 			storeUrl: (cfg.promo_url || "").trim() || undefined,
 		});
 		await getTurso(env).prepare(`UPDATE news_article SET fb_direct_posted_at = ? WHERE id = ?`).bind(tsNow(), id).run();
@@ -1043,7 +1044,7 @@ export async function fbDirectProcessOne(env: Env): Promise<{ done: boolean; tit
 
 // Hashtag "evergreen" biar postingan gampang ketemu orang yang lagi cari/scroll berita,
 // dipasang tetap di tiap template supaya jangkauan konsisten walau AI-nya kadang pelit hashtag.
-const FB_TEMPLATE_EVERGREEN_HASHTAGS = ["#LapakStore88", "#BeritaTerkini", "#BeritaHariIni", "#InfoTerkini", "#BeritaViral", "#BeritaUpdate"];
+export const FB_TEMPLATE_EVERGREEN_HASHTAGS = ["#LapakStore88", "#BeritaTerkini", "#BeritaHariIni", "#InfoTerkini", "#BeritaViral", "#BeritaUpdate"];
 
 /** Caption + hashtag utk template manual — link ditambahkan terpisah di bawah (bukan oleh AI). */
 async function geminiFbTemplateCaption(
@@ -1118,7 +1119,7 @@ export async function fbTemplateGenerate(
 		// ini belum sempat posting ke Blogger, yang berarti caption promosi malah
 		// nyasar promosiin situs orang lain. Urutan: Blogger (post_url) -> situs
 		// sendiri (site_posted_at) -> baru row.url sbg jalan terakhir.
-		const siteArticleUrl = row.site_posted_at ? `${LAPAKSTORE_SITE_URL}/berita/artikel/?id=${id}` : "";
+		const siteArticleUrl = row.site_posted_at ? `${newsSiteUrl()}/berita/artikel/?id=${id}` : "";
 		const linkUrl = String(row.post_url || siteArticleUrl || row.url || "");
 		const hashtags = [...new Set([...gen.hashtags, ...FB_TEMPLATE_EVERGREEN_HASHTAGS])].slice(0, 12);
 		const parts = [gen.text];
@@ -1127,7 +1128,7 @@ export async function fbTemplateGenerate(
 		// dari link artikel spesifik di atas (yang bisa saja belum ada kalau artikel
 		// ini belum tayang di Blogger/situs sendiri). Pemilik minta caption manual
 		// ini ikut mempromosikan website utama tiap kali diposting, bukan cuma toko.
-		parts.push(`📰 Kunjungi web berita kami: ${LAPAKSTORE_SITE_URL}/berita.html`);
+		parts.push(`📰 Kunjungi web berita kami: ${newsSiteUrl()}/berita.html`);
 		// Promosi toko -- sama seperti yang otomatis disisipkan di artikel Blogger/
 		// situs sendiri, supaya caption manual ini juga ikut mempromosikan toko.
 		const promoUrl = (cfg.promo_url || "").trim();
@@ -1328,7 +1329,7 @@ export async function newsProcessOne(
 			if (rows.length) {
 				const items = rows
 					.map((r) => {
-						const href = r.post_url ? r.post_url : `${LAPAKSTORE_SITE_URL}/berita/artikel/?id=${r.id}`;
+						const href = r.post_url ? r.post_url : `${newsSiteUrl()}/berita/artikel/?id=${r.id}`;
 						return `<li><a href="${escAttr(href)}" rel="noopener">${escHtml(r.title)}</a></li>`;
 					})
 					.join("");
@@ -1410,7 +1411,7 @@ export async function newsProcessOne(
 				articleSection: newsCategoryLabel(category),
 				author: { "@type": "Organization", name: "LokalStore88" },
 				publisher: { "@type": "Organization", name: "LokalStore88" },
-				mainEntityOfPage: `${LAPAKSTORE_SITE_URL}/berita/artikel/?id=${id}`,
+				mainEntityOfPage: `${newsSiteUrl()}/berita/artikel/?id=${id}`,
 			};
 			content += `\n<script type="application/ld+json">${JSON.stringify(ldJson)}</script>`;
 		} catch (e) {
@@ -1446,7 +1447,7 @@ export async function newsProcessOne(
 						metaDescription: rw.metaDescription,
 						postUrl,
 						imageUrl,
-						siteUrl: `${LAPAKSTORE_SITE_URL}/berita/artikel/?id=${id}`,
+						siteUrl: `${newsSiteUrl()}/berita/artikel/?id=${id}`,
 						storeUrl: promoUrl || undefined,
 					});
 				} catch (e) {
@@ -1637,7 +1638,6 @@ async function recoverStuckProcessing(env: Env): Promise<number> {
 // Batas keras utk sekali panggil (tombol "Proses Sekarang" manual TERMASUK):
 // tiap artikel makan ~4-8 subrequest (Gemini + Blogger + Turso). Cloudflare Free
 // cuma kasih 50 subrequest/invocation -- lihat catatan di newsPullSources.
-const MAX_RUN_COUNT = 5;
 
 export async function botNewsRun(
 	env: Env,
@@ -1659,7 +1659,7 @@ export async function botNewsRun(
 				: "Tidak ada AI provider aktif -- tambah/aktifkan di BOT -> Setting -> AI Provider (cek kuota & masa aktif).";
 		return { pulled: 0, posted: 0, siteOnly: 0, capped: false, message, bloggerBlocked: "" };
 	}
-	const countOverride = opts.count ? Math.max(1, Math.min(MAX_RUN_COUNT, Math.floor(opts.count))) : 0;
+	const countOverride = opts.count ? Math.max(1, Math.min(await getSys(env, "sys_news_max_run_count"), Math.floor(opts.count))) : 0;
 	let perRun = mode === "site" ? 0 : countOverride || Math.max(1, Number(cfg.per_run || "2"));
 	// Pace KHUSUS situs sendiri (LapakStore88) -- SENGAJA terpisah total dari
 	// per_run/daily_cap Blogger di atas. PENTING: pakai "||" bukan "??" -- kalau
@@ -2087,7 +2087,7 @@ export async function publicNewsSitemapXml(env: Env): Promise<string> {
 		).results ?? [];
 	const urls = rows
 		.map((r) => {
-			const loc = `${LAPAKSTORE_SITE_URL}/berita/artikel/?id=${r.id}`;
+			const loc = `${newsSiteUrl()}/berita/artikel/?id=${r.id}`;
 			const lastmod = String(r.site_posted_at || "").replace(" ", "T") + "+07:00";
 			return `<url><loc>${loc}</loc><lastmod>${lastmod}</lastmod></url>`;
 		})

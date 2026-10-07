@@ -4,7 +4,7 @@
 import { installFetchGuard } from "./lib/fetch-guard";
 import { getSys } from "./lib/settings";
 import { loadMasterData } from "./lib/master-data";
-import { adminGetMasterData, adminSaveMasterData, shioMapGet } from "./api/master-data";
+import { adminGetMasterData, adminSaveMasterData, shioMapGet, adminGetIntegrations, adminSaveIntegrations, adminTestIntegrations } from "./api/master-data";
 
 import { assistantAsk, assistantClearGaps, assistantGetConfig, assistantModels, assistantSaveConfig, assistantStatus, assistantTest } from "./api/assistant";
 import { CORS_HEADERS, json } from "./lib/respond";
@@ -194,6 +194,9 @@ const ROUTES: Record<string, Handler> = {
 	adminGetMasterData: (env, b) => adminGetMasterData(env, s(b.token)),
 	adminSaveMasterData: (env, b) => adminSaveMasterData(env, s(b.token), s(b.key), b.value),
 	shioMapGet: (env, b) => shioMapGet(env, s(b.token)),
+	adminGetIntegrations: (env, b) => adminGetIntegrations(env, s(b.token)),
+	adminSaveIntegrations: (env, b) => adminSaveIntegrations(env, s(b.token), b.values),
+	adminTestIntegrations: (env, b) => adminTestIntegrations(env, s(b.token)),
 	setMaintenance: (env, b) => setMaintenance(env, s(b.token), !!b.enabled, s(b.message)),
 
 	// kelola website (site_accounts)

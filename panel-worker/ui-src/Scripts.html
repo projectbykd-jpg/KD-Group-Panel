@@ -2695,7 +2695,7 @@
     }
 
     /* Menu admin: tampilkan satu panel per waktu (tidak numpuk scroll). */
-    const ADMIN_PANELS = ['users','sites','sesi','autopost','lapops','datamaster','maintenance'];
+    const ADMIN_PANELS = ['users','sites','sesi','autopost','lapops','datamaster','integrasi','maintenance'];
     // ---------- Admin: API key KHUSUS Asisten KD + provider cadangan ----------
     function asstCfgLoad() {
       const st = document.getElementById('asstCfgStatus');
@@ -2790,6 +2790,69 @@
         if (!r || !r.success) { toast((r && r.message) || 'Gagal menyimpan'); return; }
         sysItems = r.settings || []; sysRender(); if (st) st.textContent = 'Tersimpan'; toast('Pengaturan sistem tersimpan');
       }).withFailureHandler(e => { if (btn) btn.disabled = false; toast('Gagal menyimpan: ' + ((e && e.message) || e)); }).adminSaveSystemSettings(currentSessionToken, values);
+    }
+    // ---------- Admin: Integrasi (GitHub, LinkTree, URL, domain) ----------
+    let intItems = [];
+    function intRender() {
+      const box = document.getElementById('intGroups'); if (!box) return;
+      const groups = {};
+      intItems.forEach(i => (groups[i.group] = groups[i.group] || []).push(i));
+      const srcLabel = { admin: 'DIISI ADMIN', env: 'DARI CLOUDFLARE', bawaan: 'BAWAAN' };
+      box.innerHTML = Object.keys(groups).map(g => `<div class="sys-group"><div class="sys-group-title">${escapeHtml(g)}</div>${groups[g].map(i => `
+        <div class="int-field">
+          <div class="int-top"><span class="int-label">${escapeHtml(i.label)}</span><span class="int-src ${i.source}">${srcLabel[i.source] || ''}</span></div>
+          <div class="int-hint">${escapeHtml(i.hint)}</div>
+          <div class="int-row">
+            <input class="md-input" data-int="${i.key}" ${i.secret ? 'type="password" autocomplete="new-password"' : 'type="text"'} spellcheck="false"
+              value="${i.secret ? '' : escapeHtml(i.value)}" placeholder="${i.secret ? (i.mask ? 'Tersimpan ' + escapeHtml(i.mask) + ' — isi untuk mengganti' : 'Belum diisi') : escapeHtml(i.def)}">
+            ${i.source === 'admin' ? `<button type="button" class="glass-inner px-3 rounded-xl text-[11px] font-bold" onclick="intReset('${i.key}', this)" title="Kembalikan ke bawaan">BAWAAN</button>` : ''}
+          </div>
+        </div>`).join('')}</div>`).join('');
+    }
+    function intLoad() {
+      const st = document.getElementById('intStatus');
+      google.script.run.withSuccessHandler(r => {
+        if (!r || !r.success) { if (st) st.textContent = 'Gagal memuat: ' + ((r && r.message) || '-'); return; }
+        intItems = r.items || []; intRender(); if (st) st.textContent = intItems.length + ' pengaturan';
+      }).withFailureHandler(e => { if (st) st.textContent = 'Gagal memuat: ' + ((e && e.message) || e); }).adminGetIntegrations(currentSessionToken);
+    }
+    function intCollect() {
+      const v = {};
+      document.querySelectorAll('#intGroups input[data-int]').forEach(inp => {
+        const it = intItems.find(x => x.key === inp.dataset.int); if (!it) return;
+        const val = inp.value.trim();
+        if (it.secret) { if (val) v[it.key] = val; return; }   // rahasia kosong = tidak diubah
+        if (val !== (it.value || '')) v[it.key] = val;          // hanya yang berubah
+      });
+      return v;
+    }
+    function intSave() {
+      const values = intCollect(), btn = document.getElementById('intSaveBtn'), st = document.getElementById('intStatus');
+      if (!Object.keys(values).length) { toast('Tidak ada perubahan'); return; }
+      if (btn) btn.disabled = true;
+      google.script.run.withSuccessHandler(r => {
+        if (btn) btn.disabled = false;
+        if (!r || !r.success) { toast((r && r.message) || 'Gagal menyimpan'); if (st) st.textContent = (r && r.message) || 'Gagal'; return; }
+        intItems = r.items || intItems; intRender(); if (st) st.textContent = 'Tersimpan · berlaku ±15 detik'; toast('Integrasi tersimpan');
+      }).withFailureHandler(e => { if (btn) btn.disabled = false; toast('Gagal menyimpan: ' + ((e && e.message) || e)); }).adminSaveIntegrations(currentSessionToken, values);
+    }
+    function intReset(key, btn) {
+      const o = {}; o[key] = null; btn.disabled = true;
+      google.script.run.withSuccessHandler(r => {
+        if (!r || !r.success) { btn.disabled = false; toast((r && r.message) || 'Gagal'); return; }
+        intItems = r.items || intItems; intRender(); toast('Dikembalikan ke bawaan');
+      }).withFailureHandler(e => { btn.disabled = false; toast('Gagal: ' + ((e && e.message) || e)); }).adminSaveIntegrations(currentSessionToken, o);
+    }
+    function intTest() {
+      const out = document.getElementById('intTestOut'), btn = document.getElementById('intTestBtn');
+      if (btn) btn.disabled = true; if (out) out.innerHTML = '<span class="text-slate-400">Memeriksa…</span>';
+      google.script.run.withSuccessHandler(r => {
+        if (btn) btn.disabled = false;
+        if (!r || !r.success) { if (out) out.innerHTML = `<span class="md-err">${escapeHtml((r && r.message) || 'Gagal')}</span>`; return; }
+        if (out) out.innerHTML = (r.checks || []).map(c => `<div class="int-test ${c.ok ? 'ok' : 'bad'}"><i class="fa-solid ${c.ok ? 'fa-circle-check' : 'fa-circle-xmark'}"></i>
+          <div><b>${escapeHtml(c.label)}</b> <span class="text-slate-500">· ${escapeHtml(c.repo)} · ${escapeHtml(c.workflow)}${c.status ? ' · HTTP ' + c.status : ''}</span><div>${escapeHtml(c.message)}</div></div></div>`).join('')
+          + (r.allOk ? '<div class="md-ok mt-1">Semua jalur GitHub tersambung.</div>' : '');
+      }).withFailureHandler(e => { if (btn) btn.disabled = false; if (out) out.innerHTML = `<span class="md-err">${escapeHtml('Gagal: ' + ((e && e.message) || e))}</span>`; }).adminTestIntegrations(currentSessionToken);
     }
     // ---------- Admin: Data Master (jadwal, shio, pasaran) ----------
     let mdItems = [], mdResetArm = {};
@@ -2977,6 +3040,8 @@
         lapOpsLoad(); sysLoad(); asstCfgLoad();
       } else if (key === 'datamaster') {
         mdLoad();
+      } else if (key === 'integrasi') {
+        intLoad();
       } else if (key === 'maintenance') {
         loadMaintenanceState();
       }

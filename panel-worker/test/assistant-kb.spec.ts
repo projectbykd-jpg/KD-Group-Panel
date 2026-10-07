@@ -107,6 +107,12 @@ describe("API asisten", () => {
 			expect(selectKnowledge(q, []), q).toContain("Data Master");
 		}
 	});
+
+	it("pertanyaan token GitHub / LinkTree / domain admin memuat tab Integrasi", () => {
+		for (const q of ["cara ganti token github", "kenapa resource not accessible by personal access token", "tes koneksi github di mana", "ganti api key linktree", "ubah domain admin auto input"]) {
+			expect(selectKnowledge(q, []), q).toContain("Integrasi");
+		}
+	});
 });
 
 // --- GERBANG KELENGKAPAN: judul/label di layar yang belum dijelaskan menggagalkan CI ---

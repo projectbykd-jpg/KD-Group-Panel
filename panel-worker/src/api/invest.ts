@@ -1,5 +1,6 @@
 // Port endpoint publik Invest.gs (investGetConfig / investSaveConfig / investTestSession /
 // investStartScan / investContinueScan / investResetScan / investGetStatus / investGetWarnings).
+import { ghToken, investTurboRepo } from "../lib/integrations";
 import { requireSession } from "./auth";
 import { logActivity } from "../lib/activity";
 import { tsNow } from "../lib/time";
@@ -78,7 +79,6 @@ export async function investTestSession(env: Env, token: string) {
 // Repo tempat workflow invest-turbo.yml hidup -- sama seperti news-turbo.yml,
 // jalan sebagai plain fetch (bukan Playwright), jadi cukup di repo panel ini
 // sendiri (Day-Group-Panel), tidak perlu daygroup-scraper.
-const INVEST_TURBO_REPO = "projectbykd-jpg/Day-Group-Panel";
 const GH_HEADERS = (ghToken: string) => ({
 	Authorization: `Bearer ${ghToken}`,
 	Accept: "application/vnd.github+json",
@@ -98,11 +98,11 @@ const GH_HEADERS = (ghToken: string) => ({
  * lewat cron/live-poll seperti sebelum fitur ini ada).
  */
 async function dispatchInvestTurbo(env: Env, user: string): Promise<void> {
-	if (!env.GH_TOKEN) return; // belum dikonfigurasi -> diam-diam andalkan cron/live-poll
+	if (!ghToken(env)) return; // belum dikonfigurasi -> diam-diam andalkan cron/live-poll
 	try {
-		const resp = await fetch(`https://api.github.com/repos/${INVEST_TURBO_REPO}/actions/workflows/invest-turbo.yml/dispatches`, {
+		const resp = await fetch(`https://api.github.com/repos/${investTurboRepo(env)}/actions/workflows/invest-turbo.yml/dispatches`, {
 			method: "POST",
-			headers: GH_HEADERS(env.GH_TOKEN),
+			headers: GH_HEADERS(ghToken(env)),
 			body: JSON.stringify({ ref: "main", inputs: { user } }),
 		});
 		if (resp.status !== 204) {
