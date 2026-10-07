@@ -463,6 +463,8 @@ export interface AiCallOpts {
 	temperature?: number;
 	maxTokens?: number;
 	json?: boolean;
+	/** Parameter tambahan khusus provider (mis. reasoning_effort) -- digabung ke body permintaan. */
+	extra?: Record<string, unknown>;
 	/** Untuk tes; default AI_FIRST_BYTE_MS / AI_IDLE_MS / AI_TOTAL_MS. */
 	firstByteMs?: number;
 	idleMs?: number;
@@ -661,7 +663,7 @@ async function postChat(
 	p: AiProvider,
 	model: string,
 	messages: { role: string; content: string }[],
-	opts: { temperature?: number; maxTokens?: number; json?: boolean; firstByteMs?: number; idleMs?: number; totalMs?: number },
+	opts: { temperature?: number; maxTokens?: number; json?: boolean; extra?: Record<string, unknown>; firstByteMs?: number; idleMs?: number; totalMs?: number },
 ): Promise<{ status: number; body: any }> {
 	const firstByteMs = opts.firstByteMs ?? AI_FIRST_BYTE_MS;
 	const idleMs = opts.idleMs ?? AI_IDLE_MS;
@@ -676,6 +678,7 @@ async function postChat(
 		const payload: Record<string, unknown> = { model, messages, temperature: opts.temperature ?? 0.8 };
 		if (maxTokens) payload.max_tokens = maxTokens;
 		if (json) payload.response_format = { type: "json_object" };
+		if (opts.extra) Object.assign(payload, opts.extra);
 		if (stream) {
 			payload.stream = true;
 			if (streamUsage) payload.stream_options = { include_usage: true };

@@ -627,11 +627,11 @@
           <div class="mini-card flex flex-col gap-3 mb-3" id="asstCfgCard">
             <div>
               <div class="font-extrabold text-base"><img src="/ASSIST.svg" width="22" height="22" alt="" class="inline-block mr-2 align-text-bottom">Asisten KD (chat bantuan)</div>
-              <div class="text-xs text-slate-400 mt-1">Isi <b>API key khusus</b> untuk asisten supaya kuota <b>terpisah</b> dari AI Provider Bot News &amp; lainnya. Kompatibel OpenAI (mis. Groq: <code>https://api.groq.com/openai/v1</code>, model <code>llama-3.3-70b-versatile</code>). Pakai model <b>chat</b> (mis. llama-3.3-70b-versatile atau llama-3.1-8b-instant) &mdash; bukan model *guard*/whisper/tts. Klik <b>DAFTAR MODEL</b> untuk memilih. Key tidak pernah ditampilkan ulang dan <b>tidak pernah jatuh</b> ke provider Bot News.</div>
+              <div class="text-xs text-slate-400 mt-1">Isi <b>API key khusus</b> untuk asisten supaya kuota <b>terpisah</b> dari AI Provider Bot News &amp; lainnya. Kompatibel OpenAI (mis. Groq: <code>https://api.groq.com/openai/v1</code>, model <code>openai/gpt-oss-20b</code>). Pakai model <b>chat</b> (mis. openai/gpt-oss-20b yang cepat, atau openai/gpt-oss-120b / qwen/qwen3.8-27b — pilih sesuai yang tersedia di akun Groq Anda) &mdash; bukan model *guard*/whisper/tts. Klik <b>DAFTAR MODEL</b> untuk memilih. Key tidak pernah ditampilkan ulang dan <b>tidak pernah jatuh</b> ke provider Bot News.</div>
             </div>
             <div class="asst-key-grid">
               <label class="sys-field-col"><span>Base URL</span><input id="asstBase" class="glass-inner rounded-xl px-3 py-2 text-xs" placeholder="https://api.groq.com/openai/v1" autocomplete="off" spellcheck="false"></label>
-              <label class="sys-field-col"><span>Model</span><input id="asstModel" list="asstModelList" class="glass-inner rounded-xl px-3 py-2 text-xs" placeholder="llama-3.3-70b-versatile" autocomplete="off" spellcheck="false"><datalist id="asstModelList"></datalist></label>
+              <label class="sys-field-col"><span>Model</span><input id="asstModel" list="asstModelList" class="glass-inner rounded-xl px-3 py-2 text-xs" placeholder="openai/gpt-oss-20b" autocomplete="off" spellcheck="false"><datalist id="asstModelList"></datalist></label>
               <label class="sys-field-col asst-key-wide"><span>API key <em id="asstKeyMask" class="not-italic text-slate-500"></em></span><input id="asstKey" type="password" class="glass-inner rounded-xl px-3 py-2 text-xs" placeholder="gsk_… (kosongkan bila tidak diganti)" autocomplete="new-password" spellcheck="false"></label>
             </div>
             <div class="flex flex-wrap items-center gap-2">

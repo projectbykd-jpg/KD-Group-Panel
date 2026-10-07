@@ -12,7 +12,7 @@ import { resetSysCache } from "../src/lib/settings";
 import { fakeEnv, fakeTurso } from "./helpers/fake-env";
 
 let ctx: ReturnType<typeof fakeEnv>;
-let sent: { url: string; auth: string }[] = [];
+let sent: { url: string; auth: string; body: any }[] = [];
 let failHosts: string[] = [];
 
 beforeEach(async () => {
@@ -26,7 +26,7 @@ beforeEach(async () => {
 	vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input);
 		const h = (init?.headers ?? {}) as Record<string, string>;
-		sent.push({ url, auth: String(h.authorization ?? h.Authorization ?? "") });
+		sent.push({ url, auth: String(h.authorization ?? h.Authorization ?? ""), body: init?.body ? JSON.parse(String(init.body)) : null });
 		if (failHosts.some((x) => url.includes(x))) return new Response(JSON.stringify({ error: { message: "boom" } }), { status: 500, headers: { "content-type": "application/json" } });
 		return new Response(JSON.stringify({ model: "llama-x", choices: [{ message: { content: "OK dari " + new URL(url).host } }], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }), { status: 200, headers: { "content-type": "application/json" } });
 	});
@@ -91,6 +91,19 @@ describe("API key KHUSUS Asisten KD (terpisah dari provider bot)", () => {
 		const m = (await assistantModels(ctx.env, boss, "", "")) as { models: string[]; hidden: number };
 		expect(m.models).toEqual(["llama-3.1-8b-instant", "llama-3.3-70b-versatile"].sort());
 		expect(m.hidden).toBe(2);
+	});
+
+	it("model berpikir di Groq dijawab cepat: reasoning_effort dikirim (gpt-oss=low, qwen=none)", async () => {
+		const boss = await tok("Boss", "pw-boss");
+		await assistantSaveConfig(ctx.env, boss, { base_url: "https://api.groq.com/openai/v1", key: KEY, model: "openai/gpt-oss-20b" });
+		await assistantAsk(ctx.env, await tok("Opr", "pw-opr"), "halo", []);
+		expect(sent.at(-1)!.body.reasoning_effort).toBe("low");
+		await assistantSaveConfig(ctx.env, boss, { model: "qwen/qwen3.8-27b" });
+		await assistantAsk(ctx.env, await tok("Opr", "pw-opr"), "halo lagi", []);
+		expect(sent.at(-1)!.body.reasoning_effort).toBe("none");
+		await assistantSaveConfig(ctx.env, boss, { base_url: "https://other.test/v1", model: "openai/gpt-oss-20b" });
+		await assistantAsk(ctx.env, await tok("Opr", "pw-opr"), "halo 3", []);
+		expect(sent.at(-1)!.body.reasoning_effort).toBeUndefined(); // hanya untuk Groq
 	});
 
 	it("tes koneksi: sukses & gagal ditangani", async () => {

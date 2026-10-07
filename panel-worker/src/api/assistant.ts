@@ -105,7 +105,7 @@ export async function assistantAsk(env: Env, token: string, message: unknown, hi
 			const model = modelChain(p).find((m) => !aiCooldown(cfg, { ...p, model: m }));
 			if (!model) continue;
 			try {
-				const call = await aiChatProvider(env, cfg, { ...p, model }, {
+				const base = {
 					purpose: "assistant",
 					temperature: 0.2,
 					maxTokens,
@@ -114,7 +114,16 @@ export async function assistantAsk(env: Env, token: string, message: unknown, hi
 					firstByteMs: 20_000,
 					idleMs: 12_000,
 					totalMs: 40_000,
-				});
+				};
+				const extra = fastReasoning(p, model);
+				let call;
+				try {
+					call = await aiChatProvider(env, cfg, { ...p, model }, { ...base, extra });
+				} catch (e) {
+					// provider menolak parameter tambahan -> ulangi tanpa itu
+					if (extra && /reasoning|unknown|unsupported|invalid/i.test(e instanceof Error ? e.message : "")) call = await aiChatProvider(env, cfg, { ...p, model }, base);
+					else throw e;
+				}
 				answer = call.text.trim();
 				via = `${call.providerName} · ${call.model}`;
 				ms = call.ms;
@@ -215,12 +224,20 @@ export async function assistantTest(env: Env, token: string) {
 	} catch (e) {
 		const msg = (e instanceof Error ? e.message : String(e)).slice(0, 220);
 		const hint = /40[13]/.test(msg)
-			? " — Biasanya: key salah/tidak punya izin, ATAU model bukan model chat (mis. *guard*, whisper, tts) — pilih model dari tombol DAFTAR MODEL, mis. llama-3.3-70b-versatile."
+			? " — Biasanya: key salah/tidak punya izin, ATAU model bukan model chat (mis. *guard*, whisper, tts) — pilih model dari tombol DAFTAR MODEL, mis. openai/gpt-oss-20b."
 			: /404/.test(msg)
 				? " — Nama model/Base URL tidak ditemukan; klik DAFTAR MODEL."
 				: "";
 		return { success: false, message: "Gagal: " + msg + hint };
 	}
+}
+
+/** Model "berpikir" di Groq dijawab jauh lebih cepat bila usaha berpikirnya dikecilkan. */
+function fastReasoning(p: AiProvider, model: string): Record<string, unknown> | undefined {
+	if (!/groq\.com/i.test(p.base_url)) return undefined;
+	if (/gpt-oss/i.test(model)) return { reasoning_effort: "low" };
+	if (/qwen/i.test(model)) return { reasoning_effort: "none" };
+	return undefined;
 }
 
 const NOT_CHAT = /whisper|tts|speech|guard|safeguard|embed|orpheus|moderation|rerank|transcrib|playai|image|vision-preview/i;
