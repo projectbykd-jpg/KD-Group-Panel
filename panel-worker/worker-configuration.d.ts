@@ -7,7 +7,7 @@ interface __BaseEnv_Env {
 	ASSETS: Fetcher;
 	TZ_OFFSET_HOURS: "7";
 	PUBLIC_URL: "https://panel-worker.projectbykd.workers.dev";
-	GH_REPO: "projectbykd-jpg/daygroup-scraper";
+	GH_REPO: "projectbykd-jpg/KD-scraper";
 }
 declare namespace Cloudflare {
 	interface GlobalProps {

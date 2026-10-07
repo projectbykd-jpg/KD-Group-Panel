@@ -9,7 +9,7 @@
 // Jangan menulis rahasia (password, key, token) di sini.
 // ============================================================================
 
-export const ASSISTANT_KB_VERSION = "2026-10-08.1";
+export const ASSISTANT_KB_VERSION = "2026-10-08.2";
 
 /** Penjelasan per menu. Kunci = id navigasi (nav-<kunci>) di ui-src/Index.html. */
 export const KB_PAGES: Record<string, { title: string; text: string }> = {
@@ -195,6 +195,7 @@ export const KB_ERRORS: { m: string; a: string }[] = [
 	{ m: "phpsessid kosong", a: "Isi & simpan PHPSESSID di menu AutoCheck Invest (Setting panel agen) dulu." },
 	{ m: "session expired", a: "Sesi panel agen/admin website habis. Login ulang di sumbernya, ambil PHPSESSID/cookie baru, simpan di panel." },
 	{ m: "cookie admin kedaluwarsa", a: "Cookie Admin di Laporan Harian › Setting sudah tidak berlaku. Ambil yang baru dari browser yang login lalu tarik data lagi." },
+	{ m: "gagal memicu github actions", a: "Panel gagal menjalankan scraper di GitHub. Lihat angka di kurung: 401 = token GH_TOKEN salah/kedaluwarsa; 403 'Resource not accessible by personal access token' = token tidak punya izin (Actions: Read and write) atau repo KD-scraper tidak dicentang di token; 404 = nama repo (GH_REPO) atau workflow scrape.yml tidak ditemukan; 500/502/503 = gangguan di sisi GitHub, tunggu beberapa menit lalu tarik data lagi. Perbaikan token hanya bisa dilakukan admin server (buat Fine-grained token di GitHub, pasang sebagai secret GH_TOKEN di Cloudflare panel-worker > Settings > Variables and Secrets). Jangan kirim token ke siapa pun." },
 	{ m: "belum dikonfigurasi (secret gh_token", a: "GitHub Actions belum disambungkan di server. Hanya admin server yang bisa memperbaiki (secret GH_TOKEN)." },
 	{ m: "turso belum dikonfigurasi", a: "Database Turso belum disambungkan di server (TURSO_URL/TURSO_TOKEN). Hubungi admin server." },
 	{ m: "live chat bot belum dikonfigurasi", a: "Secret LIVECHAT_BOT_KEY belum diatur di server. Hubungi admin server." },
