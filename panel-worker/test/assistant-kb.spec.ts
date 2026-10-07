@@ -76,11 +76,11 @@ describe("API asisten", () => {
 		await add("Botx", "pw-bot", "BOT");
 	});
 
-	it("menolak pertanyaan kosong/terlalu panjang & role BOT; pesan jelas bila belum ada AI Provider", async () => {
+	it("menolak pertanyaan kosong/terlalu panjang; semua role (termasuk BOT) boleh bertanya; pesan jelas bila belum ada AI Provider", async () => {
 		const opr = await tok("Opr", "pw-opr");
 		await expect(assistantAsk(ctx.env, opr, "  ", [])).rejects.toThrow(/kosong/);
 		await expect(assistantAsk(ctx.env, opr, "a".repeat(601), [])).rejects.toThrow(/terlalu panjang/);
-		await expect(assistantAsk(ctx.env, await tok("Botx", "pw-bot"), "halo", [])).rejects.toThrow();
+		await expect(assistantAsk(ctx.env, await tok("Botx", "pw-bot"), "halo", [])).rejects.toThrow(/AI Provider|sibuk/); // BOT juga boleh bertanya
 		await expect(assistantAsk(ctx.env, opr, "cara kirim result?", [])).rejects.toThrow(/AI Provider|sibuk/);
 	});
 

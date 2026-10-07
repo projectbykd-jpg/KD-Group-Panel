@@ -1171,3 +1171,4 @@ body { position: relative; }
   #kd-assistant .kda-panel { height: min(520px, calc(100vh - 170px)); }
 }
 @media (prefers-reduced-motion: reduce) { #kd-assistant * { animation: none !important; transition: none !important; } }
+.kda-meta { margin-top: 6px; font-size: 10.5px; color: var(--ui-text-3); }

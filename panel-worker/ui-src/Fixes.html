@@ -303,7 +303,7 @@
       chipsEl.innerHTML = SUGGEST.map(function (q) { return '<button type="button" class="kda-chip">' + esc(q) + '</button>'; }).join('');
     } else {
       msgsEl.innerHTML = hist.map(function (m) {
-        return '<div class="kda-msg ' + (m.role === 'user' ? 'me' : 'bot') + (m.err ? ' err' : '') + '"><div class="kda-bubble">' + (m.role === 'user' ? '<p>' + esc(m.content) + '</p>' : md(m.content)) + '</div></div>';
+        return '<div class="kda-msg ' + (m.role === 'user' ? 'me' : 'bot') + (m.err ? ' err' : '') + '"><div class="kda-bubble">' + (m.role === 'user' ? '<p>' + esc(m.content) + '</p>' : md(m.content) + (m.meta ? '<div class="kda-meta">' + esc(m.meta) + '</div>' : '')) + '</div></div>';
       }).join('') + (busy ? '<div class="kda-msg bot"><div class="kda-bubble kda-typing"><span></span><span></span><span></span></div></div>' : '');
       chipsEl.innerHTML = '';
     }
@@ -320,7 +320,7 @@
     hist.push({ role: 'user', content: text }); busy = true; input.value = ''; autosize(); save(); render();
     google.script.run.withSuccessHandler(function (r) {
       busy = false;
-      if (r && r.success && r.answer) { hist.push({ role: 'assistant', content: r.answer }); kbVer = r.kbVersion || kbVer; }
+      if (r && r.success && r.answer) { hist.push({ role: 'assistant', content: r.answer, meta: r.via ? (r.via + ' · ' + ((r.ms || 0) / 1000).toFixed(1) + ' dtk') : '' }); kbVer = r.kbVersion || kbVer; }
       else hist.push({ role: 'assistant', content: (r && r.message) || 'Maaf, belum bisa menjawab.', err: true });
       save(); render();
     }).withFailureHandler(function (e) {
@@ -344,7 +344,7 @@
   var checkedFor = '';
   function sync() {
     var app = document.getElementById('app-container');
-    var logged = !!(app && !app.hidden && app.style.display !== 'none') && typeof currentProfile !== 'undefined' && currentProfile && currentProfile.role !== 'BOT';
+    var logged = !!(app && !app.hidden && app.style.display !== 'none') && typeof currentProfile !== 'undefined' && !!currentProfile;
     if (!logged) { root.hidden = true; checkedFor = ''; return; }
     if (checkedFor !== currentSessionToken) {
       checkedFor = currentSessionToken;

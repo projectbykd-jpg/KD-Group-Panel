@@ -4,7 +4,7 @@
 // dijalankan, tidak ada data/rahasia pengguna yang dikirim ke AI.
 import { requireSession } from "./auth";
 import { logActivity } from "../lib/activity";
-import { aiGenerate, AiUnavailableError } from "../lib/ai-provider";
+import { aiChatProvider, aiCooldown, aiLoadProviders, aiUsableProviders, AiUnavailableError, modelChain, type AiProvider } from "../lib/ai-provider";
 import { ASSISTANT_KB_VERSION, selectKnowledge } from "../lib/assistant-kb";
 import { botCfg } from "../lib/bot-news";
 import { MENU_ITEMS, parseMenus } from "../lib/menus";
@@ -57,12 +57,12 @@ export function cleanHistory(raw: unknown): { role: "user" | "assistant"; conten
 }
 
 export async function assistantStatus(env: Env, token: string) {
-	await requireSession(env, token, { ignoreMaintenance: true });
+	await requireSession(env, token, { ignoreMaintenance: true, allowBot: true });
 	return { success: true, enabled: (await getSys(env, "sys_assistant_enabled")) === 1, kbVersion: ASSISTANT_KB_VERSION };
 }
 
 export async function assistantAsk(env: Env, token: string, message: unknown, history: unknown) {
-	const s = await requireSession(env, token, { ignoreMaintenance: true });
+	const s = await requireSession(env, token, { ignoreMaintenance: true, allowBot: true });
 	if ((await getSys(env, "sys_assistant_enabled")) !== 1) throw new Error("Asisten KD sedang dimatikan admin.");
 	const q = String(message ?? "").trim();
 	if (!q) throw new Error("Pertanyaan kosong.");
@@ -73,7 +73,9 @@ export async function assistantAsk(env: Env, token: string, message: unknown, hi
 
 	const menus = parseMenus(s.profile.menus);
 	const allowed =
-		s.profile.role === "ADMIN" || menus === null
+		s.profile.role === "BOT"
+			? "menu Bot News (Dashboard, Sumber Berita, Riwayat Posting, Template FB, Setting)"
+			: s.profile.role === "ADMIN" || menus === null
 			? "SEMUA menu sesuai role"
 			: menus.map((k) => MENU_ITEMS.find((m) => m.key === k)?.label ?? k).join(", ") || "(hanya Dashboard)";
 	const ctx = `KONTEKS PENANYA: role=${s.profile.role}; menu yang diizinkan=${allowed}.`;
@@ -81,24 +83,40 @@ export async function assistantAsk(env: Env, token: string, message: unknown, hi
 	const system = `${SYSTEM_RULES}\n\n${ctx}\n\nPENGETAHUAN PANEL (versi ${ASSISTANT_KB_VERSION}):\n${selectKnowledge(q, hist.map((h) => h.content))}`;
 
 	let answer = "";
+	let via = "";
+	let ms = 0;
 	try {
 		const cfg = await botCfg(env);
-		const { value } = await aiGenerate(
-			env,
-			cfg,
-			{
-				purpose: "assistant",
-				temperature: 0.2,
-				maxTokens: await getSys(env, "sys_assistant_max_tokens"),
-				messages: [{ role: "system", content: system }, ...hist, { role: "user", content: q }],
-			},
-			(t) => {
-				const v = t.trim();
-				if (!v) throw new Error("jawaban kosong");
-				return v;
-			},
-		);
-		answer = value;
+		const providers = await aiUsableProviders(env, cfg);
+		if (!providers.length) throw new AiUnavailableError("tidak ada provider");
+		const pref = await prefSetting(env);
+		// Urutan khusus asisten: pilihan admin -> Groq (cepat) -> urutan prioritas biasa.
+		const rank = (p: AiProvider) => (pref && p.id === pref ? 0 : /groq/i.test(p.base_url + p.name) ? 1 : 2);
+		const ordered = providers.map((p, i) => ({ p, i })).sort((x, y) => rank(x.p) - rank(y.p) || x.i - y.i).map((x) => x.p);
+		const errs: string[] = [];
+		for (const p of ordered) {
+			const model = modelChain(p).find((m) => !aiCooldown(cfg, { ...p, model: m }));
+			if (!model) continue;
+			try {
+				const call = await aiChatProvider(env, cfg, { ...p, model }, {
+					purpose: "assistant",
+					temperature: 0.2,
+					maxTokens: await getSys(env, "sys_assistant_max_tokens"),
+					messages: [{ role: "system", content: system }, ...hist, { role: "user", content: q }],
+					// jangan menunggu lama: lebih baik pindah ke provider berikutnya
+					firstByteMs: 20_000,
+					idleMs: 12_000,
+					totalMs: 40_000,
+				});
+				answer = call.text.trim();
+				via = `${call.providerName} · ${call.model}`;
+				ms = call.ms;
+				break;
+			} catch (e) {
+				errs.push(`${p.name}: ${e instanceof Error ? e.message : String(e)}`);
+			}
+		}
+		if (!answer) throw new Error(errs.join(" | ") || "tidak ada jawaban");
 	} catch (e) {
 		if (e instanceof AiUnavailableError) {
 			throw new Error("Asisten belum aktif: belum ada AI Provider yang bisa dipakai. Minta admin mengaktifkannya di Bot → Setting → AI Provider.");
@@ -106,5 +124,36 @@ export async function assistantAsk(env: Env, token: string, message: unknown, hi
 		throw new Error("Asisten sedang sibuk atau AI Provider bermasalah. Coba lagi sebentar.");
 	}
 	await logActivity(env, s.username, "ASISTEN KD", `Tanya asisten (${q.length} karakter)`, "BERHASIL", "").catch(() => {});
-	return { success: true, answer, kbVersion: ASSISTANT_KB_VERSION, at: tsNow() };
+	return { success: true, answer, via, ms, kbVersion: ASSISTANT_KB_VERSION, at: tsNow() };
+}
+
+// --- Pengaturan admin: provider mana yang dipakai asisten --------------------
+const PREF_KEY = "assistant_provider";
+async function prefSetting(env: Env): Promise<string> {
+	const r = await env.DB.prepare(`SELECT value FROM settings WHERE key = ?`).bind(PREF_KEY).first<{ value: string }>();
+	return String(r?.value ?? "").trim();
+}
+
+export async function assistantGetConfig(env: Env, token: string) {
+	await requireSession(env, token, { admin: true });
+	const cfg = await botCfg(env);
+	const list = await aiLoadProviders(env, cfg).catch(() => [] as AiProvider[]);
+	return {
+		success: true,
+		provider: await prefSetting(env),
+		providers: list.map((p) => ({ id: p.id, name: p.name, model: modelChain(p)[0] || p.model, enabled: p.enabled, groq: /groq/i.test(p.base_url + p.name) })),
+		kbVersion: ASSISTANT_KB_VERSION,
+	};
+}
+
+export async function assistantSaveConfig(env: Env, token: string, provider: unknown) {
+	const s = await requireSession(env, token, { admin: true });
+	const id = String(provider ?? "").trim().slice(0, 64);
+	if (id) {
+		const list = await aiLoadProviders(env, await botCfg(env));
+		if (!list.some((p) => p.id === id)) throw new Error("Provider tidak ditemukan.");
+	}
+	await env.DB.prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).bind(PREF_KEY, id).run();
+	await logActivity(env, s.username, "ASISTEN KD", id ? "Provider asisten dipilih" : "Provider asisten: otomatis (Groq dulu)", "BERHASIL", "");
+	return { ...(await assistantGetConfig(env, token)), message: "Tersimpan." };
 }

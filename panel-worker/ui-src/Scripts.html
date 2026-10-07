@@ -2667,6 +2667,26 @@
 
     /* Menu admin: tampilkan satu panel per waktu (tidak numpuk scroll). */
     const ADMIN_PANELS = ['users','sites','sesi','autopost','lapops','maintenance'];
+    // ---------- Admin: provider AI untuk Asisten KD ----------
+    function asstCfgLoad() {
+      const st = document.getElementById('asstCfgStatus'), sel = document.getElementById('asstProvider');
+      if (!sel) return;
+      google.script.run.withSuccessHandler(r => {
+        if (!r || !r.success) { if (st) st.textContent = 'Gagal memuat: ' + ((r && r.message) || '-'); return; }
+        sel.innerHTML = '<option value="">Otomatis (Groq dulu)</option>' + (r.providers || []).map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)} · ${escapeHtml(p.model || '')}${p.enabled ? '' : ' (nonaktif)'}${p.groq ? ' ⚡' : ''}</option>`).join('');
+        sel.value = r.provider || '';
+        if (st) st.textContent = (r.providers || []).length ? ((r.providers || []).length + ' provider tersedia · pengetahuan asisten v' + (r.kbVersion || '-')) : 'Belum ada AI Provider — tambahkan di BOT → Setting → AI Provider.';
+      }).withFailureHandler(e => { if (st) st.textContent = 'Gagal memuat: ' + ((e && e.message) || e); }).assistantGetConfig(currentSessionToken);
+    }
+    function asstCfgSave() {
+      const sel = document.getElementById('asstProvider'), st = document.getElementById('asstCfgStatus'), btn = document.getElementById('asstCfgBtn');
+      if (!sel) return; if (btn) btn.disabled = true;
+      google.script.run.withSuccessHandler(r => {
+        if (btn) btn.disabled = false;
+        if (!r || !r.success) { toast((r && r.message) || 'Gagal menyimpan'); return; }
+        if (st) st.textContent = 'Tersimpan'; toast('Provider asisten tersimpan');
+      }).withFailureHandler(e => { if (btn) btn.disabled = false; toast('Gagal menyimpan: ' + ((e && e.message) || e)); }).assistantSaveConfig(currentSessionToken, sel.value);
+    }
     // ---------- Admin: pengaturan sistem (angka dengan batas aman) ----------
     let sysItems = [];
     function sysRender() {
@@ -2766,7 +2786,7 @@
       } else if (key === 'autopost') {
         loadAutoPostStatus();
       } else if (key === 'lapops') {
-        lapOpsLoad(); sysLoad();
+        lapOpsLoad(); sysLoad(); asstCfgLoad();
       } else if (key === 'maintenance') {
         loadMaintenanceState();
       }
