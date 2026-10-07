@@ -39,6 +39,21 @@ describe("umpan RSS artikel situs sendiri (untuk RSS-ke-Facebook)", () => {
 		expect(xml).toContain("<pubDate>Wed, 07 Oct 2026 02:30:00 GMT</pubDate>"); // 09:30 WIB = 02:30 UTC
 	});
 
+	it("<description> berisi caption Facebook lengkap: judul, ringkasan, tautan, promosi web berita, hashtag (seperti Template FB)", async () => {
+		add(7, { title: "Final Padel Putri", site: "2026-10-07 09:30:00", excerpt: "Ringkasan pertandingan final.", cat: "olahraga" });
+		const env = fakeEnv().env;
+		await loadIntegrations(env);
+		const xml = await publicNewsRssXml(env);
+		const desc = xml.match(/<description>(Final Padel Putri[^<]*)<\/description>/)?.[1] ?? "";
+		expect(desc).toContain("Ringkasan pertandingan final.");
+		expect(desc).toContain("🔗 Baca selengkapnya: https://");
+		expect(desc).toContain("/berita/artikel/?id=7");
+		expect(desc).toContain("📰 Kunjungi web berita kami:");
+		expect(desc).toContain("#Olahraga");          // hashtag kategori
+		expect(desc).toContain("#LapakStore88");      // hashtag tetap (Admin > Data Master)
+		expect(desc.indexOf("Final Padel Putri")).toBe(0); // judul di baris pertama
+	});
+
 	it("tanpa artikel -> tetap RSS valid (kosong), tidak error", async () => {
 		const env = fakeEnv().env;
 		await loadIntegrations(env);
