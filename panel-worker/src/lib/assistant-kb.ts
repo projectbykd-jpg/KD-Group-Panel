@@ -9,7 +9,7 @@
 // Jangan menulis rahasia (password, key, token) di sini.
 // ============================================================================
 
-export const ASSISTANT_KB_VERSION = "2026-10-07.7";
+export const ASSISTANT_KB_VERSION = "2026-10-07.8";
 
 /** Penjelasan per menu. Kunci = id navigasi (nav-<kunci>) di ui-src/Index.html. */
 export const KB_PAGES: Record<string, { title: string; text: string }> = {
@@ -59,7 +59,7 @@ export const KB_PAGES: Record<string, { title: string; text: string }> = {
 	},
 	"livechat-sessions": {
 		title: "Sesi Chat (Live Chat)",
-		text: "Auto-reply DayLiveChat. Bot membalas otomatis member yang spam/kasar HANYA di sesi yang Anda aktifkan; sesi lain tetap dibalas manual oleh CS. Daftar sesi muncul otomatis begitu userscript 'daylivechat-autobot' terpasang di Tampermonkey dan Anda login CS di daylivechat.com/cs/chat. Nyalakan switch 'BOT AKTIF' pada sesi member yang ingin dibalas otomatis. 'Sinkron terakhir' menunjukkan kapan userscript terakhir mengirim data. Cara pasang: pasang ekstensi Tampermonkey, buat script baru dari file userscript panel, isi URL Panel dan Kunci Bot (minta admin), simpan, nyalakan. Hanya ADMIN/OPERATOR.",
+		text: "Auto-reply DayLiveChat. Bot membalas otomatis member yang spam/kasar HANYA di sesi yang Anda aktifkan; sesi lain tetap dibalas manual oleh CS. Daftar sesi muncul otomatis begitu userscript 'daylivechat-autobot' terpasang di Tampermonkey dan Anda login CS di daylivechat.com/cs/chat. Nyalakan switch 'BOT AKTIF' pada sesi member yang ingin dibalas otomatis. 'Sinkron terakhir' menunjukkan kapan userscript terakhir mengirim data. Cara pasang: pasang ekstensi Tampermonkey, buat script baru dari file userscript panel, isi URL Panel dan Kunci Bot (minta admin), simpan, nyalakan. Alternatif tanpa Tampermonkey: 'Agent Live Chat' (folder panel-worker/livechat-agent, program Node.js yang dijalankan di komputer CS ber-IP yang diizinkan DayLiveChat dan menyala terus; email & password CS disimpan di file .env lokal, tidak dikirim ke panel; jangan dijalankan bersamaan dengan userscript). Bot tidak bisa jalan dari server karena login CS DayLiveChat dikunci ke IP tertentu. Hanya ADMIN/OPERATOR.",
 	},
 	"livechat-templates": {
 		title: "Template Balasan (Live Chat)",

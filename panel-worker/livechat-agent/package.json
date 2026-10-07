@@ -1,0 +1,10 @@
+{
+	"name": "livechat-agent",
+	"version": "1.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Agent Live Chat Auto-Reply tanpa browser (jalan di komputer ber-IP yang diizinkan DayLiveChat)",
+	"scripts": { "start": "node agent.mjs" },
+	"engines": { "node": ">=18" },
+	"dependencies": { "socket.io-client": "^4.8.1" }
+}
