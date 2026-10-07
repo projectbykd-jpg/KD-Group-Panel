@@ -18,7 +18,7 @@ function toInput(r: Record<string, unknown>): WdListedInput {
 export async function wdListedSync(env: Env, token: string, rows: unknown) {
 	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: "pga-pending" });
 	const list = Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
-	const added = await wdListedAdd(env, s.username, list.map(toInput));
+	const added = await wdListedAdd(env, s.username, list.map(toInput), s.profile.websites || []);
 	return { success: true, added };
 }
 

@@ -80,6 +80,7 @@ const ARG_MAP = {
 	adminGetSystemSettings: ["token"],
 	adminSaveSystemSettings: ["token", "values"],
 	assistantGetConfig: ["token"],
+	assistantClearGaps: ["token"],
 	assistantSaveConfig: ["token", "dedicated"],
 	assistantModels: ["token", "base_url", "key"],
 	assistantTest: ["token"],
@@ -265,10 +266,17 @@ mkdirSync(outDir, { recursive: true });
 // Aset gambar milik panel (logo, favicon) disimpan di ui-src/ (public/ di-ignore
 // karena hasil build) lalu disalin ke sini -- tidak lagi bergantung ke i.ibb.co.
 for (const f of ["logo.png", "favicon.png"]) copyFileSync(resolve(root, "ui-src", f), resolve(outDir, f));
-// Logo website (HUGO.png, FOLA.png, ...) & gambar role BOT (BOT.svg/BOT.png): nama KODE huruf besar + .png/.svg.
+// Logo website (HUGO.svg, FOLA.svg, ...) & emblem role BOT (BOT.svg): nama KODE huruf besar + .svg. File PNG asli tetap
+// disimpan di ui-src/ (tidak pernah hilang) tetapi TIDAK disalin ke produksi karena tidak dirujuk UI mana pun.
 for (const f of readdirSync(resolve(root, "ui-src"))) {
-	if (/^[A-Z]{2,8}\.(png|svg)$/.test(f)) copyFileSync(resolve(root, "ui-src", f), resolve(outDir, f));
+	if (/^[A-Z]{2,8}\.svg$/.test(f)) copyFileSync(resolve(root, "ui-src", f), resolve(outDir, f));
 }
+// Cache aset statis (dulu: validasi ulang tiap kunjungan). Logo/ikon jarang berubah -> 1 hari; skrip bot Live Chat selalu segar.
+writeFileSync(
+	resolve(outDir, "_headers"),
+	["/*.svg", "  Cache-Control: public, max-age=86400", "/logo.png", "  Cache-Control: public, max-age=86400", "/favicon.png", "  Cache-Control: public, max-age=86400", "/daylivechat-autobot.js", "  Cache-Control: no-cache", ""].join("\n"),
+	"utf8",
+);
 // Bot Live Chat untuk BOOKMARKLET (tanpa Tampermonkey, tanpa file di laptop): kode yang sama dengan userscript,
 // dilengkapi shim GM_getValue/GM_setValue berbasis localStorage & penjaga agar tidak dimuat dua kali.
 {

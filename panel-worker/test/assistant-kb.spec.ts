@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { adminSaveSystemSettings } from "../src/api/admin";
 import { assistantAsk, cleanHistory } from "../src/api/assistant";
 import { checkLogin } from "../src/api/auth";
-import { ASSISTANT_KB_VERSION, KB_ADMIN_TABS, KB_GENERAL, KB_PAGES, buildKnowledgeText, selectKnowledge } from "../src/lib/assistant-kb";
+import { ASSISTANT_KB_VERSION, KB_ADMIN_TABS, KB_ERRORS, KB_FAQ, KB_GENERAL, KB_GLOSSARY, KB_PAGES, buildKnowledgeText, selectKnowledge } from "../src/lib/assistant-kb";
 import { hashPassword } from "../src/lib/crypto";
 import { MENU_ITEMS } from "../src/lib/menus";
 import { SYS_SETTINGS, resetSysCache } from "../src/lib/settings";
@@ -100,5 +100,79 @@ describe("API asisten", () => {
 			expect(kb, q).toContain("SALIN KODE CONSOLE");
 			expect(kb, q).toContain("KUNCI BOT KAMU");
 		}
+	});
+});
+
+// --- GERBANG KELENGKAPAN: judul/label di layar yang belum dijelaskan menggagalkan CI ---
+const strip = (t: string) => t.replace(/<[^>]+>/g, " ").replace(/&[a-z#0-9]+;/gi, " ").replace(/\s+/g, " ").trim();
+// Judul sambutan/transien yang memang bukan fitur.
+const UI_IGNORE = new Set(["selamat datang di kd-group"]);
+describe("gerbang kelengkapan: setiap judul & kolom di layar dijelaskan", () => {
+	it("semua h2/h3/h4/summary/label/judul kartu di Index.html tercakup di pengetahuan asisten", () => {
+		const kb = buildKnowledgeText().toLowerCase();
+		const texts = new Set<string>();
+		for (const m of html.matchAll(/<(h[1-4]|label|summary)\b[^>]*>([\s\S]*?)<\/\1>/g)) texts.add(strip(m[2]));
+		for (const m of html.matchAll(/class="panel-section-title"[^>]*>([\s\S]*?)<\/div>/g)) texts.add(strip(m[1]));
+		const covered = (raw: string) => {
+			const t = raw.toLowerCase().replace(/\(.*?\)/g, "").trim();
+			if (t.length < 4 || UI_IGNORE.has(t) || t.length > 70) return true;
+			if (kb.includes(t)) return true;
+			const ws = t.split(/[^a-z0-9]+/).filter((w) => w.length >= 4);
+			return ws.length === 0 || ws.every((w) => kb.includes(w));
+		};
+		const missing = [...texts].filter((t) => !covered(t));
+		expect(missing, `Jelaskan di src/lib/assistant-kb.ts (KB_PAGES / KB_GLOSSARY / KB_FAQ): ${missing.join(" | ")}`).toEqual([]);
+	});
+
+	it("entri KB_ERRORS memang masih ada di kode (tidak usang); kecuali pesan dari scraper", () => {
+		const src = ["src/api", "src/lib", "src/senders"].flatMap((d) => (require("node:fs") as typeof import("node:fs")).readdirSync(d).filter((f: string) => f.endsWith(".ts")).map((f: string) => readFileSync(`${d}/${f}`, "utf8"))).join("\n").toLowerCase();
+		const FROM_SCRAPER = new Set(["job dihentikan sebelum selesai", "melebihi batas waktu", "cookie admin kedaluwarsa", "session expired", "http 403 forbidden", "terlalu besar"]);
+		const stale = KB_ERRORS.filter((e) => !FROM_SCRAPER.has(e.m) && !src.includes(e.m)).map((e) => e.m);
+		expect(stale, `Pesan galat ini tidak ada lagi di kode: ${stale.join(" | ")}`).toEqual([]);
+	});
+
+	it("tiap entri FAQ/galat/glosarium berisi jawaban bermakna dan id unik", () => {
+		expect(new Set(KB_FAQ.map((f) => f.id)).size).toBe(KB_FAQ.length);
+		for (const f of KB_FAQ) {
+			expect(f.k.length, f.id).toBeGreaterThan(8);
+			expect(f.a.length, f.id).toBeGreaterThan(60);
+			expect(f.a.length, `${f.id} terlalu panjang (boros token)`).toBeLessThan(900);
+		}
+		for (const e of KB_ERRORS) expect(e.a.length, e.m).toBeGreaterThan(20);
+		for (const [l, a] of Object.entries(KB_GLOSSARY)) expect(a.length, l).toBeGreaterThan(25);
+	});
+});
+
+describe("keluhan umum dijawab dari panduan", () => {
+	const cases: [string, string][] = [
+		["saya lupa password gimana", "Admin › Users"],
+		["akun saya terkunci terus", "ikon kunci"],
+		["kok menu live chat tidak muncul di akun saya", "akses menu"],
+		["panel lemot banget dan layar gelap", "Ctrl+F5"],
+		["status salah terus waktu tempel hasil", "Prize 1/2/3"],
+		["kirim telegram gagal kenapa", "token/chat ID"],
+		["ini sudah dikirim tapi saya mau kirim lagi", "SUDAH DIKIRIM"],
+		["phpsessid habis di auto prediksi", "PHPSESSID"],
+		["prediksi otomatis tidak terkirim", "Telegram PREDIKSI"],
+		["scan invest 0 data session expired", "Cek koneksi/session"],
+		["tarik data lap admin lama sekali cookie kedaluwarsa", "GitHub Actions"],
+		["total deposit tidak sesuai dengan blazz", "operator khusus"],
+		["pga pending tidak update", "tab Motion TETAP TERBUKA"],
+		["bot livechat tidak membalas padahal aktif", "template balasan AKTIF"],
+		["tombol robot tidak muncul di daylivechat", "SALIN KODE CONSOLE"],
+		["kunci userscript tidak valid", "KUNCI BOT KAMU"],
+		["asisten sibuk api key bermasalah", "TES KONEKSI"],
+		["gimana cara tambah user baru", "TAMBAH USER"],
+		["blogger belum terhubung", "In production"],
+		["Pengecekan anti-duplikat (database) tidak tersedia", "SENGAJA ditahan"],
+	];
+	for (const [q, must] of cases) {
+		it(`"${q}" -> memuat "${must}"`, () => {
+			expect(selectKnowledge(q)).toContain(must);
+		});
+	}
+	it("kolom yang sebelumnya tak terjelaskan dikenali lewat labelnya", () => {
+		expect(selectKnowledge("apa itu Paragraf minimal dan Paragraf maksimal")).toContain("12–18 paragraf");
+		expect(selectKnowledge("fungsi Catatan Admin di user")).toContain("Tidak tampil ke pengguna");
 	});
 });

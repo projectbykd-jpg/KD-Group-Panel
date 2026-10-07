@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: import("node:sqlite").DatabaseSync } }));
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
-import { assistantAsk, assistantGetConfig, assistantModels, assistantSaveConfig, assistantTest } from "../src/api/assistant";
+import { assistantAsk, assistantClearGaps, assistantGetConfig, assistantModels, assistantSaveConfig, assistantTest } from "../src/api/assistant";
 import { checkLogin } from "../src/api/auth";
 import { botAiSave } from "../src/api/bot";
 import { aiResetCooldowns } from "../src/lib/ai-provider";
@@ -147,6 +147,42 @@ describe("API key KHUSUS Asisten KD (terpisah dari provider bot)", () => {
 		expect(bodies[0].reasoning_effort).toBe("low");
 	});
 
+	it("key tersimpan tidak pernah dipakai untuk alamat (host) lain: ganti Base URL wajib key baru", async () => {
+		const boss = await tok("Boss", "pw-boss");
+		await assistantSaveConfig(ctx.env, boss, { base_url: "https://api.groq.com/openai/v1", key: KEY, model: "openai/gpt-oss-20b" });
+		await expect(assistantSaveConfig(ctx.env, boss, { base_url: "https://penyerang.test/v1" })).rejects.toThrow(/key BARU/);
+		await expect(assistantModels(ctx.env, boss, "https://penyerang.test/v1", "")).rejects.toThrow(/key BARU/);
+		sent.length = 0;
+		// host sama (hanya path berbeda) tetap boleh memakai key tersimpan
+		await expect(assistantSaveConfig(ctx.env, boss, { base_url: "https://api.groq.com/openai/v1/", model: "qwen/qwen3.8-27b" })).resolves.toMatchObject({ success: true });
+		expect(sent.some((x) => x.url.includes("penyerang.test"))).toBe(false);
+	});
+
+	it("pertanyaan yang tidak bisa dijawab dicatat untuk admin (penanda disembunyikan, rahasia disamarkan, bisa dibersihkan)", async () => {
+		const boss = await tok("Boss", "pw-boss");
+		await assistantSaveConfig(ctx.env, boss, { base_url: "https://api.groq.com/openai/v1", key: KEY, model: "openai/gpt-oss-20b" });
+		const opr = await tok("Opr", "pw-opr");
+		vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ model: "m", choices: [{ message: { content: "Itu belum ada di panduan; hubungi admin.\n[[TIDAK_TAHU]]" } }] }), { status: 200, headers: { "content-type": "application/json" } }));
+		const r = (await assistantAsk(ctx.env, opr, "kenapa fitur xyz error? password: rahasia123 token=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", [])) as { answer: string };
+		expect(r.answer).toBe("Itu belum ada di panduan; hubungi admin.");
+		expect(r.answer).not.toContain("TIDAK_TAHU");
+		await assistantAsk(ctx.env, opr, "Kenapa fitur xyz error?? password: lain", []); // pertanyaan serupa -> dihitung bertambah
+		const cfg = (await assistantGetConfig(ctx.env, boss)) as { gaps: { q: string; n: number; role: string }[] };
+		expect(cfg.gaps.length).toBeGreaterThanOrEqual(1);
+		const all = JSON.stringify(cfg.gaps);
+		expect(all).not.toContain("rahasia123");
+		expect(all).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
+		expect(cfg.gaps[0].role).toBe("OPERATOR");
+		await expect(assistantGetConfig(ctx.env, opr)).rejects.toThrow(); // hanya admin
+		await expect(assistantClearGaps(ctx.env, opr)).rejects.toThrow();
+		await assistantClearGaps(ctx.env, boss);
+		expect(((await assistantGetConfig(ctx.env, boss)) as { gaps: unknown[] }).gaps).toEqual([]);
+		// jawaban normal tanpa penanda tidak mencatat apa pun
+		vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ model: "m", choices: [{ message: { content: "Jawaban lengkap." } }] }), { status: 200, headers: { "content-type": "application/json" } }));
+		await assistantAsk(ctx.env, opr, "cara kirim result", []);
+		expect(((await assistantGetConfig(ctx.env, boss)) as { gaps: unknown[] }).gaps).toEqual([]);
+	});
+
 	it("model berpikir di Groq dijawab cepat: reasoning_effort dikirim (gpt-oss=low, qwen=none)", async () => {
 		const boss = await tok("Boss", "pw-boss");
 		await assistantSaveConfig(ctx.env, boss, { base_url: "https://api.groq.com/openai/v1", key: KEY, model: "openai/gpt-oss-20b" });
@@ -155,7 +191,7 @@ describe("API key KHUSUS Asisten KD (terpisah dari provider bot)", () => {
 		await assistantSaveConfig(ctx.env, boss, { model: "qwen/qwen3.8-27b" });
 		await assistantAsk(ctx.env, await tok("Opr", "pw-opr"), "halo lagi", []);
 		expect(sent.at(-1)!.body.reasoning_effort).toBe("none");
-		await assistantSaveConfig(ctx.env, boss, { base_url: "https://other.test/v1", model: "openai/gpt-oss-20b" });
+		await assistantSaveConfig(ctx.env, boss, { base_url: "https://other.test/v1", key: "key-baru-untuk-host-baru-123", model: "openai/gpt-oss-20b" });
 		await assistantAsk(ctx.env, await tok("Opr", "pw-opr"), "halo 3", []);
 		expect(sent.at(-1)!.body.reasoning_effort).toBeUndefined(); // hanya untuk Groq
 	});

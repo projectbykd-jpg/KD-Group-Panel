@@ -1,7 +1,8 @@
 // KD-Group Panel — Cloudflare Worker (port dari Apps Script).
 // Semua panggilan frontend lama google.script.run.<fn>(...) dipetakan ke
 // POST /api  body: { "action": "<fn>", ...args }
-import { assistantAsk, assistantGetConfig, assistantModels, assistantSaveConfig, assistantStatus, assistantTest } from "./api/assistant";
+import { installFetchGuard } from "./lib/fetch-guard";
+import { assistantAsk, assistantClearGaps, assistantGetConfig, assistantModels, assistantSaveConfig, assistantStatus, assistantTest } from "./api/assistant";
 import { CORS_HEADERS, json } from "./lib/respond";
 import { loadSession, migrateKvSessionsOnce, pruneExpiredSessions } from "./lib/session";
 import { getTurso } from "./lib/turso";
@@ -248,6 +249,7 @@ const ROUTES: Record<string, Handler> = {
 	lapGetConfig: (env, b) => lapGetConfig(env, s(b.token)),
 	lapSaveConfig: (env, b) => lapSaveConfig(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
 	assistantGetConfig: (env, b) => assistantGetConfig(env, s(b.token)),
+	assistantClearGaps: (env, b) => assistantClearGaps(env, s(b.token)),
 	assistantSaveConfig: (env, b) => assistantSaveConfig(env, s(b.token), b.dedicated),
 	assistantModels: (env, b) => assistantModels(env, s(b.token), b.base_url, b.key),
 	assistantTest: (env, b) => assistantTest(env, s(b.token)),
@@ -335,6 +337,8 @@ const ROUTES: Record<string, Handler> = {
 // langsung bergerak begitu user klik MULAI/LANJUTKAN dan terus maju selama user
 // membuka halaman (polling investGetStatus), tanpa menunggu cron eksternal.
 const INVEST_PUMP_ACTIONS = new Set(["investStartScan", "investContinueScan", "investGetStatus"]);
+
+installFetchGuard();
 
 export default {
 	async fetch(request, env, ctx): Promise<Response> {
@@ -440,18 +444,35 @@ export default {
 		if (url.pathname === "/public/news") {
 			try {
 				const category = url.searchParams.get("category") || "";
+				const idParam = url.searchParams.get("id");
+				// Daftar/banner/acak/populer di-cache di tepi 60 dtk (dulu tiap kunjungan anonim memindai tabel artikel di Turso:
+				// ORDER BY RANDOM(), COUNT, dst). Detail (?id=) TIDAK di-cache karena menambah counter views.
+				const cacheable = !idParam && request.method === "GET";
+				const cache = (globalThis as unknown as { caches?: { default: Cache } }).caches?.default;
+				const cacheKey = new Request(url.toString(), { method: "GET" });
+				if (cacheable && cache) {
+					const hit = await cache.match(cacheKey);
+					if (hit) return hit;
+				}
+				const reply = (data: unknown, status = 200): Response => {
+					const res = json(data, status);
+					if (cacheable && cache && status === 200) {
+						res.headers.set("cache-control", "public, max-age=60");
+						ctx.waitUntil(cache.put(cacheKey, res.clone()));
+					}
+					return res;
+				};
 				if (url.searchParams.get("banner")) {
-					return json(await publicNewsBanner(env), 200);
+					return reply(await publicNewsBanner(env));
 				}
 				if (url.searchParams.get("random")) {
 					const limit = parseInt(url.searchParams.get("limit") || "6", 10);
-					return json(await publicNewsRandom(env, category, limit), 200);
+					return reply(await publicNewsRandom(env, category, limit));
 				}
 				if (url.searchParams.get("popular")) {
 					const limit = parseInt(url.searchParams.get("limit") || "5", 10);
-					return json(await publicNewsPopular(env, category, limit), 200);
+					return reply(await publicNewsPopular(env, category, limit));
 				}
-				const idParam = url.searchParams.get("id");
 				if (idParam) {
 					const id = Number(idParam);
 					if (!Number.isInteger(id) || id <= 0) return json({ success: false, message: "id tidak valid" }, 400);
@@ -460,8 +481,7 @@ export default {
 				}
 				const page = parseInt(url.searchParams.get("page") || "1", 10);
 				const pageSize = parseInt(url.searchParams.get("pageSize") || "20", 10);
-				const out = await publicNewsList(env, category, page, pageSize);
-				return json(out, 200);
+				return reply(await publicNewsList(env, category, page, pageSize));
 			} catch (e) {
 				return json({ success: false, message: e instanceof Error ? e.message : String(e) }, 500);
 			}

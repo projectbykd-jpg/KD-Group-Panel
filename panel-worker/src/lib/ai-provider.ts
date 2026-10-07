@@ -83,6 +83,24 @@ export function normalizeBaseUrl(raw: string): string {
 	return u;
 }
 
+/** Host dari Base URL (huruf kecil), atau '' bila tidak sah. */
+export function hostOf(raw: string): string {
+	try {
+		return new URL(normalizeBaseUrl(raw)).host.toLowerCase();
+	} catch {
+		return "";
+	}
+}
+
+/**
+ * Key tersimpan TIDAK boleh dikirim ke alamat yang berbeda dari yang tersimpan (akun berhak mengganti Base URL ke host
+ * miliknya, lalu server memanggil host itu dengan key lama -> key bocor). Ganti host = wajib key baru.
+ */
+export function assertKeyNotReused(savedBase: string | undefined, newBase: string, newKey: string): void {
+	if (!savedBase || newKey.trim()) return;
+	if (hostOf(savedBase) !== hostOf(newBase)) throw new Error("Base URL diganti ke alamat lain: isi API key BARU (key lama tidak dipakai untuk alamat baru demi keamanan).");
+}
+
 export async function aiKeyId(key: string): Promise<string> {
 	const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(key || "")));
 	return [...new Uint8Array(buf)].slice(0, 8).map((b) => b.toString(16).padStart(2, "0")).join("");
