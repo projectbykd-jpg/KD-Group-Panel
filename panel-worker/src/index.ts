@@ -1,7 +1,7 @@
 // KD-Group Panel — Cloudflare Worker (port dari Apps Script).
 // Semua panggilan frontend lama google.script.run.<fn>(...) dipetakan ke
 // POST /api  body: { "action": "<fn>", ...args }
-import { assistantAsk, assistantGetConfig, assistantSaveConfig, assistantStatus } from "./api/assistant";
+import { assistantAsk, assistantGetConfig, assistantSaveConfig, assistantStatus, assistantTest } from "./api/assistant";
 import { CORS_HEADERS, json } from "./lib/respond";
 import { loadSession, migrateKvSessionsOnce, pruneExpiredSessions } from "./lib/session";
 import { getTurso } from "./lib/turso";
@@ -246,7 +246,8 @@ const ROUTES: Record<string, Handler> = {
 	lapGetConfig: (env, b) => lapGetConfig(env, s(b.token)),
 	lapSaveConfig: (env, b) => lapSaveConfig(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
 	assistantGetConfig: (env, b) => assistantGetConfig(env, s(b.token)),
-	assistantSaveConfig: (env, b) => assistantSaveConfig(env, s(b.token), b.provider),
+	assistantSaveConfig: (env, b) => assistantSaveConfig(env, s(b.token), b.provider, b.dedicated),
+	assistantTest: (env, b) => assistantTest(env, s(b.token)),
 	assistantStatus: (env, b) => assistantStatus(env, s(b.token)),
 	assistantAsk: (env, b) => assistantAsk(env, s(b.token), b.message, b.history),
 	lapGetSpecialOps: (env, b) => lapGetSpecialOps(env, s(b.token)),

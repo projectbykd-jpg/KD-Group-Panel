@@ -2667,7 +2667,7 @@
 
     /* Menu admin: tampilkan satu panel per waktu (tidak numpuk scroll). */
     const ADMIN_PANELS = ['users','sites','sesi','autopost','lapops','maintenance'];
-    // ---------- Admin: provider AI untuk Asisten KD ----------
+    // ---------- Admin: API key KHUSUS Asisten KD + provider cadangan ----------
     function asstCfgLoad() {
       const st = document.getElementById('asstCfgStatus'), sel = document.getElementById('asstProvider');
       if (!sel) return;
@@ -2675,17 +2675,39 @@
         if (!r || !r.success) { if (st) st.textContent = 'Gagal memuat: ' + ((r && r.message) || '-'); return; }
         sel.innerHTML = '<option value="">Otomatis (Groq dulu)</option>' + (r.providers || []).map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)} · ${escapeHtml(p.model || '')}${p.enabled ? '' : ' (nonaktif)'}${p.groq ? ' ⚡' : ''}</option>`).join('');
         sel.value = r.provider || '';
-        if (st) st.textContent = (r.providers || []).length ? ((r.providers || []).length + ' provider tersedia · pengetahuan asisten v' + (r.kbVersion || '-')) : 'Belum ada AI Provider — tambahkan di BOT → Setting → AI Provider.';
+        const d = r.dedicated || {};
+        const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
+        set('asstBase', d.base_url); set('asstModel', d.model); set('asstKey', '');
+        const km = document.getElementById('asstKeyMask'); if (km) km.textContent = d.configured ? '(tersimpan: ' + d.key_mask + ')' : '';
+        if (st) st.textContent = d.configured ? 'Key khusus aktif · pengetahuan asisten v' + (r.kbVersion || '-') : 'Belum ada key khusus — asisten memakai provider cadangan.';
       }).withFailureHandler(e => { if (st) st.textContent = 'Gagal memuat: ' + ((e && e.message) || e); }).assistantGetConfig(currentSessionToken);
     }
-    function asstCfgSave() {
+    function asstCfgSave(clear) {
       const sel = document.getElementById('asstProvider'), st = document.getElementById('asstCfgStatus'), btn = document.getElementById('asstCfgBtn');
       if (!sel) return; if (btn) btn.disabled = true;
+      const v = id => (document.getElementById(id) || {}).value || '';
+      const dedicated = clear ? { clear: true } : { base_url: v('asstBase').trim(), model: v('asstModel').trim(), key: v('asstKey').trim() };
       google.script.run.withSuccessHandler(r => {
         if (btn) btn.disabled = false;
         if (!r || !r.success) { toast((r && r.message) || 'Gagal menyimpan'); return; }
-        if (st) st.textContent = 'Tersimpan'; toast('Provider asisten tersimpan');
-      }).withFailureHandler(e => { if (btn) btn.disabled = false; toast('Gagal menyimpan: ' + ((e && e.message) || e)); }).assistantSaveConfig(currentSessionToken, sel.value);
+        toast(clear ? 'Key khusus dihapus' : 'Pengaturan asisten tersimpan'); asstCfgLoad();
+      }).withFailureHandler(e => { if (btn) btn.disabled = false; toast('Gagal menyimpan: ' + ((e && e.message) || e)); }).assistantSaveConfig(currentSessionToken, sel.value, dedicated);
+    }
+    let asstClearArm = 0;
+    function asstCfgClear(ev) {
+      // dua klik (tanpa popup): klik pertama meminta konfirmasi di tombolnya sendiri
+      const b = ev && ev.currentTarget;
+      if (Date.now() - asstClearArm < 3500) { asstClearArm = 0; if (b) b.innerHTML = '<i class="fa-solid fa-trash mr-2"></i>HAPUS KEY'; asstCfgSave(true); return; }
+      asstClearArm = Date.now(); if (b) b.innerHTML = 'YAKIN? KLIK LAGI';
+      setTimeout(() => { if (b && asstClearArm && Date.now() - asstClearArm >= 3400) { asstClearArm = 0; b.innerHTML = '<i class="fa-solid fa-trash mr-2"></i>HAPUS KEY'; } }, 3600);
+    }
+    function asstCfgTest() {
+      const st = document.getElementById('asstCfgStatus'), btn = document.getElementById('asstTestBtn');
+      if (btn) btn.disabled = true; if (st) st.textContent = 'Mengetes…';
+      google.script.run.withSuccessHandler(r => {
+        if (btn) btn.disabled = false;
+        if (st) st.textContent = (r && r.success) ? ('✓ Tersambung · ' + (r.model || '') + ' · ' + ((r.ms || 0) / 1000).toFixed(1) + ' dtk') : ((r && r.message) || 'Gagal');
+      }).withFailureHandler(e => { if (btn) btn.disabled = false; if (st) st.textContent = 'Gagal: ' + ((e && e.message) || e); }).assistantTest(currentSessionToken);
     }
     // ---------- Admin: pengaturan sistem (angka dengan batas aman) ----------
     let sysItems = [];

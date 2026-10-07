@@ -1172,3 +1172,10 @@ body { position: relative; }
 }
 @media (prefers-reduced-motion: reduce) { #kd-assistant * { animation: none !important; transition: none !important; } }
 .kda-meta { margin-top: 6px; font-size: 10.5px; color: var(--ui-text-3); }
+
+/* Kartu key khusus Asisten KD */
+.asst-key-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.asst-key-wide { grid-column: 1 / -1; }
+.sys-field-col { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--ui-text-2); }
+.sys-field-col input { height: 38px; }
+@media (max-width: 640px) { .asst-key-grid { grid-template-columns: 1fr; } }
