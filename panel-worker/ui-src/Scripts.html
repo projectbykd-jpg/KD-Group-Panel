@@ -6149,7 +6149,8 @@ Tindakan ini tidak dapat dibatalkan.`,
       groq: { name: 'Groq', base: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile', days: '' },
       gemini: { name: 'Gemini', base: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-flash-latest', days: '' },
       openrouter: { name: 'OpenRouter', base: 'https://openrouter.ai/api/v1', model: '', days: '' },
-      deepseek: { name: 'DeepSeek', base: 'https://api.deepseek.com/v1', model: 'deepseek-chat', days: '' }
+      deepseek: { name: 'DeepSeek', base: 'https://api.deepseek.com/v1', model: 'deepseek-chat', days: '' },
+      modelark: { name: 'ModelArk', base: 'https://ark.ap-southeast.bytepluses.com/api/v3', model: '', days: '' }
     };
     const hostOf = u => { try { return new URL(u).host; } catch (e) { return u || '-'; } };
     const shortDate = d => { if (!d) return ''; const p = String(d).slice(0, 10).split('-'); const m = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'][Number(p[1]) - 1] || ''; return Number(p[2]) + ' ' + m + ' ' + p[0]; };
