@@ -1803,6 +1803,35 @@ export async function botNewsRun(
 	};
 }
 
+
+/** Hitungan harian per jalur (Blogger / Situs Sendiri / Template FB) untuk 7 hari terakhir (WIB), tanggal terlama dulu. */
+async function newsDaily7(env: Env): Promise<{ date: string; blogger: number; site: number; fb: number }[]> {
+	const days: string[] = [];
+	const base = new Date(todayKey() + "T00:00:00Z").getTime();
+	for (let i = 6; i >= 0; i--) days.push(new Date(base - i * 86400_000).toISOString().slice(0, 10));
+	const from = days[0];
+	const q = async (sql: string) =>
+		((await getTurso(env).prepare(sql).bind(from).all<{ d: string; c: number }>()).results ?? []);
+	const [b, st, fb] = await Promise.all([
+		q(`SELECT substr(posted_at,1,10) AS d, COUNT(*) AS c FROM news_article WHERE status='posted' AND substr(posted_at,1,10) >= ? GROUP BY d`),
+		q(`SELECT substr(site_posted_at,1,10) AS d, COUNT(*) AS c FROM news_article WHERE site_posted_at != '' AND substr(site_posted_at,1,10) >= ? GROUP BY d`),
+		q(`SELECT substr(fb_direct_posted_at,1,10) AS d, COUNT(*) AS c FROM news_article WHERE fb_direct_posted_at NOT IN ('', 'error') AND substr(fb_direct_posted_at,1,10) >= ? GROUP BY d`),
+	]);
+	const m = (rows: { d: string; c: number }[]) => new Map(rows.map((r) => [String(r.d), Number(r.c)]));
+	const mb = m(b), ms = m(st), mf = m(fb);
+	return days.map((date) => ({ date, blogger: mb.get(date) ?? 0, site: ms.get(date) ?? 0, fb: mf.get(date) ?? 0 }));
+}
+async function siteCounts(env: Env): Promise<{ today: number; total: number }> {
+	const r = await getTurso(env)
+		.prepare(
+			`SELECT COUNT(*) AS total, SUM(CASE WHEN substr(site_posted_at,1,10) = ? THEN 1 ELSE 0 END) AS today
+			 FROM news_article WHERE site_posted_at != ''`,
+		)
+		.bind(todayKey())
+		.first<{ total: number; today: number }>();
+	return { today: Number(r?.today ?? 0), total: Number(r?.total ?? 0) };
+}
+
 // ---------------------------------------------------------------------------
 // Untuk panel (API)
 // ---------------------------------------------------------------------------
@@ -1846,6 +1875,11 @@ export async function botNewsSnapshot(env: Env) {
 			.all()).results ?? [];
 	const byStatus: Record<string, number> = {};
 	for (const r of counts) byStatus[String(r.status)] = Number(r.c);
+	const [site, daily7, fbTotal] = await Promise.all([
+		siteCounts(env),
+		newsDaily7(env),
+		getTurso(env).prepare(`SELECT COUNT(*) AS c FROM news_article WHERE fb_direct_posted_at NOT IN ('', 'error')`).first<{ c: number }>().then((r) => Number(r?.c ?? 0)),
+	]);
 	return {
 		success: true,
 		config: {
@@ -1875,6 +1909,7 @@ export async function botNewsSnapshot(env: Env) {
 			blogger_redirect_uri: bloggerRedirectUri(cfg),
 			blog_id: cfg.blogger_blog_id || "",
 			blogger_site_url: cfg.blogger_site_url || "",
+			site_url: newsSiteUrl(), // alamat web berita sendiri (Admin > Integrasi) -- dipakai tautan riwayat di UI
 			fb_enabled: String(cfg.fb_enabled || "0") === "1",
 			fb_page_id: cfg.fb_page_id || "",
 			has_facebook: !!(cfg.fb_page_id && cfg.fb_page_token),
@@ -1888,7 +1923,11 @@ export async function botNewsSnapshot(env: Env) {
 			news_banner_text: cfg.news_banner_text || "",
 		},
 		postedToday: await postedToday(env),
+		siteToday: site.today,
+		siteTotal: site.total,
+		fbTotal: fbTotal,
 		fbDirectPostedToday: await fbDirectPostedToday(env),
+		daily7,
 		fbDirectQueue: Number(
 			(await getTurso(env).prepare(`SELECT COUNT(*) AS c FROM news_article WHERE fb_direct_posted_at = ''`).first<{ c: number }>())?.c ?? 0,
 		),
