@@ -629,8 +629,8 @@ async function dispatchScrapeJob(
 	if (resp.status !== 204) {
 		const body = await resp.text();
 		let hint = "";
-		if (resp.status === 404) hint = " — workflow scrape.yml belum ada. Push repo daygroup-scraper dulu.";
-		else if (resp.status === 403) hint = " — token GitHub kurang izin (butuh Actions: Read and write) atau belum akses repo daygroup-scraper.";
+		if (resp.status === 404) hint = " — workflow scrape.yml belum ada. Cek repo KD-scraper (nama repo di GH_REPO).";
+		else if (resp.status === 403) hint = " — token GitHub kurang izin (butuh Actions: Read and write) atau belum diberi akses ke repo KD-scraper.";
 		else if (resp.status === 422) hint = " — branch 'main' belum ada di repo (repo masih kosong).";
 		let detail = "";
 		try {
