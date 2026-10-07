@@ -2104,6 +2104,33 @@ export async function publicNewsRandom(env: Env, category: string, limit: number
 	return { success: true, articles: rows };
 }
 
+const xmlEsc = (s: string) => String(s ?? "").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const imgMime = (u: string) => (/\.png(\?|$)/i.test(u) ? "image/png" : /\.webp(\?|$)/i.test(u) ? "image/webp" : /\.gif(\?|$)/i.test(u) ? "image/gif" : "image/jpeg");
+
+/** Umpan RSS 2.0 artikel situs sendiri (30 terbaru). Untuk layanan RSS-ke-Facebook (dlvr.it, IFTTT, Publer, Make, Zapier, dst)
+ * yang memposting ke Fanspage memakai aplikasi Meta mereka sendiri -- jadi admin tidak perlu membuat app/token Meta. */
+export async function publicNewsRssXml(env: Env): Promise<string> {
+	await ensureNewsCategoryColumns(env);
+	const rows =
+		(
+			await getTurso(env)
+				.prepare(`SELECT id, title, excerpt, image_url, category, site_posted_at FROM news_article WHERE site_posted_at != '' ORDER BY site_posted_at DESC, id DESC LIMIT 30`)
+				.all<{ id: number; title: string; excerpt: string; image_url: string; category: string; site_posted_at: string }>()
+		).results ?? [];
+	const base = newsSiteUrl();
+	const items = rows
+		.map((r) => {
+			const link = `${base}/berita/artikel/?id=${r.id}`;
+			const t = new Date(String(r.site_posted_at || "").replace(" ", "T") + "+07:00"); // waktu simpan = WIB
+			const pub = Number.isNaN(t.getTime()) ? "" : `<pubDate>${t.toUTCString()}</pubDate>`;
+			const img = r.image_url && /^https?:\/\//i.test(r.image_url) ? `<enclosure url="${xmlEsc(r.image_url)}" type="${imgMime(r.image_url)}" length="0"/>` : "";
+			const cat = r.category ? `<category>${xmlEsc(r.category)}</category>` : "";
+			return `<item><title>${xmlEsc(r.title)}</title><link>${xmlEsc(link)}</link><guid isPermaLink="true">${xmlEsc(link)}</guid>${pub}<description>${xmlEsc(r.excerpt || r.title)}</description>${cat}${img}</item>`;
+		})
+		.join("");
+	return `<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0"><channel><title>Berita Terkini</title><link>${xmlEsc(base)}</link><description>Berita terbaru</description><language>id</language>${items}</channel></rss>`;
+}
+
 /** Sitemap XML utk artikel "Berita Terkini" LapakStore88 -- dipakai Google supaya
  * bisa menemukan & meng-crawl semua artikel yang tayang di situs sendiri (tanpa
  * ini, Google cuma bisa nemu artikel lewat link internal satu-satu / backlink,
