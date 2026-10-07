@@ -9,7 +9,7 @@
 // Jangan menulis rahasia (password, key, token) di sini.
 // ============================================================================
 
-export const ASSISTANT_KB_VERSION = "2026-10-07.2";
+export const ASSISTANT_KB_VERSION = "2026-10-07.3";
 
 /** Penjelasan per menu. Kunci = id navigasi (nav-<kunci>) di ui-src/Index.html. */
 export const KB_PAGES: Record<string, { title: string; text: string }> = {
@@ -27,7 +27,7 @@ export const KB_PAGES: Record<string, { title: string; text: string }> = {
 	},
 	invest: {
 		title: "AutoCheck Invest",
-		text: "Memindai semua pasaran di panel agen dan menandai user yang melebihi batas line (2D/3D/4D) hari ini + kemarin. Isi dulu 'Setting panel agen': Base URL, PHPSESSID (wajib; cookie sesi login agen yang masih hidup), koderedis (bila tetap 'session expired'), Cookie mentah (opsional), Limit 2D/3D/4D, dan Daftar pasaran (isi hanya jika scan menghasilkan 0 data). Klik 'Simpan setting', lalu 'Cek koneksi/session' untuk memastikan cookie valid. 'Mulai scan' memulai; 'Lanjutkan scan' meneruskan bila terhenti; 'Reset' mengulang; 'Refresh hasil' memuat hasil terbaru. Hasil muncul di 'User lewat batas'. Bila 'session expired', login ulang ke panel agen dan ambil PHPSESSID baru. Nilai default limit bisa diubah admin di Admin > Pengaturan.",
+		text: "Memindai semua pasaran di panel agen dan menandai user yang melebihi batas line (2D/3D/4D) hari ini + kemarin. Isi dulu 'Setting panel agen': Base URL, PHPSESSID (wajib; cookie sesi login agen yang masih hidup), koderedis (bila tetap 'session expired'), Cookie mentah (opsional), Limit 2D/3D/4D, dan Daftar pasaran (isi hanya jika scan menghasilkan 0 data). Klik 'Simpan setting', lalu 'Cek koneksi/session' untuk memastikan cookie valid. 'Mulai scan' memulai; 'Lanjutkan scan' meneruskan bila terhenti; 'Reset' mengulang; 'Refresh hasil' memuat hasil terbaru. Hasil muncul di 'User lewat batas'. Bila 'session expired', login ulang ke panel agen dan ambil PHPSESSID baru. Nilai default limit bisa diubah admin di Admin > Pengaturan Sistem.",
 	},
 	"auto-input": {
 		title: "Auto Prediksi",
@@ -35,7 +35,7 @@ export const KB_PAGES: Record<string, { title: string; text: string }> = {
 	},
 	"lap-admin": {
 		title: "Lap Admin",
-		text: "Laporan harian dari panel admin website. Pilih tanggal (Tanggal mulai/selesai, atau tombol Hari ini / Kemarin / 7 hari), klik 'TARIK DATA'. Data ditarik oleh scraper di GitHub Actions (butuh Link Admin + Cookie Admin di menu Setting), progres tampil di 'Progres & riwayat tarik data' dan boleh ditinggal ke menu lain. Hasil: 'Laporan Register' (bisa di-Copy); kartu Total Deposit (total History Operator DIKURANGI operator khusus), Total <operator khusus> seperti Blazz/Khanpay, dan Total Withdraw — sesuai tanggal yang ditarik; Total Selisih, ID Selisih (tombol Copy menyalin daftar ID selisih), WD PGA-IDF; lalu tabel Register (filter Non Referral / With Referral), ID Selisih, Report Agent (filter Action & Operator), Withdraw PGA-IDF, dan Riwayat Koin. Tiap tabel punya pencarian dan tombol Copy. Daftar operator khusus diatur admin di Admin > Pengaturan. Bila cookie kedaluwarsa, tarik data gagal: ambil Cookie Admin baru dan simpan di Setting. Data lama (sebelum fitur total) menampilkan petunjuk 'klik TARIK DATA'.",
+		text: "Laporan harian dari panel admin website. Pilih tanggal (Tanggal mulai/selesai, atau tombol Hari ini / Kemarin / 7 hari), klik 'TARIK DATA'. Data ditarik oleh scraper di GitHub Actions (butuh Link Admin + Cookie Admin di menu Setting), progres tampil di 'Progres & riwayat tarik data' dan boleh ditinggal ke menu lain. Hasil: 'Laporan Register' (bisa di-Copy); kartu Total Deposit (total History Operator DIKURANGI operator khusus), Total <operator khusus> seperti Blazz/Khanpay, dan Total Withdraw — sesuai tanggal yang ditarik; Total Selisih, ID Selisih (tombol Copy menyalin daftar ID selisih), WD PGA-IDF; lalu tabel Register (filter Non Referral / With Referral), ID Selisih, Report Agent (filter Action & Operator), Withdraw PGA-IDF, dan Riwayat Koin. Tiap tabel punya pencarian dan tombol Copy. Daftar operator khusus diatur admin di Admin > Pengaturan Sistem. Bila cookie kedaluwarsa, tarik data gagal: ambil Cookie Admin baru dan simpan di Setting. Data lama (sebelum fitur total) menampilkan petunjuk 'klik TARIK DATA'.",
 	},
 	"lap-motion": {
 		title: "Lap Motion",
@@ -67,7 +67,7 @@ export const KB_PAGES: Record<string, { title: string; text: string }> = {
 	},
 	admin: {
 		title: "Admin",
-		text: "Hanya ADMIN. Tab: Users, Website, Sesi Aktif, Auto Posting, Pengaturan, Maintenance & Log (penjelasan tiap tab ada di bagian Admin).",
+		text: "Hanya ADMIN. Tab: Users, Website, Sesi Aktif, Auto Posting, Pengaturan Sistem, Maintenance & Log (penjelasan tiap tab ada di bagian Admin).",
 	},
 	"bot-dashboard": {
 		title: "Bot News — Dashboard",
@@ -110,8 +110,8 @@ export const KB_ADMIN_TABS: Record<string, { title: string; text: string }> = {
 		text: "Mengaktifkan/menonaktifkan auto posting prediksi: selama ada operator login, prediksi tiap sesi jam dan kata-kata penutup dikirim otomatis ke website milik operator itu (Smart Lock mencegah dobel). Digerakkan cron eksternal yang memanggil 'URL CRON' tiap menit. Tombol: URL CRON, Jalankan Sekarang, Aktifkan/Nonaktifkan.",
 	},
 	lapops: {
-		title: "Pengaturan",
-		text: "Dua bagian. (1) 'Pengaturan Sistem': nilai angka dengan batas aman yang dipakai server — lama simpan log aktivitas, toleransi susulan auto-post, batas salah password & lama kunci akun, masa berlaku sesi & maks sesi per user, default limit AutoCheck Invest 2D/3D/4D, dan pengaturan Asisten KD. Klik SIMPAN (tombol DEFAULT mengembalikan nilai bawaan di form sebelum disimpan). Nilai di luar rentang dijepit otomatis; berlaku ±15 detik. (2) 'Lap Admin · Operator Khusus': daftar operator (label + nama operator) yang dipisahkan dari Total Deposit di Lap Admin, mis. Blazz, Khanpay. Nama operator cocok bila mengandung teks itu (tidak peka huruf besar/kecil), maks 10. Hanya ADMIN yang bisa menyimpan.",
+		title: "Pengaturan Sistem",
+		text: "Dua bagian. (1) 'Pengaturan Sistem': nilai angka dengan batas aman yang dipakai server — lama simpan log aktivitas, toleransi susulan auto-post, batas salah password & lama kunci akun, masa berlaku sesi & maks sesi per user, default limit AutoCheck Invest 2D/3D/4D, dan pengaturan Asisten KD. Di bagian atas ada kartu 'Asisten KD' untuk memilih AI Provider yang dipakai asisten (Otomatis = Groq dulu, lalu provider lain). Klik SIMPAN (tombol DEFAULT mengembalikan nilai bawaan di form sebelum disimpan). Nilai di luar rentang dijepit otomatis; berlaku ±15 detik. (2) 'Lap Admin · Operator Khusus': daftar operator (label + nama operator) yang dipisahkan dari Total Deposit di Lap Admin, mis. Blazz, Khanpay. Nama operator cocok bila mengandung teks itu (tidak peka huruf besar/kecil), maks 10. Hanya ADMIN yang bisa menyimpan.",
 	},
 	maintenance: {
 		title: "Maintenance & Log",
@@ -128,7 +128,7 @@ TAMPILAN: sidebar kiri berisi menu per grup (Utama, Laporan Harian, Live Chat, A
 MAINTENANCE: bila mode maintenance aktif, operator tidak bisa kirim/login; hanya admin.
 UMUM PENYEBAB GAGAL: (1) cookie/PHPSESSID/token kedaluwarsa — ambil yang baru dari browser yang sedang login; (2) website belum punya token Telegram/LinkTree/Panel-Z di Admin > Website; (3) akun tidak punya akses website/menu; (4) kuota/layanan pihak ketiga (Telegram, GitHub Actions) sedang bermasalah — coba lagi nanti; (5) data duplikat diblokir sengaja agar tidak terkirim dua kali.
 KEAMANAN: jangan membagikan password, cookie, token, atau API key kepada siapa pun termasuk asisten ini; asisten tidak butuh dan tidak boleh meminta data itu.
-ASISTEN KD: widget chat melayang di kanan bawah. Tombol '−' menyembunyikan ke tepi kanan; tombol tab kecil di tepi memunculkannya lagi. Asisten hanya memberi panduan (tidak menjalankan aksi) dan memakai AI Provider yang diatur di Bot > Setting.
+ASISTEN KD: widget chat melayang di kanan bawah, tersedia untuk SEMUA role (termasuk BOT). Tombol '−' menyembunyikan ke tepi kanan; tombol tab kecil di tepi memunculkannya lagi. Asisten hanya memberi panduan (tidak menjalankan aksi) dan memakai AI Provider yang diatur di Bot > Setting.
 `.trim();
 
 export function buildKnowledgeText(): string {

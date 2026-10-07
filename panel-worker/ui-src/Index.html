@@ -611,7 +611,7 @@
             <button class="admin-tab" data-admin-tab="sites" onclick="switchAdminPanel('sites')"><i class="fa-solid fa-globe"></i>Website</button>
             <button class="admin-tab" data-admin-tab="sesi" onclick="switchAdminPanel('sesi')"><i class="fa-solid fa-users-viewfinder"></i>Sesi Aktif</button>
             <button class="admin-tab" data-admin-tab="autopost" onclick="switchAdminPanel('autopost')"><i class="fa-solid fa-robot"></i>Auto Posting</button>
-            <button class="admin-tab" data-admin-tab="lapops" onclick="switchAdminPanel('lapops')"><i class="fa-solid fa-sliders"></i>Pengaturan</button>
+            <button class="admin-tab" data-admin-tab="lapops" onclick="switchAdminPanel('lapops')"><i class="fa-solid fa-sliders"></i>Pengaturan Sistem</button>
             <button class="admin-tab" data-admin-tab="maintenance" onclick="switchAdminPanel('maintenance')"><i class="fa-solid fa-screwdriver-wrench"></i>Maintenance &amp; Log</button>
           </div>
           <select class="admin-tab-select" id="adminTabSelect" aria-label="Pilih panel admin" onchange="switchAdminPanel(this.value)">
@@ -624,6 +624,19 @@
           </select>
 
           <div class="admin-panel" data-admin-panel="lapops">
+          <div class="mini-card flex flex-col gap-3 mb-3" id="asstCfgCard">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-2">
+              <div>
+                <div class="font-extrabold text-base"><img src="/ASSIST.svg" width="22" height="22" alt="" class="inline-block mr-2 align-text-bottom">Asisten KD (chat bantuan)</div>
+                <div class="text-xs text-slate-400 mt-1">Pilih AI Provider (dari <b>BOT → Setting → AI Provider</b>) yang dipakai asisten. <b>Otomatis</b> = Groq lebih dulu (paling cepat), lalu provider lain bila gagal. Batas pertanyaan &amp; on/off ada di kartu Pengaturan Sistem di bawah.</div>
+              </div>
+              <div class="flex items-center gap-2">
+                <select id="asstProvider" class="glass-inner rounded-xl px-3 py-2 text-xs" aria-label="Provider asisten"></select>
+                <button type="button" onclick="asstCfgSave()" id="asstCfgBtn" class="bg-gradient-to-r from-cyan-400 to-blue-600 text-slate-950 px-4 py-2 rounded-xl text-xs font-extrabold">SIMPAN</button>
+              </div>
+            </div>
+            <div id="asstCfgStatus" class="text-xs text-slate-400">Memuat…</div>
+          </div>
           <div class="mini-card flex flex-col gap-4 mb-3">
             <div class="flex flex-col md:flex-row md:items-center justify-between gap-2">
               <div>
