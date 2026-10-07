@@ -6535,11 +6535,61 @@ Tindakan ini tidak dapat dibatalkan.`,
       const a = document.getElementById('livechatBookmarklet');
       if (a) a.setAttribute('href', livechatBookmarkletCode());
     }
+    function livechatCopyConsole() {
+      const code = livechatBookmarkletCode().replace(/^javascript:/, '');
+      const done = () => toast('Perintah disalin. Di halaman DayLiveChat: F12 → Console → tempel → Enter.');
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code).then(done, () => prompt('Salin perintah ini:', code));
+      else prompt('Salin perintah ini:', code);
+    }
     function livechatCopyBookmarklet() {
       const code = livechatBookmarkletCode();
       const done = () => toast('Kode bookmark disalin. Buat bookmark baru lalu tempel di kolom alamat (URL).');
       if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code).then(done, () => prompt('Salin kode ini:', code));
       else prompt('Salin kode ini:', code);
+    }
+    // Kunci Bot milik pengguna ini (diturunkan di server; tidak disimpan di browser).
+    let livechatKeyShown = false;
+    function livechatKeyLoad(then) {
+      google.script.run.withSuccessHandler(r => {
+        if (!r || r.success === false) { toast((r && r.message) || 'Gagal memuat kunci'); return; }
+        const box = document.getElementById('livechatKeyBox');
+        if (box) box.value = r.key || '';
+        if (then) then(r.key || '');
+      }).withFailureHandler(e => toast((e && e.message) || String(e))).livechatGetBotKey(currentSessionToken);
+    }
+    function livechatKeyToggle() {
+      const box = document.getElementById('livechatKeyBox'), btn = document.getElementById('livechatKeyShow');
+      if (!box) return;
+      const apply = () => { box.type = livechatKeyShown ? 'text' : 'password'; if (btn) btn.innerHTML = livechatKeyShown ? '<i class="fa-regular fa-eye-slash mr-1"></i>SEMBUNYIKAN' : '<i class="fa-regular fa-eye mr-1"></i>TAMPILKAN'; };
+      livechatKeyShown = !livechatKeyShown;
+      if (livechatKeyShown && !box.value) livechatKeyLoad(apply); else apply();
+    }
+    function livechatKeyCopy() {
+      const done = key => {
+        const ok = () => toast('Kunci Bot disalin. Tempel di tombol 🤖 pada halaman DayLiveChat.');
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(key).then(ok, () => prompt('Salin kunci ini:', key));
+        else prompt('Salin kunci ini:', key);
+      };
+      const box = document.getElementById('livechatKeyBox');
+      if (box && box.value) done(box.value); else livechatKeyLoad(done);
+    }
+    let livechatKeyResetArmed = false;
+    function livechatKeyReset() {
+      const btn = document.getElementById('livechatKeyReset');
+      if (!livechatKeyResetArmed) {
+        livechatKeyResetArmed = true;
+        if (btn) btn.textContent = 'KLIK LAGI UNTUK KONFIRMASI';
+        setTimeout(() => { livechatKeyResetArmed = false; if (btn) btn.innerHTML = '<i class="fa-solid fa-rotate mr-1"></i>BUAT KUNCI BARU'; }, 5000);
+        return;
+      }
+      livechatKeyResetArmed = false;
+      if (btn) btn.innerHTML = '<i class="fa-solid fa-rotate mr-1"></i>BUAT KUNCI BARU';
+      google.script.run.withSuccessHandler(r => {
+        if (!r || r.success === false) { toast((r && r.message) || 'Gagal membuat kunci baru'); return; }
+        const box = document.getElementById('livechatKeyBox');
+        if (box) box.value = r.key || '';
+        toast('Kunci baru dibuat. Kunci lama sudah tidak berlaku — isi ulang di tombol 🤖.');
+      }).withFailureHandler(e => toast((e && e.message) || String(e))).livechatResetBotKey(currentSessionToken);
     }
     function renderLivechatSubpage(page) {
       LIVECHAT_PAGES.forEach(p => {
@@ -6561,6 +6611,8 @@ Tindakan ini tidak dapat dibatalkan.`,
       google.script.run.withSuccessHandler(r => {
         if (!r || r.success === false) { if (!silent) toast((r && r.message) || 'Gagal memuat sesi chat'); return; }
         livechatSessionsCache = r.sessions || [];
+        const noTpl = document.getElementById('livechatNoTpl');
+        if (noTpl) noTpl.style.display = (Number(r.templateCount) === 0) ? '' : 'none';
         renderLivechatSessions();
       }).withFailureHandler(e => { if (!silent) toast((e && e.message) || String(e)); }).livechatListSessions(currentSessionToken);
     }

@@ -72,6 +72,10 @@ async function ensureTables(env: Env): Promise<void> {
 	for (const stmt of [
 		`ALTER TABLE livechat_session ADD COLUMN queue_code TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE livechat_session ADD COLUMN last_seen_at TEXT NOT NULL DEFAULT ''`,
+		// Pemisahan per pengguna panel: '' = data lama (kunci bot bersama), selain itu username (huruf kecil).
+		`ALTER TABLE livechat_session ADD COLUMN owner TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE livechat_template ADD COLUMN owner TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE livechat_log ADD COLUMN owner TEXT NOT NULL DEFAULT ''`,
 	]) {
 		try {
 			await db.prepare(stmt).run();
@@ -84,6 +88,7 @@ async function ensureTables(env: Env): Promise<void> {
 
 export interface LivechatSessionRow {
 	session_key: string;
+	owner: string;
 	queue_code: string;
 	customer_name: string;
 	divisi: string;
@@ -96,46 +101,52 @@ export interface LivechatSessionRow {
 
 export interface LivechatTemplateRow {
 	id: number;
+	owner?: string;
 	reply_text: string;
 	active: number;
 	sort_order: number;
 	updated_at: string;
 }
 
+// --- Pemisahan per pengguna ---
+// Setiap pengguna panel punya Kunci Bot sendiri (lihat api/livechat.ts). Semua sesi/template/log punya `owner`
+// (username huruf kecil; '' = data lama dari kunci bersama). session_key di tabel adalah PRIMARY KEY global, jadi
+// untuk owner non-lama disimpan sebagai "owner:idAsli" supaya id yang sama dari akun DayLiveChat berbeda tidak
+// saling menimpa. Userscript selalu melihat id asli (tanpa prefiks).
+const innerKey = (owner: string, id: string): string => (owner ? `${owner}:${id}` : id);
+const rawKey = (owner: string, key: string): string => (owner && key.startsWith(owner + ":") ? key.slice(owner.length + 1) : key);
+const inList = (owners: string[]): string => owners.map(() => "?").join(",");
+
 // --- Sesi chat ---
 
-/** Dipanggil panel (role ADMIN/OPERATOR) untuk menampilkan daftar sesi + status toggle. */
-export async function listSessions(env: Env): Promise<LivechatSessionRow[]> {
+/** Dipanggil panel: sesi milik `owners` saja (pengguna biasa = dirinya; ADMIN juga data lama ''). */
+export async function listSessions(env: Env, owners: string[]): Promise<LivechatSessionRow[]> {
 	await ensureTables(env);
 	const r = await getTurso(env)
-		.prepare(`SELECT * FROM livechat_session ORDER BY bot_enabled DESC, last_seen_at DESC LIMIT 200`)
+		.prepare(`SELECT * FROM livechat_session WHERE owner IN (${inList(owners)}) ORDER BY bot_enabled DESC, last_seen_at DESC LIMIT 200`)
+		.bind(...owners)
 		.all<LivechatSessionRow>();
 	return r.results;
 }
 
-/** Toggle "Aktifkan Bot" per sesi -- ini SATU-SATUNYA cara sesi jadi bot_enabled=1. */
-export async function setSessionBot(env: Env, sessionKey: string, enabled: boolean): Promise<void> {
+/** Toggle "Aktifkan Bot" per sesi -- hanya sesi milik `owners`; SATU-SATUNYA cara sesi jadi bot_enabled=1. */
+export async function setSessionBot(env: Env, owners: string[], sessionKey: string, enabled: boolean): Promise<void> {
 	await ensureTables(env);
 	await getTurso(env)
-		.prepare(`UPDATE livechat_session SET bot_enabled = ?, bot_updated_at = ? WHERE session_key = ?`)
-		.bind(enabled ? 1 : 0, tsNow(), sessionKey)
+		.prepare(`UPDATE livechat_session SET bot_enabled = ?, bot_updated_at = ? WHERE session_key = ? AND owner IN (${inList(owners)})`)
+		.bind(enabled ? 1 : 0, tsNow(), sessionKey, ...owners)
 		.run();
 }
 
 /**
- * Dipanggil userscript (auth via LIVECHAT_BOT_KEY, bukan sesi login) tiap
- * beberapa detik: upsert daftar sesi yang terlihat lewat GET /api/chats/inbox
- * (dipanggil userscript langsung ke DayLiveChat, browser CS sendiri yang
- * IP-nya sudah diizinkan). Untuk sesi yang MASIH ada di Kotak Masuk,
- * bot_enabled TIDAK disentuh sama sekali di sini -- hanya setSessionBot
- * (dipicu toggle operator di panel) yang boleh mengubahnya. TAPI begitu sesi
- * SUDAH TIDAK ADA lagi di Kotak Masuk (member keluar/chat ditutup), fungsi
- * ini SENGAJA mematikan bot_enabled-nya sendiri (permintaan operator: jangan
- * biarkan switch nyangkut ON pada member yang sudah pergi) lalu membuang
- * barisnya -- lihat detail di bawah.
+ * Dipanggil userscript (auth via Kunci Bot milik satu pengguna) tiap beberapa detik: upsert daftar sesi yang terlihat
+ * lewat GET /api/chats/inbox. HANYA menyentuh sesi milik `owner` itu -- sinkron satu akun CS tidak boleh mematikan atau
+ * menghapus sesi akun lain. Untuk sesi yang MASIH ada di Kotak Masuk, bot_enabled tidak disentuh (hanya setSessionBot);
+ * sesi yang SUDAH TIDAK ADA lagi di Kotak Masuk dimatikan otomatis lalu barisnya dibuang.
  */
 export async function syncSessionsFromScript(
 	env: Env,
+	owner: string,
 	rows: Array<{ sessionKey: string; queueCode?: string; customerName?: string; divisi?: string; lastMessage?: string; lastSender?: string }>,
 ): Promise<{ synced: number }> {
 	await ensureTables(env);
@@ -144,13 +155,14 @@ export async function syncSessionsFromScript(
 	let n = 0;
 	const keys: string[] = [];
 	for (const row of rows) {
-		const key = String(row.sessionKey || "").trim();
-		if (!key) continue;
+		const id = String(row.sessionKey || "").trim();
+		if (!id) continue;
+		const key = innerKey(owner, id);
 		keys.push(key);
 		await db
 			.prepare(
-				`INSERT INTO livechat_session (session_key, queue_code, customer_name, divisi, last_message, last_sender, bot_enabled, last_seen_at, bot_updated_at)
-				 VALUES (?, ?, ?, ?, ?, ?, 0, ?, '')
+				`INSERT INTO livechat_session (session_key, owner, queue_code, customer_name, divisi, last_message, last_sender, bot_enabled, last_seen_at, bot_updated_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, '')
 				 ON CONFLICT(session_key) DO UPDATE SET
 					queue_code = excluded.queue_code,
 					customer_name = excluded.customer_name,
@@ -161,6 +173,7 @@ export async function syncSessionsFromScript(
 			)
 			.bind(
 				key,
+				owner,
 				String(row.queueCode ?? "").slice(0, 100),
 				String(row.customerName ?? "").slice(0, 200),
 				String(row.divisi ?? "").slice(0, 100),
@@ -171,52 +184,52 @@ export async function syncSessionsFromScript(
 			.run();
 		n++;
 	}
-	// `rows` SELALU daftar LENGKAP Kotak Masuk saat ini (dikirim userscript
-	// tiap tick, termasuk kalau kosong, dan cuma dikirim kalau fetch-nya
-	// BENERAN sukses -- lihat refreshInbox() di userscript -- jadi daftar ini
-	// bisa dipercaya, tidak perlu toleransi "mungkin cuma gagal sinkron
-	// sesaat"). Sesi yang tidak ada lagi di daftar ini berarti member sudah
-	// keluar/chat ditutup di DayLiveChat:
-	//   1. Kalau sesinya masih bot_enabled -- matikan OTOMATIS dulu (operator
-	//      minta ini: jangan biarkan switch nyangkut ON pada member yang
-	//      sudah pergi).
-	//   2. Baris yang sudah bot_enabled=0 (baik dari awal maupun baru saja
-	//      dimatikan di langkah 1) langsung dibuang dari daftar panel.
+	// `rows` SELALU daftar LENGKAP Kotak Masuk akun itu (termasuk kosong). Sesi MILIK OWNER INI yang tidak ada lagi:
+	// matikan bot-nya dulu, lalu buang barisnya.
 	if (keys.length) {
-		const placeholders = keys.map(() => "?").join(",");
+		const ph = inList(keys);
 		await db
-			.prepare(`UPDATE livechat_session SET bot_enabled = 0, bot_updated_at = ? WHERE bot_enabled = 1 AND session_key NOT IN (${placeholders})`)
-			.bind(now, ...keys)
+			.prepare(`UPDATE livechat_session SET bot_enabled = 0, bot_updated_at = ? WHERE owner = ? AND bot_enabled = 1 AND session_key NOT IN (${ph})`)
+			.bind(now, owner, ...keys)
 			.run();
-		await db
-			.prepare(`DELETE FROM livechat_session WHERE bot_enabled = 0 AND session_key NOT IN (${placeholders})`)
-			.bind(...keys)
-			.run();
+		await db.prepare(`DELETE FROM livechat_session WHERE owner = ? AND bot_enabled = 0 AND session_key NOT IN (${ph})`).bind(owner, ...keys).run();
 	} else {
-		await db.prepare(`UPDATE livechat_session SET bot_enabled = 0, bot_updated_at = ? WHERE bot_enabled = 1`).bind(now).run();
-		await db.prepare(`DELETE FROM livechat_session WHERE bot_enabled = 0`).run();
+		await db.prepare(`UPDATE livechat_session SET bot_enabled = 0, bot_updated_at = ? WHERE owner = ? AND bot_enabled = 1`).bind(now, owner).run();
+		await db.prepare(`DELETE FROM livechat_session WHERE owner = ? AND bot_enabled = 0`).bind(owner).run();
 	}
 	return { synced: n };
 }
 
-/** Dipanggil userscript: daftar session_key yang boleh dioperasikan bot saat ini + template aktif. */
-export async function pullEnabledSessions(env: Env): Promise<{ enabledKeys: string[]; templates: LivechatTemplateRow[] }> {
+/** Dipanggil userscript: id sesi (asli) yang boleh dioperasikan bot + template aktif -- hanya milik `owner`. */
+export async function pullEnabledSessions(env: Env, owner: string): Promise<{ enabledKeys: string[]; templates: LivechatTemplateRow[] }> {
 	await ensureTables(env);
 	const db = getTurso(env);
-	const sessions = await db.prepare(`SELECT session_key FROM livechat_session WHERE bot_enabled = 1`).all<{ session_key: string }>();
-	const templates = await db.prepare(`SELECT * FROM livechat_template WHERE active = 1 ORDER BY sort_order ASC, id ASC`).all<LivechatTemplateRow>();
-	return { enabledKeys: sessions.results.map((r) => r.session_key), templates: templates.results };
+	const sessions = await db.prepare(`SELECT session_key FROM livechat_session WHERE owner = ? AND bot_enabled = 1`).bind(owner).all<{ session_key: string }>();
+	const templates = await db
+		.prepare(`SELECT id, reply_text, active, sort_order, updated_at FROM livechat_template WHERE owner = ? AND active = 1 ORDER BY sort_order ASC, id ASC`)
+		.bind(owner)
+		.all<LivechatTemplateRow>();
+	return { enabledKeys: sessions.results.map((r) => rawKey(owner, r.session_key)), templates: templates.results };
 }
 
 // --- Template balasan (daftar acak, tanpa memandang isi keluhan member) ---
 
-export async function listTemplates(env: Env): Promise<LivechatTemplateRow[]> {
+export async function listTemplates(env: Env, owners: string[]): Promise<LivechatTemplateRow[]> {
 	await ensureTables(env);
-	const r = await getTurso(env).prepare(`SELECT * FROM livechat_template ORDER BY sort_order ASC, id ASC`).all<LivechatTemplateRow>();
+	const r = await getTurso(env)
+		.prepare(`SELECT * FROM livechat_template WHERE owner IN (${inList(owners)}) ORDER BY sort_order ASC, id ASC`)
+		.bind(...owners)
+		.all<LivechatTemplateRow>();
 	return r.results;
 }
 
-export async function saveTemplate(env: Env, data: { id?: number; replyText: string; active?: boolean; sortOrder?: number }): Promise<void> {
+/** Template baru dimiliki `owner`; mengubah template hanya boleh bila pemiliknya termasuk `owners`. */
+export async function saveTemplate(
+	env: Env,
+	owner: string,
+	owners: string[],
+	data: { id?: number; replyText: string; active?: boolean; sortOrder?: number },
+): Promise<void> {
 	await ensureTables(env);
 	const db = getTurso(env);
 	const replyText = String(data.replyText ?? "").trim();
@@ -225,37 +238,37 @@ export async function saveTemplate(env: Env, data: { id?: number; replyText: str
 	const sortOrder = Number.isFinite(data.sortOrder) ? Number(data.sortOrder) : 0;
 	if (data.id) {
 		await db
-			.prepare(`UPDATE livechat_template SET reply_text = ?, active = ?, sort_order = ?, updated_at = ? WHERE id = ?`)
-			.bind(replyText, active, sortOrder, tsNow(), data.id)
+			.prepare(`UPDATE livechat_template SET reply_text = ?, active = ?, sort_order = ?, updated_at = ? WHERE id = ? AND owner IN (${inList(owners)})`)
+			.bind(replyText, active, sortOrder, tsNow(), data.id, ...owners)
 			.run();
 	} else {
 		await db
-			.prepare(`INSERT INTO livechat_template (reply_text, active, sort_order, updated_at) VALUES (?, ?, ?, ?)`)
-			.bind(replyText, active, sortOrder, tsNow())
+			.prepare(`INSERT INTO livechat_template (owner, reply_text, active, sort_order, updated_at) VALUES (?, ?, ?, ?, ?)`)
+			.bind(owner, replyText, active, sortOrder, tsNow())
 			.run();
 	}
 }
 
-export async function deleteTemplate(env: Env, id: number): Promise<void> {
+export async function deleteTemplate(env: Env, owners: string[], id: number): Promise<void> {
 	await ensureTables(env);
-	await getTurso(env).prepare(`DELETE FROM livechat_template WHERE id = ?`).bind(id).run();
+	await getTurso(env).prepare(`DELETE FROM livechat_template WHERE id = ? AND owner IN (${inList(owners)})`).bind(id, ...owners).run();
 }
 
 // --- Audit ---
 
-export async function logAutoReply(env: Env, sessionKey: string, customerMessage: string, matchedTemplateId: number | null, replyText: string): Promise<void> {
+export async function logAutoReply(env: Env, owner: string, sessionKey: string, customerMessage: string, matchedTemplateId: number | null, replyText: string): Promise<void> {
 	await ensureTables(env);
 	await getTurso(env)
-		.prepare(`INSERT INTO livechat_log (session_key, customer_message, matched_template_id, reply_text, sent_at) VALUES (?, ?, ?, ?, ?)`)
-		.bind(sessionKey, customerMessage.slice(0, 2000), matchedTemplateId, replyText.slice(0, 2000), tsNow())
+		.prepare(`INSERT INTO livechat_log (owner, session_key, customer_message, matched_template_id, reply_text, sent_at) VALUES (?, ?, ?, ?, ?, ?)`)
+		.bind(owner, sessionKey, customerMessage.slice(0, 2000), matchedTemplateId, replyText.slice(0, 2000), tsNow())
 		.run();
 }
 
-export async function recentLogs(env: Env, limit = 100): Promise<Array<Record<string, unknown>>> {
+export async function recentLogs(env: Env, owners: string[], limit = 100): Promise<Array<Record<string, unknown>>> {
 	await ensureTables(env);
 	const r = await getTurso(env)
-		.prepare(`SELECT * FROM livechat_log ORDER BY id DESC LIMIT ?`)
-		.bind(Math.min(500, Math.max(1, limit)))
+		.prepare(`SELECT * FROM livechat_log WHERE owner IN (${inList(owners)}) ORDER BY id DESC LIMIT ?`)
+		.bind(...owners, Math.min(500, Math.max(1, limit)))
 		.all();
 	return r.results;
 }

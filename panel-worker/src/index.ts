@@ -105,7 +105,9 @@ import {
 	livechatBotReport,
 	livechatBotSync,
 	livechatDeleteTemplate,
+	livechatGetBotKey,
 	livechatListSessions,
+	livechatResetBotKey,
 	livechatListTemplates,
 	livechatRecentLogs,
 	livechatSaveTemplate,
@@ -302,6 +304,8 @@ const ROUTES: Record<string, Handler> = {
 
 	// Live Chat Auto-Reply — sisi panel (sesi login ADMIN/OPERATOR)
 	livechatListSessions: (env, b) => livechatListSessions(env, s(b.token)),
+	livechatGetBotKey: (env, b) => livechatGetBotKey(env, s(b.token)),
+	livechatResetBotKey: (env, b) => livechatResetBotKey(env, s(b.token)),
 	livechatSetBotEnabled: (env, b) => livechatSetBotEnabled(env, s(b.token), s(b.sessionKey), !!b.enabled),
 	livechatListTemplates: (env, b) => livechatListTemplates(env, s(b.token)),
 	livechatSaveTemplate: (env, b) => livechatSaveTemplate(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
