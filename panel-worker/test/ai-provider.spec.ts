@@ -659,4 +659,17 @@ describe("banyak model per provider (urutan cadangan)", () => {
 		expect(res.list.providers[0].cooling_models.map((c: any) => c.model)).toEqual(["glm-5.3"]);
 		expect(res.list.providers[0].cooldown_until).toBe(0); // masih ada model yang jalan
 	});
+
+	it("model dicabut Google (404 'no longer available') -> pesan galat menunjuk ke DAFTAR MODEL, bukan menyalahkan key", async () => {
+		const { botAiTest } = await import("../src/api/bot");
+		const { env: e, db } = fakeEnv();
+		db.prepare(`INSERT INTO users (username, username_lc, password_hash, role) VALUES ('Bos','bos',?, 'ADMIN')`).run(await hashPassword("pw"));
+		const { sessionToken: t } = (await checkLogin(e, "Bos", "pw", "")) as { sessionToken: string };
+		mockFetch((url) => url.endsWith("/models")
+			? { status: 404, body: { error: { message: "nope" } } }
+			: { status: 404, body: { error: { code: 404, message: "This model models/gemini-2.5-flash is no longer available to new users." } } });
+		const saved = await botAiSave(e, t, { name: "Gemini", base_url: "https://generativelanguage.googleapis.com/v1beta/openai", key: "AIzaSyAAAAAAAAAAAAAAAA", model: "gemini-2.5-flash" });
+		const res: any = await botAiTest(e, t, { id: saved.providers[0].id });
+		expect(JSON.stringify(res)).toMatch(/DAFTAR MODEL/);
+	});
 });

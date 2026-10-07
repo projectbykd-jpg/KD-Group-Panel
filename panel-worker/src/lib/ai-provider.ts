@@ -786,7 +786,10 @@ async function postChat(
 const errText = (status: number, body: any) => {
 	const e = body?.error;
 	const msg = typeof e === "string" ? e : e?.message || JSON.stringify(e ?? body ?? "");
-	return `HTTP ${status} ${String(msg).slice(0, 220)}`.trim();
+	const short = String(msg).slice(0, 220);
+	// Model dicabut/tidak tersedia di akun ini (mis. Gemini: "no longer available to new users") -> arahkan ke DAFTAR MODEL.
+	const gone = (status === 404 || status === 400) && /model/i.test(String(msg)) && /no longer available|not found|not supported|does not exist|decommission|deprecated|not available/i.test(String(msg));
+	return `HTTP ${status} ${short}${gone ? " -> Model ini sudah tidak tersedia untuk akun Anda (key tidak salah). Klik DAFTAR MODEL, pilih model yang tampil, SIMPAN, lalu Tes lagi." : ""}`.trim();
 };
 
 /**

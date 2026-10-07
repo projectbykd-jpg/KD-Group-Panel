@@ -292,7 +292,7 @@ export async function assistantTest(env: Env, token: string) {
 		const msg = (e instanceof Error ? e.message : String(e)).slice(0, 220);
 		// Timeout/lambat BUKAN key salah: jangan menyesatkan dgn vonis key/model; cukup sarankan model lebih cepat.
 		if (/belum mulai membalas|tidak ada data|melebihi|timeout|abort/i.test(msg)) {
-			return { success: false, message: `Gagal: model "${p.model}" terlalu lama membalas (${msg}). Key & alamat tidak dipersoalkan. Coba model yang lebih cepat dan bukan alias "*-latest" (mis. gemini-2.5-flash / openai/gpt-oss-20b) lewat DAFTAR MODEL.` };
+			return { success: false, message: `Gagal: model "${p.model}" terlalu lama membalas (${msg}). Key & alamat tidak dipersoalkan. Coba model yang lebih cepat dan bukan alias "*-latest" (pilih dari yang tampil di DAFTAR MODEL, mis. varian flash/flash-lite atau openai/gpt-oss-20b).` };
 		}
 		const hint = /404/.test(msg) ? " — Nama model/Base URL tidak ditemukan; klik DAFTAR MODEL." : "";
 		return { success: false, message: "Gagal: " + msg + hint + (await diagnose(p)) };
