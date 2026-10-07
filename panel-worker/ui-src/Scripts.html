@@ -527,6 +527,7 @@
       currentProfile = sessionProfile;
       res = sessionProfile;
       persistSessionToken(currentSessionToken);
+      shioMapLoad();
       // Cache sesi hanya optimasi resume; kegagalan storage tidak boleh
       // menghentikan render panel setelah autentikasi berhasil.
       try { localStorage.setItem("daygroup_user", currentUser); } catch (e) {}
@@ -2694,7 +2695,7 @@
     }
 
     /* Menu admin: tampilkan satu panel per waktu (tidak numpuk scroll). */
-    const ADMIN_PANELS = ['users','sites','sesi','autopost','lapops','maintenance'];
+    const ADMIN_PANELS = ['users','sites','sesi','autopost','lapops','datamaster','maintenance'];
     // ---------- Admin: API key KHUSUS Asisten KD + provider cadangan ----------
     function asstCfgLoad() {
       const st = document.getElementById('asstCfgStatus');
@@ -2790,6 +2791,120 @@
         sysItems = r.settings || []; sysRender(); if (st) st.textContent = 'Tersimpan'; toast('Pengaturan sistem tersimpan');
       }).withFailureHandler(e => { if (btn) btn.disabled = false; toast('Gagal menyimpan: ' + ((e && e.message) || e)); }).adminSaveSystemSettings(currentSessionToken, values);
     }
+    // ---------- Admin: Data Master (jadwal, shio, pasaran) ----------
+    let mdItems = [], mdResetArm = {};
+    const mdEsc = escapeHtml;
+    const mdLines = t => String(t || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+    function mdSlotHtml(sl, i) {
+      sl = sl || {};
+      return `<div class="md-slot" data-slot>
+        <div class="md-no">SESI <span data-no>${i + 1}</span> &middot; <span class="text-slate-500">ID PRED-<span data-no>${i + 1}</span></span></div>
+        <input class="md-input" data-f="jam" maxlength="5" placeholder="HH:MM" value="${mdEsc(sl.jam || '')}" aria-label="Jam (WIB)">
+        <input class="md-input" data-f="nama" maxlength="120" placeholder="Nama sesi" value="${mdEsc(sl.nama || '')}" aria-label="Nama sesi">
+        <textarea class="md-ta" data-f="pasaran" placeholder="Satu pasaran per baris" aria-label="Pasaran">${mdEsc((sl.pasaran || []).join('\n'))}</textarea>
+        <button type="button" class="admin-icon-btn admin-icon-delete" onclick="mdSlotDel(this)" title="Hapus sesi"><i class="fa-solid fa-trash"></i></button>
+      </div>`;
+    }
+    function mdSlotDel(btn) {
+      const box = btn.closest('[data-md-slots]'); if (!box) return;
+      if (box.children.length <= 1) { toast('Minimal 1 sesi'); return; }
+      btn.closest('[data-slot]').remove();
+      box.querySelectorAll('[data-slot]').forEach((r, i) => r.querySelectorAll('[data-no]').forEach(n => { n.textContent = i + 1; }));
+    }
+    function mdSlotAdd(key) {
+      const box = document.querySelector(`[data-md-slots="${key}"]`); if (!box) return;
+      if (box.children.length >= 12) { toast('Maksimal 12 sesi'); return; }
+      box.insertAdjacentHTML('beforeend', mdSlotHtml({}, box.children.length));
+    }
+    function mdEditor(it) {
+      const v = it.value;
+      if (it.key === 'md_jadwal') return `<div class="flex flex-col gap-2" data-md-slots="${it.key}">${v.map(mdSlotHtml).join('')}</div>
+        <div><button type="button" class="glass-inner px-3 py-2 rounded-xl text-xs font-bold" onclick="mdSlotAdd('${it.key}')"><i class="fa-solid fa-plus mr-2"></i>TAMBAH SESI</button></div>`;
+      if (it.key === 'md_closing') return `<label class="flex flex-col gap-1 text-[11px] text-slate-400">Jam kiriman penutup (pisahkan koma, maks 4, WIB)
+          <input class="md-input" data-f="slots" value="${mdEsc(v.slots.join(', '))}" placeholder="06:15, 16:00"></label>
+        <label class="flex flex-col gap-1 text-[11px] text-slate-400">Variasi kalimat (satu per baris, 1-20)
+          <textarea class="md-ta" data-f="variants" style="min-height:170px">${mdEsc(v.variants.join('\n'))}</textarea></label>`;
+      if (it.key === 'md_shio') {
+        const lab = i => 'Sisa ' + (i === 11 ? '0 (12)' : (i + 1));
+        return `<div class="md-shio">${v.names.map((n, i) => `<label>${lab(i)}<input class="md-input" data-shio="${i}" maxlength="20" value="${mdEsc(n)}"></label>`).join('')}
+          <label>Angka 00<input class="md-input" data-f="zero" maxlength="20" value="${mdEsc(v.zero)}"></label></div>
+          <div class="md-hint">Contoh: Prize 1 berakhir <b>13</b> &rarr; 13 mod 12 = 1 &rarr; nama pertama. Nama harus huruf saja (tanpa spasi) dan tidak boleh kembar.</div>`;
+      }
+      if (it.key === 'md_shio_pool') return `<textarea class="md-ta" data-f="lines" placeholder="ANJING - KUDA">${mdEsc(v.join('\n'))}</textarea>`;
+      if (it.key === 'md_market_panel') return `<textarea class="md-ta" data-f="lines" style="min-height:260px" placeholder="HK SIANG = hk-siang">${mdEsc(Object.keys(v).map(k => k + ' = ' + v[k]).join('\n'))}</textarea>
+        <div class="md-hint">Format tiap baris: <code>NAMA PASARAN = slug</code>. Nama dicocokkan tanpa peka huruf besar/kecil.</div>`;
+      if (it.key === 'md_invest_pasaran') return `<textarea class="md-ta" data-f="lines" style="min-height:260px" placeholder="p6680 = BULLSEYE">${mdEsc(v.map(r => r[0] + ' = ' + r[1]).join('\n'))}</textarea>
+        <div class="md-hint">Format tiap baris: <code>kode = NAMA</code> (kode dari panel agen, mis. p6680).</div>`;
+      return '';
+    }
+    function mdRender() {
+      const box = document.getElementById('mdBody'); if (!box) return;
+      // jaga kartu yang sedang terbuka saat render ulang
+      const open = new Set(Array.from(box.querySelectorAll('details[open]')).map(d => d.dataset.key));
+      let lastGroup = '';
+      box.innerHTML = mdItems.map(it => {
+        const head = it.group !== lastGroup ? `<div class="md-group-title">${mdEsc(it.group)}</div>` : '';
+        lastGroup = it.group;
+        const n = Array.isArray(it.value) ? it.value.length : (it.value && it.value.names ? 12 : Object.keys(it.value || {}).length);
+        return head + `<details class="md-card" data-key="${it.key}" ${open.has(it.key) ? 'open' : ''}>
+          <summary><span class="md-sum-l"><i class="fa-solid fa-chevron-right md-chev"></i>${mdEsc(it.title)}</span>
+            <span class="md-badge ${it.custom ? 'custom' : ''}">${it.custom ? 'DIUBAH ADMIN' : 'BAWAAN'}${it.key === 'md_closing' ? '' : ' · ' + n}</span></summary>
+          <div class="md-body">
+            <div class="md-hint">${mdEsc(it.hint)}</div>
+            ${mdEditor(it)}
+            <div class="md-actions">
+              <button type="button" class="bg-gradient-to-r from-cyan-400 to-blue-600 text-slate-950 px-4 py-2 rounded-xl text-xs font-extrabold" onclick="mdSave('${it.key}', this)"><i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN</button>
+              <button type="button" class="glass-inner px-4 py-2 rounded-xl text-xs font-bold ${it.custom ? '' : 'opacity-50'}" ${it.custom ? '' : 'disabled'} onclick="mdReset('${it.key}', this)"><i class="fa-solid fa-rotate-left mr-2"></i>KEMBALIKAN KE BAWAAN</button>
+              <span class="md-msg text-xs"></span>
+            </div>
+          </div></details>`;
+      }).join('');
+    }
+    function mdLoad() {
+      const st = document.getElementById('mdStatus');
+      google.script.run.withSuccessHandler(r => {
+        if (!r || !r.success) { if (st) st.textContent = 'Gagal memuat: ' + ((r && r.message) || '-'); return; }
+        mdItems = r.items || []; mdRender(); if (st) st.textContent = mdItems.length + ' daftar';
+      }).withFailureHandler(e => { if (st) st.textContent = 'Gagal memuat: ' + ((e && e.message) || e); }).adminGetMasterData(currentSessionToken);
+    }
+    function mdCollect(key, card) {
+      const f = n => { const e = card.querySelector(`[data-f="${n}"]`); return e ? e.value : ''; };
+      if (key === 'md_jadwal') return Array.from(card.querySelectorAll('[data-slot]')).map(r => ({
+        jam: r.querySelector('[data-f="jam"]').value.trim(), nama: r.querySelector('[data-f="nama"]').value.trim(), pasaran: mdLines(r.querySelector('[data-f="pasaran"]').value),
+      }));
+      if (key === 'md_closing') return { slots: f('slots').split(/[,\s]+/).map(x => x.trim()).filter(Boolean), variants: mdLines(f('variants')) };
+      if (key === 'md_shio') return { names: Array.from(card.querySelectorAll('[data-shio]')).map(i => i.value.trim()), zero: f('zero').trim() };
+      if (key === 'md_shio_pool') return mdLines(f('lines'));
+      const pairs = mdLines(f('lines')).map(l => { const i = l.indexOf('='); return i < 0 ? [l.trim(), ''] : [l.slice(0, i).trim(), l.slice(i + 1).trim()]; });
+      if (key === 'md_market_panel') { const o = {}; pairs.forEach(p => { o[p[0]] = p[1]; }); return o; }
+      return pairs; // md_invest_pasaran
+    }
+    function mdMsg(card, text, ok) { const m = card.querySelector('.md-msg'); if (m) { m.textContent = text; m.className = 'md-msg ' + (ok ? 'md-ok' : 'md-err'); } }
+    function mdSave(key, btn) {
+      const card = btn.closest('details'); if (!card) return;
+      let value; try { value = mdCollect(key, card); } catch (e) { mdMsg(card, 'Format tidak valid', false); return; }
+      btn.disabled = true; mdMsg(card, 'Menyimpan…', true);
+      google.script.run.withSuccessHandler(r => {
+        btn.disabled = false;
+        if (!r || !r.success) { mdMsg(card, (r && r.message) || 'Gagal menyimpan', false); return; }
+        mdItems = r.items || mdItems; mdRender(); toast('Tersimpan'); if (key === 'md_shio') shioMapLoad();
+        const c2 = document.querySelector(`details[data-key="${key}"]`); if (c2) mdMsg(c2, 'Tersimpan · berlaku ±15 detik', true);
+      }).withFailureHandler(e => { btn.disabled = false; mdMsg(card, 'Gagal: ' + ((e && e.message) || e), false); }).adminSaveMasterData(currentSessionToken, key, value);
+    }
+    function mdReset(key, btn) {
+      const card = btn.closest('details'); if (!card) return;
+      // dua klik (tanpa popup): klik pertama meminta konfirmasi di tombolnya sendiri
+      if (Date.now() - (mdResetArm[key] || 0) < 3500) {
+        mdResetArm[key] = 0; btn.disabled = true;
+        google.script.run.withSuccessHandler(r => {
+          if (!r || !r.success) { btn.disabled = false; mdMsg(card, (r && r.message) || 'Gagal', false); return; }
+          mdItems = r.items || mdItems; mdRender(); toast('Dikembalikan ke bawaan'); if (key === 'md_shio') shioMapLoad();
+        }).withFailureHandler(e => { btn.disabled = false; mdMsg(card, 'Gagal: ' + ((e && e.message) || e), false); }).adminSaveMasterData(currentSessionToken, key, null);
+        return;
+      }
+      mdResetArm[key] = Date.now(); const old = btn.innerHTML; btn.innerHTML = 'YAKIN? KLIK LAGI';
+      setTimeout(() => { if (btn.isConnected) btn.innerHTML = old; mdResetArm[key] = 0; }, 3600);
+    }
     // ---------- Admin: operator khusus Lap Admin ----------
     function lapOpsRowHtml(o) {
       const v = x => escapeHtml(String(x == null ? '' : x));
@@ -2860,6 +2975,8 @@
         loadAutoPostStatus();
       } else if (key === 'lapops') {
         lapOpsLoad(); sysLoad(); asstCfgLoad();
+      } else if (key === 'datamaster') {
+        mdLoad();
       } else if (key === 'maintenance') {
         loadMaintenanceState();
       }
@@ -3464,12 +3581,18 @@
       if (b) b.classList.remove('show');
     }
 
+    // Peta shio mengikuti server (Admin > Data Master) supaya pratinjau di browser = hasil server. Sebelum termuat: bawaan.
+    let shioNames = ['KUDA','ULAR','NAGA','KELINCI','HARIMAU','KERBAU','TIKUS','BABI','ANJING','AYAM','MONYET','KAMBING'], shioZero = 'KELINCI';
+    function shioMapLoad() {
+      google.script.run.withSuccessHandler(r => {
+        if (r && r.success && Array.isArray(r.names) && r.names.length === 12) { shioNames = r.names; shioZero = r.zero || shioZero; }
+      }).withFailureHandler(() => {}).shioMapGet(currentSessionToken);
+    }
     function getShioLocal(num) {
-      const groups = ["KELINCI","KUDA","ULAR","NAGA","KELINCI","HARIMAU","KERBAU","TIKUS","BABI","ANJING","AYAM","MONYET","KAMBING"];
       const value = Number(num);
-      if (value === 0) return 'KELINCI';
-      const normalized = ((value % 12) + 12) % 12;
-      return normalized === 0 ? 'KAMBING' : groups[normalized];
+      if (value === 0) return shioZero;
+      const r = ((value % 12) + 12) % 12;
+      return shioNames[r === 0 ? 11 : r - 1];
     }
 
     function processTextLocal(text) {

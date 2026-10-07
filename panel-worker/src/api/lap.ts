@@ -1,3 +1,4 @@
+import { getSys } from "../lib/settings";
 // Menu "Laporan Harian" — endpoint Worker.
 // Fase A: kredensial (Setting) + Lap Motion + Lap Mozart (API JSON, jalan langsung
 // di Worker). Lap Admin (scraper berat) menyusul lewat GitHub Actions.
@@ -581,9 +582,9 @@ async function dispatchScrapeJob(
 	}
 	const running = await getTurso(env).prepare(
 		`SELECT id FROM lap_job WHERE username = ? AND kind = ? AND status IN ('pending','running')
-		 AND created_at > datetime('now','+7 hours','-30 minutes') LIMIT 1`,
+		 AND created_at > datetime('now','+7 hours', ?) LIMIT 1`,
 	)
-		.bind(username, kind)
+		.bind(username, kind, `-${await getSys(env, "sys_lap_dup_job_min")} minutes`)
 		.first<{ id: string }>();
 	if (running) return { success: true as const, jobId: running.id, message: "Proses sebelumnya masih berjalan.", reused: true };
 
@@ -653,8 +654,6 @@ async function dispatchScrapeJob(
 const JOB_MENU: Record<string, MenuKey> = { admin: "lap-admin", motion: "lap-motion", mozart: "lap-mozart" };
 // Job yang tidak bergerak selama ini dianggap macet (GitHub Actions gagal
 // start / runner mati di tengah jalan) supaya progres tidak berputar selamanya.
-const JOB_STALE_PENDING_MIN = 15;
-const JOB_STALE_RUNNING_MIN = 25;
 
 /** Import dari skrip console (Motion/Mozart) dicatat sebagai job selesai. */
 async function recordLapImport(env: Env, username: string, kind: "motion" | "mozart", startDate: string, endDate: string, message: string) {
@@ -685,6 +684,8 @@ export async function lapJobs(env: Env, token: string) {
 				.bind(s.username)
 				.all<Record<string, string>>()
 		).results ?? [];
+	const JOB_STALE_PENDING_MIN = await getSys(env, "sys_lap_stale_pending_min");
+	const JOB_STALE_RUNNING_MIN = await getSys(env, "sys_lap_stale_running_min");
 	const stalePending = tsPlusMinutes(-JOB_STALE_PENDING_MIN);
 	const staleRunning = tsPlusMinutes(-JOB_STALE_RUNNING_MIN);
 	const jobs = rows

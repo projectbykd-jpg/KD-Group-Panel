@@ -614,6 +614,7 @@
             <button class="admin-tab" data-admin-tab="sesi" onclick="switchAdminPanel('sesi')"><i class="fa-solid fa-users-viewfinder"></i>Sesi Aktif</button>
             <button class="admin-tab" data-admin-tab="autopost" onclick="switchAdminPanel('autopost')"><i class="fa-solid fa-robot"></i>Auto Posting</button>
             <button class="admin-tab" data-admin-tab="lapops" onclick="switchAdminPanel('lapops')"><i class="fa-solid fa-sliders"></i>Pengaturan Sistem</button>
+            <button class="admin-tab" data-admin-tab="datamaster" onclick="switchAdminPanel('datamaster')"><i class="fa-solid fa-database"></i>Data Master</button>
             <button class="admin-tab" data-admin-tab="maintenance" onclick="switchAdminPanel('maintenance')"><i class="fa-solid fa-screwdriver-wrench"></i>Maintenance &amp; Log</button>
           </div>
           <select class="admin-tab-select" id="adminTabSelect" aria-label="Pilih panel admin" onchange="switchAdminPanel(this.value)">
@@ -622,6 +623,7 @@
             <option value="sesi">Sesi Login Aktif</option>
             <option value="autopost">Auto Posting Prediksi</option>
             <option value="lapops">Pengaturan Sistem</option>
+            <option value="datamaster">Data Master (Jadwal, Shio, Pasaran)</option>
             <option value="maintenance">Maintenance &amp; Retensi Log</option>
           </select>
 
@@ -680,6 +682,20 @@
           </div>
           </div>
 
+          <div class="admin-panel" data-admin-panel="datamaster">
+          <div class="mini-card flex flex-col gap-3 mb-3">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-2">
+              <div>
+                <div class="font-extrabold text-base"><i class="fa-solid fa-database mr-2 text-cyan-300"></i>Data Master</div>
+                <div class="text-xs text-slate-400 mt-1">Daftar yang dipakai sistem dan dulu tertanam di kode: jadwal auto-posting, peta shio, dan pasaran. Perubahan berlaku dalam &plusmn;15 detik. Data yang tidak valid <b>ditolak dengan pesan jelas</b>, dan <b>KEMBALIKAN KE BAWAAN</b> selalu tersedia.</div>
+              </div>
+              <span id="mdStatus" class="text-xs text-slate-400">Memuat…</span>
+            </div>
+            <div class="md-warn"><i class="fa-solid fa-triangle-exclamation"></i><span>Hati-hati pada <b>urutan sesi jadwal</b>: nomor sesi (PRED-1, PRED-2, …) dipakai penjaga anti-kirim-ganda. Ubah isi sesi boleh kapan saja; <b>tambah sesi di bagian bawah</b>, jangan menukar urutan di tengah hari.</span></div>
+          </div>
+          <div id="mdBody" class="md-list"></div>
+          </div>
+
           <div class="admin-panel" data-admin-panel="maintenance">
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div class="mini-card flex flex-col gap-4">
@@ -710,6 +726,7 @@
             <div>
               <div class="font-extrabold text-cyan-200"><i class="fa-solid fa-robot mr-2"></i>Auto Posting Prediksi</div>
               <div class="text-xs text-slate-400 mt-1">Selama ada operator login, prediksi tiap sesi jam <b>dan kata-kata penutup (06:15 &amp; 16:00)</b> dikirim otomatis ke website milik operator itu. Smart Lock mencegah pengiriman ganda antar akun. Penjadwalan digerakkan <b>cron eksternal</b> (cron-job.org) yang memanggil URL CRON tiap menit; router memilih sendiri sesi yang jatuh tempo (toleransi susulan 25 menit).</div>
+              <div class="text-[11px] text-slate-400 mt-2">Jam &amp; pasaran tiap sesi, kata penutup, dan angka batas (masa kunci, percobaan, toleransi) diatur di tab <button type="button" class="text-cyan-300 font-bold underline" onclick="switchAdminPanel('datamaster')">Data Master</button> dan <button type="button" class="text-cyan-300 font-bold underline" onclick="switchAdminPanel('lapops')">Pengaturan Sistem</button>.</div>
               <div id="autoPostStatus" class="text-[10px] text-slate-500 mt-2">Memuat status…</div>
               <div id="autoPostWebhookBox" class="text-[10px] text-slate-400 mt-2 leading-relaxed" style="display:none"></div>
             </div>

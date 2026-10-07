@@ -15,7 +15,7 @@ function empty(): Processed {
 	return { market: "UNKNOWN", status: "SALAH", shio: "", twoDigit: "", output: "", prize1: "", prize2: "", prize3: "" };
 }
 
-const SHIO_ORDER = [
+export const SHIO_ORDER = [
 	"", // idx 0 tak dipakai
 	"KUDA",
 	"ULAR",
@@ -31,9 +31,12 @@ const SHIO_ORDER = [
 	"KAMBING",
 ];
 
+/** Shio untuk angka 00 (bawaan KELINCI, bukan KAMBING -- sesuai map lama). Bisa diubah admin (Data Master). */
+export const SHIO_CONFIG = { zero: "KELINCI" };
+
 export function getShio(num: number): string {
 	if (!Number.isFinite(num)) return "UNKNOWN";
-	if (num === 0) return "KELINCI"; // sesuai map lama: 0 -> KELINCI (bukan KAMBING)
+	if (num === 0) return SHIO_CONFIG.zero;
 	const r = num % 12;
 	return SHIO_ORDER[r === 0 ? 12 : r] || "UNKNOWN";
 }
@@ -77,7 +80,7 @@ export function processText(text: string): Processed {
 	}
 }
 
-const MARKET_TO_PANEL: Record<string, string> = {
+export const MARKET_TO_PANEL: Record<string, string> = {
 	ATHENS: "athens", AUSTRIA: "austria", BAHRAIN: "bahrain", BERLIN: "berlin", BULLSEYE: "bullseye",
 	BUSAN: "busan", CAIRO: "cairo", CALIFORNIA: "california", CAROLINADAY: "carolina-day", CAROLINAEVE: "carolina-eve",
 	COLORADO: "colorado", DALLAS: "dallas", FLORIDAEVE: "florida-eve", FLORIDAMID: "florida-mid", "HK SIANG": "hk-siang",

@@ -7,9 +7,15 @@
 // Tabel dibuat otomatis (CREATE TABLE IF NOT EXISTS, sekali per isolate) --
 // tidak perlu migrasi manual; migration/007_login_throttle.sql hanya dokumentasi.
 
-const WINDOW_MS = 15 * 60 * 1000;
-// 16 operator bisa saja keluar lewat satu IP kantor yang sama, jadi batasnya
+import { getSys } from "./settings";
+
+// Jendela & batas diatur admin (Pengaturan Sistem > Keamanan Login): bawaan 15 menit / 30 kali.
+const windowMs = async (env: Env) => (await getSys(env, "sys_ip_fail_window_min")) * 60 * 1000;
+const maxFails = (env: Env) => getSys(env, "sys_ip_max_fails");
+// 16 operator bisa saja keluar lewat satu IP kantor yang sama, jadi batas bawaannya
 // sengaja longgar: 30 kali salah dalam 15 menit dari satu IP baru diblokir.
+// Nilai bawaan (dipakai juga oleh test):
+const WINDOW_MS = 15 * 60 * 1000;
 const MAX_FAILS = 30;
 
 let tableReady = false;
@@ -34,8 +40,8 @@ export async function loginBlockedMinutes(env: Env, ip: string): Promise<number>
 			.bind(ip)
 			.first<{ fails: number; window_start: number }>();
 		if (!row) return 0;
-		const left = row.window_start + WINDOW_MS - Date.now();
-		if (left <= 0 || row.fails < MAX_FAILS) return 0;
+		const left = row.window_start + (await windowMs(env)) - Date.now();
+		if (left <= 0 || row.fails < (await maxFails(env))) return 0;
 		return Math.max(1, Math.ceil(left / 60000));
 	} catch (e) {
 		// Throttle hanya lapisan tambahan -- kalau D1 bermasalah, login tetap jalan.
@@ -49,13 +55,14 @@ export async function recordLoginFailure(env: Env, ip: string): Promise<void> {
 	const now = Date.now();
 	try {
 		await ensureTable(env);
+		const WINDOW = await windowMs(env);
 		await env.DB.prepare(
 			`INSERT INTO login_throttle (ip, fails, window_start) VALUES (?, 1, ?)
 			 ON CONFLICT(ip) DO UPDATE SET
 				fails = CASE WHEN window_start + ? <= ? THEN 1 ELSE fails + 1 END,
 				window_start = CASE WHEN window_start + ? <= ? THEN ? ELSE window_start END`,
 		)
-			.bind(ip, now, WINDOW_MS, now, WINDOW_MS, now, now)
+			.bind(ip, now, WINDOW, now, WINDOW, now, now)
 			.run();
 	} catch (e) {
 		console.error("login throttle write error", e);

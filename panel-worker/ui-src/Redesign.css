@@ -1088,6 +1088,35 @@ thead th:last-child, tbody td:last-child { padding-right: 14px !important; }
 .sys-input em { font-style: normal; font-size: 11.5px; color: var(--ui-text-3); min-width: 34px; }
 .sys-range { grid-column: 2; font-size: 10.5px; color: var(--ui-text-3); text-align: right; }
 
+/* ---- Data Master (admin) ---- */
+.md-list { display: flex; flex-direction: column; gap: 10px; }
+.md-warn { display: flex; gap: 10px; align-items: flex-start; padding: 9px 12px; border: 1px solid var(--ui-line-strong); border-radius: 10px; background: var(--ui-surface-2); font-size: 12px; color: var(--ui-text-2, var(--ui-text)); line-height: 1.45; }
+.md-warn i { color: #f59e0b; margin-top: 2px; }
+.md-group-title { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ui-text-3); padding: 6px 2px 0; }
+.md-card { border: 1px solid var(--ui-line); border-radius: 10px; background: var(--ui-surface); overflow: hidden; }
+.md-card > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 14px; font-weight: 700; font-size: 13.5px; }
+.md-card > summary::-webkit-details-marker { display: none; }
+.md-card > summary .md-sum-l { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.md-card > summary .md-chev { transition: transform .12s; color: var(--ui-text-3); font-size: 11px; }
+.md-card[open] > summary .md-chev { transform: rotate(90deg); }
+.md-card[open] > summary { border-bottom: 1px solid var(--ui-line); background: var(--ui-surface-2); }
+.md-badge { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--ui-line-strong); color: var(--ui-text-3); white-space: nowrap; }
+.md-badge.custom { color: #38bdf8; border-color: rgba(56,189,248,.45); }
+.md-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.md-hint { font-size: 12px; color: var(--ui-text-3); line-height: 1.45; }
+.md-ta { width: 100%; min-height: 140px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--ui-surface-2) !important; border: 1px solid var(--ui-line-strong) !important; border-radius: 8px !important; padding: 8px 10px !important; color: var(--ui-text) !important; resize: vertical; }
+.md-input { height: 34px; background: var(--ui-surface-2) !important; border: 1px solid var(--ui-line-strong) !important; border-radius: 8px !important; padding: 0 10px !important; color: var(--ui-text) !important; font-size: 12.5px; width: 100%; }
+.md-slot { display: grid; grid-template-columns: 90px minmax(0, 1fr) minmax(0, 1.6fr) auto; gap: 8px; align-items: start; padding: 8px; border: 1px solid var(--ui-line); border-radius: 8px; background: var(--ui-surface-2); }
+.md-slot .md-ta { min-height: 132px; }
+#mdStatus { white-space: nowrap; }
+.md-slot .md-no { grid-column: 1 / -1; font-size: 10.5px; font-weight: 700; letter-spacing: .06em; color: var(--ui-text-3); }
+.md-shio { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.md-shio label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--ui-text-3); }
+.md-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.md-err { font-size: 12px; color: #fb7185; }
+.md-ok { font-size: 12px; color: #34d399; }
+@media (max-width: 720px) { .md-slot { grid-template-columns: 1fr; } }
+
 /* ---- LOGIN: background khas KD-Group (statis, tanpa blur/animasi) ---- */
 body { position: relative; }
 #login-bg { display: none; position: fixed; inset: 0; z-index: 0; pointer-events: none; background: #060a11 url("/LOGINBG.svg") center / cover no-repeat; }

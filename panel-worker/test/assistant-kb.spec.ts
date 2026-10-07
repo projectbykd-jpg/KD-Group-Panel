@@ -101,6 +101,12 @@ describe("API asisten", () => {
 			expect(kb, q).toContain("KUNCI BOT KAMU");
 		}
 	});
+
+	it("pertanyaan mengatur jadwal prediksi / shio / pasaran memuat tab Data Master", () => {
+		for (const q of ["cara ubah jadwal prediksi", "shio salah gimana ubah peta shio", "tambah pasaran baru panelz", "gimana ganti jam penutup prediksi", "tambah sesi prediksi baru"]) {
+			expect(selectKnowledge(q, []), q).toContain("Data Master");
+		}
+	});
 });
 
 // --- GERBANG KELENGKAPAN: judul/label di layar yang belum dijelaskan menggagalkan CI ---

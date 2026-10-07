@@ -88,7 +88,6 @@ export async function sendClosingPredictionAuto(env: Env, token: string, onlyWeb
 // ---------------------------------------------------------------------------
 // Auto-post router (dipakai Cron Trigger + tombol admin "JALANKAN SEKARANG")
 // ---------------------------------------------------------------------------
-const GUARD_TTL = 21600; // 6 jam
 
 async function isAutoPostEnabled(env: Env): Promise<boolean> {
 	const r = await env.DB.prepare(`SELECT value FROM settings WHERE key = 'autopost_enabled'`).first<{ value: string }>();
@@ -178,6 +177,10 @@ export async function runAutoPostRouter(env: Env, opts: { force?: boolean; windo
 	// Kalau satu run belum selesai (Telegram lambat) dan run berikutnya sudah masuk,
 	// dua-duanya bisa memproses slot yang sama SEBELUM guard slot terkunci -> pesan
 	// penutup / prediksi terkirim DOBEL. Lock ini (KV, TTL 3 menit) mencegah itu.
+	// Angka berikut diatur admin (Pengaturan Sistem > Auto Posting Prediksi).
+	const GUARD_TTL = (await getSys(env, "sys_slot_guard_hours")) * 3600;
+	const MAX_ATTEMPTS = await getSys(env, "sys_slot_max_attempts");
+	const LOCK_SECONDS = await getSys(env, "sys_autopost_lock_seconds");
 	const RUN_LOCK = "autopost:router:running";
 	if (!opts.force) {
 		try {
@@ -185,7 +188,7 @@ export async function runAutoPostRouter(env: Env, opts: { force?: boolean; windo
 				summary.message = "Router auto-post lain masih berjalan — tick ini dilewati.";
 				return summary;
 			}
-			await env.SESS.put(RUN_LOCK, String(Date.now()), { expirationTtl: 180 });
+			await env.SESS.put(RUN_LOCK, String(Date.now()), { expirationTtl: LOCK_SECONDS });
 		} catch {
 			/* KV error -> lanjut tanpa lock (lebih baik jalan daripada macet) */
 		}
@@ -255,11 +258,11 @@ export async function runAutoPostRouter(env: Env, opts: { force?: boolean; windo
 			await kvPut(guardKey, GUARD_TTL);
 			return;
 		}
-		// Masih ada yang gagal: coba lagi tick berikutnya, TAPI batasi 3x.
+		// Masih ada yang gagal: coba lagi tick berikutnya, TAPI batasi (bawaan 3x, diatur admin).
 		const attKey = guardKey + ":att";
 		const att = Number((await kvGet(attKey)) || 0) + 1;
 		try {
-			if (att >= 3) {
+			if (att >= MAX_ATTEMPTS) {
 				await kvPut(guardKey, GUARD_TTL);
 				await env.SESS.delete(attKey);
 			} else {
