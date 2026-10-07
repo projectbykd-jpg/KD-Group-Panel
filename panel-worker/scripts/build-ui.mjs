@@ -79,6 +79,8 @@ const ARG_MAP = {
 	lapSaveConfig: ["token", "data"],
 	adminGetSystemSettings: ["token"],
 	adminSaveSystemSettings: ["token", "values"],
+	assistantStatus: ["token"],
+	assistantAsk: ["token", "message", "history"],
 	lapGetSpecialOps: ["token"],
 	lapSaveSpecialOps: ["token", "operators"],
 	lapRunAdmin: ["token", "startDate", "endDate"],

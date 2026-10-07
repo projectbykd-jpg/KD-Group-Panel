@@ -1109,3 +1109,65 @@ body { position: relative; }
 @media (max-width: 760px) { .login-bg-mark, .login-bg-badge { display: none; } #login-bg { background-position: 40% center; } }
 
 .login-caps[hidden], [hidden] { display: none !important; }
+
+/* ============================================================
+   ASISTEN KD (chat melayang) -- tanpa blur/glow; transisi pendek
+   ============================================================ */
+#kd-assistant { position: fixed; right: 18px; bottom: 18px; z-index: 900; font-size: 13px; }
+#kd-assistant[hidden] { display: none !important; }
+#kd-assistant .kda-panel { display: none; width: min(390px, calc(100vw - 24px)); height: min(580px, calc(100vh - 110px)); flex-direction: column; background: var(--ui-surface); border: 1px solid var(--ui-line-strong); border-radius: 14px; box-shadow: 0 24px 60px -16px rgba(0,0,0,.8); overflow: hidden; }
+#kd-assistant[data-state="open"] .kda-panel { display: flex; animation: kdaIn .16s ease-out; }
+#kd-assistant[data-state="open"] .kda-fab, #kd-assistant[data-state="open"] .kda-dock { display: none; }
+#kd-assistant[data-state="fab"] .kda-dock, #kd-assistant[data-state="docked"] .kda-fab { display: none; }
+@keyframes kdaIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.kda-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--ui-line); background: var(--ui-surface-2); }
+.kda-head::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: linear-gradient(90deg, #2a8cff, #35d0ff 50%, #ff8a1f); }
+.kda-panel { position: relative; }
+.kda-title { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.kda-title b { font-size: 14px; color: var(--ui-text); font-weight: 700; }
+.kda-title small { font-size: 11px; color: var(--ui-text-3); }
+.kda-iconbtn { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: transparent; color: var(--ui-text-2); border: 1px solid transparent; cursor: pointer; font-size: 14px; }
+.kda-iconbtn:hover { background: var(--ui-surface-3); color: var(--ui-text); border-color: var(--ui-line-strong); }
+.kda-min { font-size: 20px; line-height: 1; font-weight: 600; }
+.kda-msgs { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; scrollbar-width: thin; scrollbar-color: var(--ui-line-strong) transparent; }
+.kda-msg { display: flex; }
+.kda-msg.me { justify-content: flex-end; }
+.kda-bubble { max-width: 88%; padding: 8px 12px; border-radius: 12px; line-height: 1.5; color: var(--ui-text); background: var(--ui-surface-2); border: 1px solid var(--ui-line); word-break: break-word; }
+.kda-msg.me .kda-bubble { background: rgba(var(--ui-accent-rgb), .16); border-color: rgba(var(--ui-accent-rgb), .4); border-bottom-right-radius: 4px; }
+.kda-msg.bot .kda-bubble { border-bottom-left-radius: 4px; }
+.kda-msg.err .kda-bubble { border-color: rgba(var(--ui-danger-rgb), .45); color: #ffb4ba; }
+.kda-bubble p { margin: 0 0 6px; } .kda-bubble p:last-child, .kda-bubble ol:last-child, .kda-bubble ul:last-child { margin-bottom: 0; }
+.kda-bubble ol, .kda-bubble ul { margin: 0 0 6px; padding-left: 20px; } .kda-bubble li { margin: 2px 0; }
+.kda-bubble ol { list-style: decimal; } .kda-bubble ul { list-style: disc; }
+.kda-bubble code { font-family: ui-monospace, monospace; font-size: 12px; background: var(--ui-surface-3); padding: 1px 5px; border-radius: 5px; }
+.kda-typing { display: inline-flex; gap: 4px; align-items: center; padding: 12px; }
+.kda-typing span { width: 6px; height: 6px; border-radius: 50%; background: var(--ui-text-3); animation: kdaDot 1s infinite ease-in-out; }
+.kda-typing span:nth-child(2) { animation-delay: .15s; } .kda-typing span:nth-child(3) { animation-delay: .3s; }
+@keyframes kdaDot { 0%, 80%, 100% { opacity: .3; } 40% { opacity: 1; } }
+.kda-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; }
+.kda-chips:empty { display: none; }
+.kda-chip { font-size: 12px; padding: 5px 10px; border-radius: 999px; background: var(--ui-surface-2); border: 1px solid var(--ui-line-strong); color: var(--ui-text-2); cursor: pointer; text-align: left; }
+.kda-chip:hover { color: var(--ui-text); border-color: rgba(var(--ui-accent-rgb), .6); }
+.kda-form { display: flex; align-items: flex-end; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--ui-line); }
+.kda-form textarea { flex: 1; resize: none; min-height: 38px; max-height: 110px; padding: 8px 10px; background: var(--ui-surface-2) !important; border: 1px solid var(--ui-line-strong) !important; border-radius: 10px !important; color: var(--ui-text) !important; font-size: 13px !important; line-height: 1.4; }
+.kda-form textarea:focus { border-color: var(--ui-accent) !important; outline: none; box-shadow: 0 0 0 3px rgba(var(--ui-accent-rgb), .18); }
+.kda-send { width: 38px; height: 38px; border-radius: 10px; background: var(--ui-accent); color: var(--ui-on-accent); border: 0; display: grid; place-items: center; cursor: pointer; flex: none; }
+.kda-send:disabled { opacity: .5; cursor: progress; }
+.kda-foot { padding: 0 12px 8px; font-size: 11px; color: var(--ui-text-3); }
+/* logo melayang + tombol sembunyikan (−) */
+.kda-fab { position: relative; width: 64px; height: 64px; }
+.kda-fab-main { width: 64px; height: 64px; padding: 0; border: 0; background: transparent; border-radius: 50%; cursor: pointer; transition: transform .15s ease; filter: drop-shadow(0 6px 10px rgba(0,0,0,.55)); }
+.kda-fab-main:hover { transform: translateY(-2px) scale(1.04); }
+.kda-fab-main img { width: 100%; height: 100%; display: block; }
+.kda-fab-min { position: absolute; top: -6px; left: -6px; width: 22px; height: 22px; border-radius: 50%; background: var(--ui-surface-3); color: var(--ui-text); border: 1px solid var(--ui-line-strong); font-size: 15px; line-height: 1; display: grid; place-items: center; cursor: pointer; opacity: .85; padding: 0 0 2px; }
+.kda-fab-min:hover { opacity: 1; background: var(--ui-surface-2); border-color: var(--ui-accent); }
+/* tab kecil di tepi kanan (setelah disembunyikan) */
+.kda-dock { position: fixed; right: 0; bottom: 28px; height: 54px; padding: 0 6px 0 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: var(--ui-surface-2); color: var(--ui-text-2); border: 1px solid var(--ui-line-strong); border-right: 0; border-radius: 12px 0 0 12px; cursor: pointer; transform: translateX(8px); transition: transform .15s ease; }
+.kda-dock:hover { transform: none; color: var(--ui-text); border-color: var(--ui-accent); }
+.kda-dock i { font-size: 10px; } .kda-dock img { width: 24px; height: 24px; }
+@media (max-width: 1023px) {
+  #kd-assistant { bottom: 82px; right: 12px; }
+  .kda-dock { bottom: 96px; }
+  #kd-assistant .kda-panel { height: min(520px, calc(100vh - 170px)); }
+}
+@media (prefers-reduced-motion: reduce) { #kd-assistant * { animation: none !important; transition: none !important; } }

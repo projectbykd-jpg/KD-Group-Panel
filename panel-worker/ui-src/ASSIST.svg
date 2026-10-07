@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Asisten KD">
+  <defs>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#35d0ff"/><stop offset=".55" stop-color="#2a8cff"/><stop offset="1" stop-color="#ff8a1f"/></linearGradient>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#14284a"/><stop offset="1" stop-color="#08101e"/></linearGradient>
+    <linearGradient id="bub" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7ee7ff"/><stop offset=".5" stop-color="#35b6ff"/><stop offset="1" stop-color="#2a74ff"/></linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffe27a"/><stop offset="1" stop-color="#ff8a1f"/></linearGradient>
+    <radialGradient id="glow" cx=".5" cy=".38" r=".6"><stop offset="0" stop-color="#2a8cff" stop-opacity=".38"/><stop offset="1" stop-color="#2a8cff" stop-opacity="0"/></radialGradient>
+    <clipPath id="c"><circle cx="128" cy="128" r="112"/></clipPath>
+  </defs>
+  <circle cx="128" cy="128" r="112" fill="url(#plate)"/>
+  <g clip-path="url(#c)">
+    <rect width="256" height="256" fill="url(#glow)"/>
+    <g stroke="#35d0ff" stroke-width="1.4" fill="none" opacity=".35"><path d="M20 196h50l14 14h40"/><path d="M236 196h-46l-14 14h-30"/><path d="M20 70h30l12-12h24"/></g>
+    <g fill="#35d0ff" opacity=".7"><circle cx="124" cy="210" r="3"/><circle cx="86" cy="58" r="3"/><circle cx="172" cy="210" r="3"/></g>
+  </g>
+  <circle cx="128" cy="128" r="112" fill="none" stroke="url(#ring)" stroke-width="10"/>
+  <circle cx="128" cy="128" r="99" fill="none" stroke="#fff" stroke-opacity=".08" stroke-width="2"/>
+  <!-- headset -->
+  <path d="M60 112C60 58 196 58 196 112" fill="none" stroke="url(#gold)" stroke-width="9" stroke-linecap="round"/>
+  <rect x="48" y="104" width="22" height="46" rx="10" fill="url(#gold)"/>
+  <rect x="186" y="104" width="22" height="46" rx="10" fill="url(#gold)"/>
+  <path d="M196 148c0 22-14 34-40 36" fill="none" stroke="#ffb347" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="154" cy="184" r="7" fill="url(#gold)"/>
+  <!-- bubble -->
+  <path d="M82 80h92a28 28 0 0 1 28 28v36a28 28 0 0 1-28 28h-46l-30 26 6-26h-22a28 28 0 0 1-28-28v-36a28 28 0 0 1 28-28z" fill="url(#bub)" stroke="#e8fbff" stroke-opacity=".55" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M90 90q38-12 76 0" fill="none" stroke="#fff" stroke-opacity=".5" stroke-width="3" stroke-linecap="round"/>
+  <text x="128" y="143" text-anchor="middle" font-family="'Arial Black','Segoe UI Black','Helvetica Neue',Arial,sans-serif" font-weight="900" font-size="52" fill="#06223f" letter-spacing="-1">KD</text>
+  <!-- sparkle -->
+  <path d="M206 46l5 15 15 5-15 5-5 15-5-15-15-5 15-5z" fill="url(#gold)"/>
+  <path d="M168 40l2.6 7.4 7.4 2.6-7.4 2.6-2.6 7.4-2.6-7.4-7.4-2.6 7.4-2.6z" fill="#fff" opacity=".9"/>
+</svg>
