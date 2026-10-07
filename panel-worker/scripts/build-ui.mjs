@@ -82,6 +82,7 @@ const ARG_MAP = {
 	adminGetMasterData: ["token"],
 	adminSaveMasterData: ["token", "key", "value"],
 	shioMapGet: ["token"],
+	homeInsights: ["token"],
 	adminGetIntegrations: ["token"],
 	adminSaveIntegrations: ["token", "values"],
 	adminTestIntegrations: ["token"],

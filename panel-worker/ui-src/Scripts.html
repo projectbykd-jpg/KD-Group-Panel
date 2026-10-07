@@ -649,6 +649,23 @@
       setCount('homeMiniSends', stats.sends);
       setCount('homeMiniToday', stats.today);
 
+      // Rasio sukses (berhasil / (berhasil + gagal)) -> donat
+      const okN = Number(stats.success || 0), badN = Number(stats.failed || 0);
+      const pct = (okN + badN) ? Math.round(okN * 100 / (okN + badN)) : null;
+      const arc = document.getElementById('homeDonutArc'), pctEl = document.getElementById('homeDonutPct');
+      if (arc) arc.setAttribute('stroke-dasharray', (pct == null ? 0 : pct) + ' 100');
+      if (pctEl) pctEl.textContent = pct == null ? '–' : pct + '%';
+      // Salam sesuai jam WIB + tanggal
+      const wib = new Date(Date.now() + (7 * 60 + new Date().getTimezoneOffset()) * 60000);
+      const hh = wib.getHours();
+      const greet = hh < 4 ? 'Selamat malam' : hh < 11 ? 'Selamat pagi' : hh < 15 ? 'Selamat siang' : hh < 19 ? 'Selamat sore' : 'Selamat malam';
+      const gEl = document.getElementById('homeGreeting'); if (gEl) gEl.textContent = greet + ', ' + (currentUser || 'User');
+      const dEl = document.getElementById('homeGreetDate');
+      if (dEl) dEl.textContent = wib.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+      const roleEl = document.getElementById('homeRoleChip');
+      if (roleEl) roleEl.innerHTML = '<i class="fa-solid fa-shield-halved"></i>' + escapeHtml(String((currentProfile && currentProfile.role) || 'USER'));
+      const mEl = document.getElementById('homeMaintPill'); if (mEl) mEl.hidden = !(data && data.maintenance && data.maintenance.enabled);
+
       const userEl = document.getElementById('homeDashboardUser');
       if (userEl) userEl.innerHTML = '<i class="fa-solid fa-user"></i>' + escapeHtml(currentUser || 'User');
 
@@ -691,6 +708,57 @@
       FX.countUp(document.getElementById('homeDashboardStats'));
     }
 
+    // ---------- Dashboard: grafik per jam, jadwal prediksi, top operator ----------
+    let homeInsightsSig = '';
+    function renderHomeInsights(d) {
+      if (!d || !d.success) return;
+      const sig = JSON.stringify([d.hourly, d.hourlyFailed, d.topUsers, d.schedule, d.closing, Math.floor((d.nowMinutes || 0) / 5)]);
+      if (sig === homeInsightsSig) return; // tidak ada yang berubah -> jangan gambar ulang
+      homeInsightsSig = sig;
+      const nowH = Math.floor((d.nowMinutes || 0) / 60);
+      const max = Math.max(1, ...d.hourly);
+      const bars = document.getElementById('homeHourly');
+      if (bars) bars.innerHTML = d.hourly.map((n, h) => {
+        const bad = d.hourlyFailed[h] || 0, ok = Math.max(0, n - bad);
+        const ph = n ? Math.max(6, Math.round(n * 100 / max)) : 0;           // tinggi total (%)
+        const badPct = n ? Math.round(bad * 100 / n) : 0;
+        return `<div class="dash-bar ${n ? '' : 'empty'} ${h === nowH ? 'now' : ''}" title="${String(h).padStart(2, '0')}:00 — ${n} aktivitas${bad ? ', ' + bad + ' gagal' : ''}">
+          <i class="bad" style="height:${ph * badPct / 100}%"></i><i class="ok" style="height:${ph - ph * badPct / 100}%"></i></div>`;
+      }).join('');
+      // Jadwal: sesi + kata penutup, urut jam; yang sudah lewat = selesai, pertama yang belum = berikutnya
+      const items = (d.schedule || []).map(x => ({ jam: x.jam, nama: x.nama, kind: 'slot', total: x.total }))
+        .concat((d.closing || []).map(j => ({ jam: j, nama: 'Kata-kata penutup', kind: 'close' })))
+        .sort((a, b) => a.jam.localeCompare(b.jam));
+      const mins = j => { const p = j.split(':'); return Number(p[0]) * 60 + Number(p[1]); };
+      let nextIdx = items.findIndex(x => mins(x.jam) > (d.nowMinutes || 0));
+      const box = document.getElementById('homeSchedule');
+      if (box) box.innerHTML = items.map((x, i) => {
+        const st = mins(x.jam) <= (d.nowMinutes || 0) ? 'done' : (i === nextIdx ? 'next' : '');
+        const badge = st === 'done' ? 'SELESAI' : st === 'next' ? 'BERIKUTNYA' : (x.kind === 'slot' ? x.total + ' pasaran' : 'NANTI');
+        return `<div class="dash-slot ${st} ${x.kind === 'close' ? 'close' : ''}"><span class="t">${escapeHtml(x.jam)}</span><span class="dot"></span><span class="n" title="${escapeHtml(x.nama)}">${escapeHtml(x.nama)}</span><span class="b">${badge}</span></div>`;
+      }).join('') || '<div class="home-activity-empty">Belum ada jadwal.</div>';
+      const chip = document.getElementById('homeNextSlot');
+      if (chip) {
+        if (nextIdx < 0) { chip.className = 'dashboard-chip'; chip.innerHTML = '<i class="fa-solid fa-check-double"></i>Semua sesi hari ini selesai'; }
+        else {
+          const diff = mins(items[nextIdx].jam) - (d.nowMinutes || 0), h = Math.floor(diff / 60), m = diff % 60;
+          chip.className = 'dashboard-chip is-next';
+          chip.innerHTML = '<i class="fa-solid fa-hourglass-half"></i>Berikutnya ' + escapeHtml(items[nextIdx].jam) + ' · ' + (h ? h + 'j ' : '') + m + 'm lagi';
+        }
+      }
+      const top = document.getElementById('homeTopCard'), rank = document.getElementById('homeTopUsers');
+      const isAdmin = !!(currentProfile && currentProfile.role === 'ADMIN');
+      if (top) top.hidden = !(isAdmin && (d.topUsers || []).length);
+      if (rank && isAdmin) {
+        const topMax = Math.max(1, ...(d.topUsers || []).map(u => u.n));
+        rank.innerHTML = (d.topUsers || []).map((u, i) => `<div class="dash-rank-row"><span class="no">${i + 1}</span>
+          <div class="bar"><i style="width:${Math.round(u.n * 100 / topMax)}%"></i><span>${escapeHtml(u.username)}</span></div><span class="v">${u.n}</span></div>`).join('');
+      }
+    }
+    function loadHomeInsights() {
+      google.script.run.withSuccessHandler(renderHomeInsights).withFailureHandler(() => {}).homeInsights(currentSessionToken);
+    }
+
     function loadHomeDashboard(force) {
       if (!currentUser) return;
       const freshMs = 12000;
@@ -700,6 +768,7 @@
       const syncEl = document.getElementById('homeDashboardSync');
       if (syncEl) syncEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>Memuat data…';
 
+      loadHomeInsights();
       google.script.run
         .withSuccessHandler(data => {
           window._homeDashboardLoadedAt = Date.now();

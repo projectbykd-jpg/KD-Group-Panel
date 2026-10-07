@@ -1,6 +1,6 @@
 // Port getBootstrapData / getDashboardData / getLivePanelData (bagian dashboard).
 import { publicProfile, requireSession } from "./auth";
-import { getDashboardData, normalizeDashOptions } from "../lib/dash";
+import { getDashboardData, getHomeInsights, normalizeDashOptions } from "../lib/dash";
 
 export async function getBootstrapData(env: Env, token: string) {
 	let session;
@@ -48,4 +48,10 @@ export async function getBootstrapData(env: Env, token: string) {
 export async function getDashboard(env: Env, token: string, options: unknown) {
 	const session = await requireSession(env, token, { ignoreMaintenance: true });
 	return getDashboardData(env, session.profile, normalizeDashOptions(options));
+}
+
+/** Grafik per jam, top operator (admin), dan jadwal prediksi hari ini untuk halaman Dashboard. */
+export async function homeInsights(env: Env, token: string) {
+	const session = await requireSession(env, token, { ignoreMaintenance: true });
+	return { success: true, ...(await getHomeInsights(env, session.profile)) };
 }
