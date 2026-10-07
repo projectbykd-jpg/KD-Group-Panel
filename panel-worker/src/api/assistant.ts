@@ -4,7 +4,7 @@
 // dijalankan, tidak ada data/rahasia pengguna yang dikirim ke AI.
 import { requireSession } from "./auth";
 import { logActivity } from "../lib/activity";
-import { aiChatProvider, aiCooldown, aiLoadProviders, aiUsableProviders, AiUnavailableError, modelChain, type AiProvider } from "../lib/ai-provider";
+import { aiChatProvider, aiCooldown, aiLoadProviders, aiUsableProviders, AiUnavailableError, maskKey, modelChain, normalizeBaseUrl, type AiProvider } from "../lib/ai-provider";
 import { ASSISTANT_KB_VERSION, selectKnowledge } from "../lib/assistant-kb";
 import { botCfg } from "../lib/bot-news";
 import { MENU_ITEMS, parseMenus } from "../lib/menus";
@@ -87,23 +87,32 @@ export async function assistantAsk(env: Env, token: string, message: unknown, hi
 	let ms = 0;
 	try {
 		const cfg = await botCfg(env);
-		const providers = await aiUsableProviders(env, cfg);
-		if (!providers.length) throw new AiUnavailableError("tidak ada provider");
-		const pref = await prefSetting(env);
-		// Urutan khusus asisten: pilihan admin -> Groq (cepat) -> urutan prioritas biasa.
-		const rank = (p: AiProvider) => (pref && p.id === pref ? 0 : /groq/i.test(p.base_url + p.name) ? 1 : 2);
-		const ordered = providers.map((p, i) => ({ p, i })).sort((x, y) => rank(x.p) - rank(y.p) || x.i - y.i).map((x) => x.p);
+		const maxTokens = await getSys(env, "sys_assistant_max_tokens");
+		const dedicated = await loadDedicated(env);
+		const fallback = (await getSys(env, "sys_assistant_fallback")) === 1;
+		// Kandidat: key KHUSUS asisten dulu (terpisah dari provider bot/lainnya).
+		// Provider bersama hanya dipakai bila tidak ada key khusus, atau admin mengizinkan cadangan.
+		const candidates: AiProvider[] = [];
+		if (dedicated) candidates.push(dedicated);
+		if (!dedicated || fallback) {
+			const providers = await aiUsableProviders(env, cfg);
+			const pref = await prefSetting(env);
+			// Urutan: pilihan admin -> Groq (cepat) -> urutan prioritas biasa.
+			const rank = (p: AiProvider) => (pref && p.id === pref ? 0 : /groq/i.test(p.base_url + p.name) ? 1 : 2);
+			candidates.push(...providers.map((p, i) => ({ p, i })).sort((x, y) => rank(x.p) - rank(y.p) || x.i - y.i).map((x) => x.p));
+		}
+		if (!candidates.length) throw new AiUnavailableError("tidak ada provider");
 		const errs: string[] = [];
-		for (const p of ordered) {
+		for (const p of candidates) {
 			const model = modelChain(p).find((m) => !aiCooldown(cfg, { ...p, model: m }));
 			if (!model) continue;
 			try {
 				const call = await aiChatProvider(env, cfg, { ...p, model }, {
 					purpose: "assistant",
 					temperature: 0.2,
-					maxTokens: await getSys(env, "sys_assistant_max_tokens"),
+					maxTokens,
 					messages: [{ role: "system", content: system }, ...hist, { role: "user", content: q }],
-					// jangan menunggu lama: lebih baik pindah ke provider berikutnya
+					// jangan menunggu lama: lebih baik pindah ke kandidat berikutnya
 					firstByteMs: 20_000,
 					idleMs: 12_000,
 					totalMs: 40_000,
@@ -119,9 +128,9 @@ export async function assistantAsk(env: Env, token: string, message: unknown, hi
 		if (!answer) throw new Error(errs.join(" | ") || "tidak ada jawaban");
 	} catch (e) {
 		if (e instanceof AiUnavailableError) {
-			throw new Error("Asisten belum aktif: belum ada AI Provider yang bisa dipakai. Minta admin mengaktifkannya di Bot → Setting → AI Provider.");
+			throw new Error("Asisten belum aktif: belum ada API key. Minta admin mengisinya di Admin → Pengaturan Sistem → Asisten KD (atau aktifkan AI Provider di Bot → Setting).");
 		}
-		throw new Error("Asisten sedang sibuk atau AI Provider bermasalah. Coba lagi sebentar.");
+		throw new Error("Asisten sedang sibuk atau API key bermasalah. Coba lagi sebentar.");
 	}
 	await logActivity(env, s.username, "ASISTEN KD", `Tanya asisten (${q.length} karakter)`, "BERHASIL", "").catch(() => {});
 	return { success: true, answer, via, ms, kbVersion: ASSISTANT_KB_VERSION, at: tsNow() };
@@ -134,19 +143,46 @@ async function prefSetting(env: Env): Promise<string> {
 	return String(r?.value ?? "").trim();
 }
 
+// Key KHUSUS asisten (terpisah dari AI Provider bot/lain agar kuota tidak saling ganggu).
+const DEDICATED_KEY = "assistant_ai";
+type Dedicated = { base_url: string; key: string; model: string };
+
+async function readDedicated(env: Env): Promise<Dedicated | null> {
+	const r = await env.DB.prepare(`SELECT value FROM settings WHERE key = ?`).bind(DEDICATED_KEY).first<{ value: string }>();
+	try {
+		const o = JSON.parse(String(r?.value ?? "")) as Partial<Dedicated>;
+		if (o && o.base_url && o.key && o.model) return { base_url: String(o.base_url), key: String(o.key), model: String(o.model) };
+	} catch {
+		/* kosong / rusak */
+	}
+	return null;
+}
+
+function toProvider(d: Dedicated): AiProvider {
+	return { id: "assistant-dedicated", name: "Asisten (key khusus)", base_url: d.base_url, key: d.key, model: d.model, enabled: true, quota: 0, activated: "", valid_days: 0, used_adjust: 0, created_at: "" };
+}
+
+async function loadDedicated(env: Env): Promise<AiProvider | null> {
+	const d = await readDedicated(env);
+	return d ? toProvider(d) : null;
+}
+
 export async function assistantGetConfig(env: Env, token: string) {
 	await requireSession(env, token, { admin: true });
 	const cfg = await botCfg(env);
 	const list = await aiLoadProviders(env, cfg).catch(() => [] as AiProvider[]);
+	const d = await readDedicated(env);
 	return {
 		success: true,
 		provider: await prefSetting(env),
 		providers: list.map((p) => ({ id: p.id, name: p.name, model: modelChain(p)[0] || p.model, enabled: p.enabled, groq: /groq/i.test(p.base_url + p.name) })),
+		dedicated: d ? { configured: true, base_url: d.base_url, model: d.model, key_mask: maskKey(d.key) } : { configured: false, base_url: "", model: "", key_mask: "" },
 		kbVersion: ASSISTANT_KB_VERSION,
 	};
 }
 
-export async function assistantSaveConfig(env: Env, token: string, provider: unknown) {
+/** Simpan provider bersama pilihan + (opsional) key khusus. Key kosong = pertahankan yang lama; clear=true = hapus. */
+export async function assistantSaveConfig(env: Env, token: string, provider: unknown, dedicated?: unknown) {
 	const s = await requireSession(env, token, { admin: true });
 	const id = String(provider ?? "").trim().slice(0, 64);
 	if (id) {
@@ -154,6 +190,47 @@ export async function assistantSaveConfig(env: Env, token: string, provider: unk
 		if (!list.some((p) => p.id === id)) throw new Error("Provider tidak ditemukan.");
 	}
 	await env.DB.prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).bind(PREF_KEY, id).run();
-	await logActivity(env, s.username, "ASISTEN KD", id ? "Provider asisten dipilih" : "Provider asisten: otomatis (Groq dulu)", "BERHASIL", "");
+	let note = id ? "Provider cadangan dipilih" : "Provider cadangan: otomatis (Groq dulu)";
+	const o = (dedicated && typeof dedicated === "object" ? dedicated : null) as Record<string, unknown> | null;
+	if (o) {
+		if (o.clear === true) {
+			await env.DB.prepare(`DELETE FROM settings WHERE key = ?`).bind(DEDICATED_KEY).run();
+			note += "; key khusus dihapus";
+		} else if (String(o.base_url ?? "").trim() || String(o.key ?? "").trim() || String(o.model ?? "").trim()) {
+			const old = await readDedicated(env);
+			const base_url = normalizeBaseUrl(String(o.base_url ?? "") || old?.base_url || "");
+			const key = String(o.key ?? "").trim() || old?.key || "";
+			const model = String(o.model ?? "").trim() || old?.model || "";
+			if (key.length < 8 || key.length > 300 || /\s/.test(key)) throw new Error("API key tidak valid (tanpa spasi, 8–300 karakter).");
+			if (!model || model.length > 80 || /[\s,]/.test(model)) throw new Error("Model wajib diisi (satu nama model, tanpa spasi/koma).");
+			await env.DB.prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+				.bind(DEDICATED_KEY, JSON.stringify({ base_url, key, model }))
+				.run();
+			note += `; key khusus disimpan (${new URL(base_url).host}, ${model})`;
+		}
+	}
+	await logActivity(env, s.username, "ASISTEN KD", note, "BERHASIL", "");
 	return { ...(await assistantGetConfig(env, token)), message: "Tersimpan." };
+}
+
+/** Tes cepat key khusus: satu pertanyaan kecil, mengembalikan lama & jawaban singkat. */
+export async function assistantTest(env: Env, token: string) {
+	await requireSession(env, token, { admin: true });
+	const p = await loadDedicated(env);
+	if (!p) throw new Error("Belum ada key khusus yang disimpan.");
+	const cfg = await botCfg(env);
+	try {
+		const call = await aiChatProvider(env, cfg, p, {
+			purpose: "assistant-test",
+			temperature: 0,
+			maxTokens: 40,
+			messages: [{ role: "user", content: "Balas hanya: OK" }],
+			firstByteMs: 15_000,
+			idleMs: 10_000,
+			totalMs: 25_000,
+		});
+		return { success: true, ms: call.ms, model: call.model, reply: call.text.trim().slice(0, 60) };
+	} catch (e) {
+		return { success: false, message: "Gagal: " + (e instanceof Error ? e.message : String(e)).slice(0, 220) };
+	}
 }
