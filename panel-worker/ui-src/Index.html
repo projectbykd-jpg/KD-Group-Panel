@@ -669,7 +669,7 @@
             <div class="mini-card flex flex-col gap-4">
               <div>
                 <div class="font-extrabold text-indigo-200"><i class="fa-solid fa-broom mr-2"></i>Retensi Activity Log</div>
-                <div class="text-xs text-slate-400 mt-1">Log aktivitas disimpan <b>7 hari terakhir</b>. Baris yang lebih tua dihapus otomatis oleh cron harian, tidak perlu diaktifkan manual.</div>
+                <div class="text-xs text-slate-400 mt-1">Log aktivitas disimpan sesuai <b>Pengaturan</b> (bawaan 7 hari terakhir). Baris yang lebih tua dihapus otomatis oleh cron harian, tidak perlu diaktifkan manual.</div>
               </div>
               <div id="backupActivityStatus" class="text-[10px] text-slate-500">Klik BERSIHKAN SEKARANG untuk memangkas log lama saat ini juga.</div>
               <button id="logPruneBtn" onclick="runActivityBackupNow()" class="glass-inner px-4 py-3 rounded-2xl text-[10px] font-extrabold mt-auto"><i class="fa-solid fa-broom mr-2"></i>BERSIHKAN SEKARANG</button>
@@ -1500,6 +1500,30 @@
         <i class="fa-solid fa-check mr-2"></i>OK, TUTUP
       </button>
     </div>
+  </div>
+
+  <!-- ASISTEN KD: chat bantuan melayang (tampil setelah login, bukan untuk role BOT) -->
+  <div id="kd-assistant" data-state="fab" hidden>
+    <section class="kda-panel" role="dialog" aria-label="Asisten KD" aria-modal="false">
+      <header class="kda-head">
+        <img src="/ASSIST.svg" width="38" height="38" alt="" decoding="async">
+        <div class="kda-title"><b>Asisten KD</b><small id="kdaSub">Tanya cara memakai panel</small></div>
+        <button type="button" class="kda-iconbtn" id="kdaClear" title="Hapus percakapan" aria-label="Hapus percakapan"><i class="fa-regular fa-trash-can"></i></button>
+        <button type="button" class="kda-iconbtn kda-min" id="kdaMin" title="Sembunyikan" aria-label="Sembunyikan Asisten KD">&minus;</button>
+      </header>
+      <div class="kda-msgs" id="kdaMsgs" aria-live="polite"></div>
+      <div class="kda-chips" id="kdaChips"></div>
+      <form class="kda-form" id="kdaForm" autocomplete="off">
+        <textarea id="kdaInput" rows="1" maxlength="600" placeholder="Tulis pertanyaan… (Enter kirim)" aria-label="Pertanyaan untuk Asisten KD"></textarea>
+        <button type="submit" class="kda-send" id="kdaSend" aria-label="Kirim"><i class="fa-solid fa-paper-plane"></i></button>
+      </form>
+      <div class="kda-foot">Jangan kirim password, cookie, atau API key.</div>
+    </section>
+    <div class="kda-fab">
+      <button type="button" class="kda-fab-main" id="kdaOpen" aria-label="Buka Asisten KD" title="Tanya Asisten KD"><img src="/ASSIST.svg" width="60" height="60" alt="" decoding="async"></button>
+      <button type="button" class="kda-fab-min" id="kdaHide" aria-label="Sembunyikan ke tepi kanan" title="Sembunyikan">&minus;</button>
+    </div>
+    <button type="button" class="kda-dock" id="kdaDock" aria-label="Tampilkan Asisten KD" title="Tampilkan Asisten KD"><i class="fa-solid fa-chevron-left"></i><img src="/ASSIST.svg" width="26" height="26" alt="" decoding="async"></button>
   </div>
 
   <?!= include('Scripts'); ?>

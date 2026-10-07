@@ -1,6 +1,7 @@
 // KD-Group Panel — Cloudflare Worker (port dari Apps Script).
 // Semua panggilan frontend lama google.script.run.<fn>(...) dipetakan ke
 // POST /api  body: { "action": "<fn>", ...args }
+import { assistantAsk, assistantStatus } from "./api/assistant";
 import { CORS_HEADERS, json } from "./lib/respond";
 import { loadSession, migrateKvSessionsOnce, pruneExpiredSessions } from "./lib/session";
 import { getTurso } from "./lib/turso";
@@ -244,6 +245,8 @@ const ROUTES: Record<string, Handler> = {
 	// laporan harian
 	lapGetConfig: (env, b) => lapGetConfig(env, s(b.token)),
 	lapSaveConfig: (env, b) => lapSaveConfig(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
+	assistantStatus: (env, b) => assistantStatus(env, s(b.token)),
+	assistantAsk: (env, b) => assistantAsk(env, s(b.token), b.message, b.history),
 	lapGetSpecialOps: (env, b) => lapGetSpecialOps(env, s(b.token)),
 	lapSaveSpecialOps: (env, b) => lapSaveSpecialOps(env, s(b.token), b.operators),
 	// depoPaidRows/depoCreateRows/wdRows SENGAJA tidak di-default-kan ke [] --

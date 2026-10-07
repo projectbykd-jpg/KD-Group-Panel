@@ -260,3 +260,100 @@
   document.addEventListener('DOMContentLoaded', wrap, { once: true });
 })();
 </script>
+
+<script>
+/* ASISTEN KD -- widget chat melayang. Murni UI: bertanya ke Worker (assistantAsk).
+   State: fab (logo melayang) | open (panel) | docked (tab kecil di tepi kanan). */
+(function () {
+  var root = document.getElementById('kd-assistant');
+  if (!root) return;
+  var KEY = 'kd_asst_state', HKEY = 'kd_asst_hist';
+  var msgsEl = document.getElementById('kdaMsgs'), chipsEl = document.getElementById('kdaChips');
+  var input = document.getElementById('kdaInput'), sendBtn = document.getElementById('kdaSend');
+  var state = 'fab', hist = [], busy = false, enabled = true, kbVer = '';
+  try { var st = localStorage.getItem(KEY); if (st === 'docked') state = 'docked'; } catch (e) {}
+  try { hist = JSON.parse(sessionStorage.getItem(HKEY) || '[]').slice(-20); } catch (e) { hist = []; }
+
+  var SUGGEST = ['Cara kirim result ke semua sistem?', 'Cara tarik data Lap Admin?', 'Kenapa tombol Kirim gagal?', 'Cara tambah user baru (admin)?', 'Apa itu Auto Prediksi?'];
+
+  function setState(s) {
+    state = s; root.setAttribute('data-state', s);
+    try { localStorage.setItem(KEY, s === 'docked' ? 'docked' : 'fab'); } catch (e) {}
+    if (s === 'open') { render(); setTimeout(function () { try { input.focus(); } catch (e) {} }, 60); }
+  }
+  function esc(t) { return (typeof escapeHtml === 'function') ? escapeHtml(t) : String(t).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
+  // Markdown ringan yang aman: escape dulu, baru **tebal**, `kode`, daftar.
+  function md(text) {
+    var lines = esc(text).split(/\n/), out = [], list = null;
+    function close() { if (list) { out.push('</' + list + '>'); list = null; } }
+    lines.forEach(function (ln) {
+      var m;
+      if ((m = ln.match(/^\s*(\d+)[.)]\s+(.*)$/))) { if (list !== 'ol') { close(); out.push('<ol>'); list = 'ol'; } out.push('<li>' + inline(m[2]) + '</li>'); }
+      else if ((m = ln.match(/^\s*[-*•]\s+(.*)$/))) { if (list !== 'ul') { close(); out.push('<ul>'); list = 'ul'; } out.push('<li>' + inline(m[1]) + '</li>'); }
+      else if (!ln.trim()) { close(); }
+      else { close(); out.push('<p>' + inline(ln) + '</p>'); }
+    });
+    close(); return out.join('');
+  }
+  function inline(t) { return t.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>'); }
+
+  function render() {
+    if (!hist.length) {
+      msgsEl.innerHTML = '<div class="kda-msg bot"><div class="kda-bubble"><p>Halo! Saya <b>Asisten KD</b>. Tanyakan cara memakai menu apa pun di panel — saya jawab langkah demi langkah.</p></div></div>';
+      chipsEl.innerHTML = SUGGEST.map(function (q) { return '<button type="button" class="kda-chip">' + esc(q) + '</button>'; }).join('');
+    } else {
+      msgsEl.innerHTML = hist.map(function (m) {
+        return '<div class="kda-msg ' + (m.role === 'user' ? 'me' : 'bot') + (m.err ? ' err' : '') + '"><div class="kda-bubble">' + (m.role === 'user' ? '<p>' + esc(m.content) + '</p>' : md(m.content)) + '</div></div>';
+      }).join('') + (busy ? '<div class="kda-msg bot"><div class="kda-bubble kda-typing"><span></span><span></span><span></span></div></div>' : '');
+      chipsEl.innerHTML = '';
+    }
+    msgsEl.scrollTop = msgsEl.scrollHeight;
+    sendBtn.disabled = busy;
+  }
+  function save() { try { sessionStorage.setItem(HKEY, JSON.stringify(hist.slice(-20))); } catch (e) {} }
+
+  function ask(text) {
+    text = String(text || '').trim();
+    if (!text || busy) return;
+    if (typeof currentSessionToken === 'undefined' || !currentSessionToken) return;
+    var past = hist.filter(function (m) { return !m.err; }).slice(-6).map(function (m) { return { role: m.role, content: m.content }; });
+    hist.push({ role: 'user', content: text }); busy = true; input.value = ''; autosize(); save(); render();
+    google.script.run.withSuccessHandler(function (r) {
+      busy = false;
+      if (r && r.success && r.answer) { hist.push({ role: 'assistant', content: r.answer }); kbVer = r.kbVersion || kbVer; }
+      else hist.push({ role: 'assistant', content: (r && r.message) || 'Maaf, belum bisa menjawab.', err: true });
+      save(); render();
+    }).withFailureHandler(function (e) {
+      busy = false; hist.push({ role: 'assistant', content: (e && e.message) || 'Maaf, terjadi gangguan. Coba lagi.', err: true }); save(); render();
+    }).assistantAsk(currentSessionToken, text, past);
+  }
+  function autosize() { input.style.height = 'auto'; input.style.height = Math.min(110, input.scrollHeight) + 'px'; }
+
+  document.getElementById('kdaOpen').addEventListener('click', function () { setState('open'); });
+  document.getElementById('kdaHide').addEventListener('click', function (e) { e.stopPropagation(); setState('docked'); });
+  document.getElementById('kdaDock').addEventListener('click', function () { setState('fab'); });
+  document.getElementById('kdaMin').addEventListener('click', function () { setState('docked'); });
+  document.getElementById('kdaClear').addEventListener('click', function () { hist = []; save(); render(); });
+  document.getElementById('kdaForm').addEventListener('submit', function (e) { e.preventDefault(); ask(input.value); });
+  input.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask(input.value); } });
+  input.addEventListener('input', autosize);
+  chipsEl.addEventListener('click', function (e) { var b = e.target.closest('.kda-chip'); if (b) ask(b.textContent); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && state === 'open') setState('fab'); });
+
+  // Tampil hanya setelah login & bukan role BOT; status (aktif/nonaktif) dicek sekali per sesi.
+  var checkedFor = '';
+  function sync() {
+    var app = document.getElementById('app-container');
+    var logged = !!(app && !app.hidden && app.style.display !== 'none') && typeof currentProfile !== 'undefined' && currentProfile && currentProfile.role !== 'BOT';
+    if (!logged) { root.hidden = true; checkedFor = ''; return; }
+    if (checkedFor !== currentSessionToken) {
+      checkedFor = currentSessionToken;
+      google.script.run.withSuccessHandler(function (r) { enabled = !(r && r.success && r.enabled === false); kbVer = (r && r.kbVersion) || kbVer; var sub = document.getElementById('kdaSub'); if (sub && kbVer) sub.textContent = 'Paham panel · v' + kbVer; sync(); })
+        .withFailureHandler(function () {}).assistantStatus(currentSessionToken);
+    }
+    root.hidden = !enabled;
+  }
+  root.setAttribute('data-state', state);
+  setInterval(sync, 1200); sync();
+})();
+</script>
