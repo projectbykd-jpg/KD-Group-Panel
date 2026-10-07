@@ -6055,6 +6055,21 @@ Tindakan ini tidak dapat dibatalkan.`,
     function botEsc(s){return String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
 
     let botHistoryCache = [];
+    // Baris log seragam untuk Riwayat & Log artikel: waktu | judul + keterangan | aksi
+    function botLogRow(o){
+      return `<div class="bot-log-row">
+        <span class="bot-log-t">${botEsc(o.time || '')}</span>
+        <div class="bot-log-main">
+          ${o.href ? `<a href="${botEsc(o.href)}" target="_blank" class="bot-log-title">${botEsc(o.title)}</a>` : `<span class="bot-log-title">${botEsc(o.title)}</span>`}
+          <div class="bot-log-meta">${o.meta || ''}</div>
+        </div>
+        ${o.side ? `<div class="bot-log-side">${o.side}</div>` : ''}
+      </div>`;
+    }
+    function botHistTab(which){
+      document.querySelectorAll('[data-hist]').forEach(b => b.classList.toggle('active', b.dataset.hist === which));
+      document.querySelectorAll('[data-hist-pane]').forEach(p => { p.style.display = p.dataset.histPane === which ? '' : 'none'; });
+    }
     function renderBotHistory(){
       const box = document.getElementById('botHistoryList');
       const cnt = document.getElementById('botHistCount');
@@ -6062,21 +6077,15 @@ Tindakan ini tidak dapat dibatalkan.`,
       const q = (document.getElementById('botHistSearch')||{}).value || '';
       const ql = q.toLowerCase();
       const rows = botHistoryCache.filter(h => !ql || String(h.title||'').toLowerCase().includes(ql));
-      if (cnt) cnt.textContent = '(' + botHistoryCache.length + (q ? ' · tampil ' + rows.length : '') + ')';
-      box.innerHTML = rows.map(h => {
-        const t = String(h.posted_at||'').slice(0,16).replace('T',' ');
-        return `<div class="flex items-start gap-2 border-b border-white/5 pb-1.5">
-          <span class="text-[9px] text-slate-500 whitespace-nowrap mt-0.5">${botEsc(t)}</span>
-          <div class="flex-1 min-w-0">
-            <a href="${botEsc(h.post_url)}" target="_blank" class="text-slate-100 hover:text-emerald-300 block truncate">${botEsc(h.title)}</a>
-            <span class="text-[9px] text-slate-500">${botEsc(h.source)}</span> ·
-            <a href="${botEsc(h.url)}" target="_blank" class="text-[9px] text-slate-500 hover:text-slate-300">sumber asli</a>
-          </div>
-        </div>`;
-      }).join('') || '<div class="text-[11px] text-slate-500">Belum ada postingan.</div>';
+      if (cnt) cnt.textContent = botHistoryCache.length + (q ? ' · ' + rows.length : '');
+      box.innerHTML = rows.map(h => botLogRow({
+        time: String(h.posted_at||'').slice(0,16).replace('T',' '), href: h.post_url, title: h.title,
+        meta: botEsc(h.source) + ' · <a href="' + botEsc(h.url) + '" target="_blank">sumber asli</a>',
+      })).join('') || '<div class="bot-empty">Belum ada postingan.</div>';
     }
 
     let botSiteHistoryCache = [];
+    let botSiteUrl = '';
     function renderBotSiteHistory(){
       const box = document.getElementById('botSiteHistoryList');
       const cnt = document.getElementById('botSiteHistCount');
@@ -6084,18 +6093,12 @@ Tindakan ini tidak dapat dibatalkan.`,
       const q = (document.getElementById('botSiteHistSearch')||{}).value || '';
       const ql = q.toLowerCase();
       const rows = botSiteHistoryCache.filter(h => !ql || String(h.title||'').toLowerCase().includes(ql));
-      if (cnt) cnt.textContent = '(' + botSiteHistoryCache.length + (q ? ' · tampil ' + rows.length : '') + ')';
-      box.innerHTML = rows.map(h => {
-        const t = String(h.site_posted_at||'').slice(0,16).replace('T',' ');
-        return `<div class="flex items-start gap-2 border-b border-white/5 pb-1.5">
-          <span class="text-[9px] text-slate-500 whitespace-nowrap mt-0.5">${botEsc(t)}</span>
-          <div class="flex-1 min-w-0">
-            <a href="https://lokalstore88.online/berita/artikel/?id=${Number(h.id)}" target="_blank" class="text-slate-100 hover:text-emerald-300 block truncate">${botEsc(h.title)}</a>
-            <span class="text-[9px] text-slate-500">${botEsc(h.source)} · ${botEsc(h.category||'umum')}</span> ·
-            <a href="${botEsc(h.url)}" target="_blank" class="text-[9px] text-slate-500 hover:text-slate-300">sumber asli</a>
-          </div>
-        </div>`;
-      }).join('') || '<div class="text-[11px] text-slate-500">Belum ada postingan.</div>';
+      if (cnt) cnt.textContent = botSiteHistoryCache.length + (q ? ' · ' + rows.length : '');
+      box.innerHTML = rows.map(h => botLogRow({
+        time: String(h.site_posted_at||'').slice(0,16).replace('T',' '),
+        href: botSiteUrl ? botSiteUrl + '/berita/artikel/?id=' + Number(h.id) : '', title: h.title,
+        meta: botEsc(h.source) + ' · ' + botEsc(h.category||'umum') + ' · <a href="' + botEsc(h.url) + '" target="_blank">sumber asli</a>',
+      })).join('') || '<div class="bot-empty">Belum ada postingan.</div>';
     }
 
     function renderBotSubpage(page){
@@ -6568,6 +6571,7 @@ Tindakan ini tidak dapat dibatalkan.`,
       if (!snap || !snap.success) return;
       pageFetchedAt.bot = Date.now();
       const c = snap.config || {};
+      botSiteUrl = String(c.site_url || '').replace(/\/+$/, ''); // sebelum riwayat Situs Sendiri digambar
       botHistoryCache = snap.history || [];
       renderBotHistory();
       botSiteHistoryCache = snap.siteHistory || [];
@@ -6607,15 +6611,7 @@ Tindakan ini tidak dapat dibatalkan.`,
         </div>`;
       }).join('') || '<div class="text-[11px] text-slate-500">Belum ada yang di-generate.</div>';
 
-      const bs = snap.byStatus || {};
-      const stat = document.getElementById('botNewsStat');
-      if (stat) stat.innerHTML = [
-        ['Diposting ke Blogger hari ini', snap.postedToday||0],
-        ['Antre (new)', bs.new||0],
-        ['Total ke Blogger', bs.posted||0],
-        ['Total ke Situs Sendiri', bs.site||0],
-        ['Error', bs.error||0]
-      ].map(x=>`<div class="mini-card"><div class="text-[10px] text-slate-400 font-semibold">${x[0]}</div><div class="text-xl font-black mt-1 text-slate-50">${x[1]}</div></div>`).join('');
+      renderBotDashboard(snap);
 
       const sl = document.getElementById('botSourceList');
       if (sl) sl.innerHTML = (snap.sources||[]).map(s=>`
@@ -6627,22 +6623,68 @@ Tindakan ini tidak dapat dibatalkan.`,
         </div>`).join('') || '<div class="text-[11px] text-slate-500">Belum ada sumber.</div>';
 
       const al = document.getElementById('botArticleList');
-      if (al) al.innerHTML = (snap.recent||[]).map(a=>{
-        const badge = {posted:'bg-emerald-500/15 text-emerald-300',new:'bg-cyan-500/15 text-cyan-300',error:'bg-rose-500/15 text-rose-300',skipped:'bg-slate-500/15 text-slate-400'}[a.status]||'bg-slate-500/15 text-slate-300';
-        return `<div class="glass-inner rounded-xl px-3 py-2">
-          <div class="flex items-center gap-2">
-            <span class="text-[9px] font-bold px-2 py-0.5 rounded-full ${badge}">${botEsc(a.status)}</span>
-            <span class="text-[10px] text-slate-500">${botEsc(a.source)}</span>
-            ${a.status==='new'||a.status==='error'?`<button onclick="skipBotArticle(${a.id})" class="text-[10px] text-slate-400 ml-auto">skip</button>`:''}
-          </div>
-          <div class="text-xs text-slate-100 mt-1">${botEsc(a.title)}</div>
-          <div class="text-[10px] mt-1 flex gap-3">
-            <a href="${botEsc(a.url)}" target="_blank" class="text-slate-500 hover:text-slate-300">sumber</a>
-            ${a.post_url?`<a href="${botEsc(a.post_url)}" target="_blank" class="text-emerald-400">hasil post</a>`:''}
-            ${a.error?`<span class="text-rose-400 truncate">${botEsc(a.error)}</span>`:''}
-          </div>
+      if (al) al.innerHTML = (snap.recent||[]).map(a => {
+        const tone = {posted:'ok', new:'info', error:'bad', skipped:'mute', site:'site'}[a.status] || 'mute';
+        const label = {posted:'Blogger', new:'Antre', error:'Error', skipped:'Dilewati', site:'Situs'}[a.status] || a.status;
+        return botLogRow({
+          time: String(a.posted_at || a.found_at || '').slice(5,16).replace('T',' '), title: a.title,
+          meta: '<span class="bot-badge ' + tone + '">' + botEsc(label) + '</span> ' + botEsc(a.source) +
+            ' · <a href="' + botEsc(a.url) + '" target="_blank">sumber</a>' +
+            (a.post_url ? ' · <a href="' + botEsc(a.post_url) + '" target="_blank">hasil post</a>' : '') +
+            (a.error ? '<div class="bot-log-err">' + botEsc(a.error) + '</div>' : ''),
+          side: (a.status === 'new' || a.status === 'error') ? '<button onclick="skipBotArticle(' + Number(a.id) + ')" class="bot-skip">Lewati</button>' : '',
+        });
+      }).join('') || '<div class="bot-empty">Belum ada artikel.</div>';
+      const sc = document.getElementById('botSrcCount');
+      if (sc) { const all = snap.sources || []; sc.textContent = all.filter(x => x.active).length + ' aktif / ' + all.length; }
+    }
+
+    // ---------- Dashboard Bot: 3 jalur (struktur identik), tren 7 hari, kesehatan ----------
+    function renderBotDashboard(snap){
+      const c = snap.config || {}, bs = snap.byStatus || {};
+      botSiteUrl = String(c.site_url || '').replace(/\/+$/, '');
+      const n = v => Number(v || 0).toLocaleString('id-ID');
+      const bloggerState = !c.has_blogger_client ? ['bad', 'Belum diatur'] : !c.has_blogger ? ['bad', 'Belum terhubung'] : c.blogger_auth_error ? ['bad', 'Terputus'] : ['ok', 'Terhubung'];
+      const channels = [
+        { tone: 'blogger', icon: 'fa-brands fa-blogger', name: 'Blogger', st: bloggerState, today: snap.postedToday, cap: Number(c.daily_cap || 0), total: bs.posted, note: 'Batas ' + n(c.daily_cap) + ' per hari' },
+        { tone: 'site', icon: 'fa-solid fa-globe', name: 'Situs Sendiri', st: ['ok', 'Aktif'], today: snap.siteToday, cap: 0, total: snap.siteTotal, note: 'Maks ' + n(c.site_per_run) + ' per putaran' },
+        { tone: 'fb', icon: 'fa-brands fa-facebook', name: 'Template Facebook', st: c.fb_direct_enabled ? ['ok', 'Otomatis'] : ['mute', 'Manual'], today: snap.fbDirectPostedToday, cap: Number(c.fb_direct_daily_cap || 0), total: snap.fbTotal, note: 'Antre ' + n(snap.fbDirectQueue) + ' artikel' },
+      ];
+      const ch = document.getElementById('botChannels');
+      if (ch) ch.innerHTML = channels.map(o => {
+        const pct = o.cap ? Math.min(100, Math.round(Number(o.today || 0) * 100 / o.cap)) : 0;
+        return `<div class="bot-ch tone-${o.tone}">
+          <div class="bot-ch-head"><span class="bot-ch-ico"><i class="${o.icon}"></i></span><span class="bot-ch-name">${o.name}</span><span class="bot-ch-pill ${o.st[0]}">${o.st[1]}</span></div>
+          <div class="bot-ch-num"><b>${n(o.today)}</b><span>${o.cap ? '/ ' + n(o.cap) + ' ' : ''}hari ini</span></div>
+          <div class="bot-ch-bar ${o.cap ? '' : 'open'}" title="${o.cap ? pct + '% dari batas harian' : 'Tanpa batas harian'}"><i style="width:${o.cap ? pct : 100}%"></i></div>
+          <div class="bot-ch-foot"><span>Total semua <b>${n(o.total)}</b></span><span>${o.cap ? pct + '% terpakai' : 'Tanpa batas harian'}</span></div>
+          <div class="bot-ch-note">${o.note}</div>
         </div>`;
-      }).join('') || '<div class="text-[11px] text-slate-500">Belum ada artikel.</div>';
+      }).join('');
+
+      // Tren 7 hari: 3 batang per hari, tinggi relatif terhadap nilai terbesar
+      const d7 = snap.daily7 || [];
+      const mx = Math.max(1, ...d7.map(d => Math.max(d.blogger, d.site, d.fb)));
+      const tr = document.getElementById('botTrend');
+      if (tr) tr.innerHTML = d7.map((d, i) => {
+        const bar = (cls, v, name) => `<i class="b-${cls}" style="height:${v ? Math.max(5, Math.round(v * 100 / mx)) : 0}%" title="${name}: ${v}"></i>`;
+        const dd = d.date.slice(8, 10) + '/' + d.date.slice(5, 7);
+        return `<div class="bot-day ${i === d7.length - 1 ? 'today' : ''}"><div class="bot-day-bars">${bar('blogger', d.blogger, 'Blogger')}${bar('site', d.site, 'Situs Sendiri')}${bar('fb', d.fb, 'Template FB')}</div>
+          <div class="bot-day-n">${d.blogger + d.site + d.fb}</div><div class="bot-day-l">${i === d7.length - 1 ? 'Hari ini' : dd}</div></div>`;
+      }).join('') || '<div class="bot-empty">Belum ada data.</div>';
+
+      // Kesehatan & antrean: baris seragam label | nilai
+      const src = snap.sources || [], srcOn = src.filter(x => x.active).length;
+      const rows = [
+        ['fa-hourglass-half', 'Antre artikel', n(bs.new), ''],
+        ['fa-triangle-exclamation', 'Error', n(bs.error), Number(bs.error || 0) > 0 ? 'bad' : 'ok'],
+        ['fa-circle-check', 'Total tayang (Blogger + Situs)', n(Number(bs.posted || 0) + Number(snap.siteTotal || 0)), ''],
+        ['fa-rss', 'Sumber berita aktif', srcOn + ' / ' + src.length, srcOn ? 'ok' : 'bad'],
+        ['fa-microchip', 'AI provider aktif', n(c.ai_providers_on) + ' / ' + n(c.ai_providers), Number(c.ai_providers_on || 0) ? 'ok' : 'bad'],
+        ['fa-robot', 'Auto-post', c.enabled ? 'Aktif · tiap ' + n(c.auto_interval_minutes) + ' mnt' : 'Nonaktif', c.enabled ? 'ok' : 'mute'],
+      ];
+      const hl = document.getElementById('botHealth');
+      if (hl) hl.innerHTML = rows.map(r => `<div class="bot-health-row"><span class="l"><i class="fa-solid ${r[0]}"></i>${r[1]}</span><b class="v ${r[3]}">${r[2]}</b></div>`).join('');
     }
 
     function loadBotNews(){

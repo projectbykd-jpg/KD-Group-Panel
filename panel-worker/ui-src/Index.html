@@ -977,27 +977,30 @@
           </div>
           <!-- Ringkasan AI provider & token (detail: Setting -> AI Provider) -->
           <div id="botAiDashCard" class="ai-dash-card" hidden></div>
-          <div class="glass-card rounded-3xl p-6 flex flex-col gap-5">
-            <div class="flex items-start justify-between gap-4 flex-wrap">
-              <div class="panel-section-title pt-2.5"><i class="fa-solid fa-gauge-high text-emerald-400 text-sm"></i> RINGKASAN</div>
-              <div class="flex items-end gap-2 flex-wrap">
-                <label class="flex flex-col gap-1">
-                  <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Send ke</span>
-                  <select id="botRunTarget" class="glass-inner rounded-xl px-3 py-2.5 text-slate-100 text-xs font-bold">
-                    <option value="both" class="bg-slate-900">Blogger + Website Sendiri</option>
-                    <option value="blogger" class="bg-slate-900">Blogger saja</option>
-                    <option value="site" class="bg-slate-900">Website Sendiri saja</option>
-                  </select>
-                </label>
-                <label class="flex flex-col gap-1">
-                  <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Jumlah artikel</span>
-                  <input id="botRunCount" type="number" min="1" placeholder="Semua" class="glass-inner rounded-xl px-3 py-2.5 text-slate-100 text-xs font-bold w-24" title="Kosongkan = pakai 'Artikel per proses' di Setting & jalan sampai antrean habis.">
-                </label>
-                <button onclick="botNewsRunGithub()" class="bg-gradient-to-r from-purple-400 to-fuchsia-500 text-slate-950 text-xs font-bold px-4 py-2.5 rounded-xl" title="Diproses lewat GitHub Actions -- tidak kena limit 'Too many subrequests'. Hasilnya masuk 1-2 menit kemudian, bukan instan -- tinggal tunggu, progress kelihatan di bawah."><i class="fa-brands fa-github mr-1"></i>PROSES</button>
-                <button onclick="loadBotNews()" class="btn-secondary text-xs font-bold px-4 py-2.5 rounded-xl" title="Refresh angka & status" aria-label="Refresh angka & status"><i class="fa-solid fa-rotate"></i></button>
-              </div>
-            </div>
 
+          <!-- Tiga jalur posting, struktur IDENTIK: hari ini / batas / total / status -->
+          <section id="botChannels" class="bot-channels"></section>
+
+          <!-- Aksi: jalankan sekarang -->
+          <div class="glass-card rounded-3xl p-5 flex flex-col gap-4">
+            <div class="bot-subhead">
+              <div class="bot-subhead-ico"><i class="fa-solid fa-bolt"></i></div>
+              <div class="bot-subhead-txt"><h3>Jalankan sekarang</h3><p>Proses antrean lewat GitHub Actions (tidak kena limit subrequest). Tanpa jumlah = ikut "Artikel per proses" di Setting dan jalan sampai antrean habis.</p></div>
+            </div>
+            <div class="bot-run">
+              <label class="bot-run-f"><span>Send ke</span>
+                <select id="botRunTarget" class="glass-inner rounded-xl px-3 py-2.5 text-slate-100 text-xs font-bold">
+                  <option value="both" class="bg-slate-900">Blogger + Website Sendiri</option>
+                  <option value="blogger" class="bg-slate-900">Blogger saja</option>
+                  <option value="site" class="bg-slate-900">Website Sendiri saja</option>
+                </select>
+              </label>
+              <label class="bot-run-f"><span>Jumlah artikel</span>
+                <input id="botRunCount" type="number" min="1" placeholder="Semua" class="glass-inner rounded-xl px-3 py-2.5 text-slate-100 text-xs font-bold" title="Kosongkan = pakai 'Artikel per proses' di Setting & jalan sampai antrean habis">
+              </label>
+              <button onclick="botNewsRunGithub()" class="bot-run-go" title="Diproses lewat GitHub Actions -- tidak kena limit 'Too many subrequests'."><i class="fa-solid fa-play mr-2"></i>JALANKAN</button>
+              <button onclick="loadBotNews()" class="btn-secondary text-xs font-bold px-4 py-2.5 rounded-xl" title="Refresh angka & status" aria-label="Refresh angka & status"><i class="fa-solid fa-rotate"></i></button>
+            </div>
             <div id="botGithubProgress" class="mini-card hidden">
               <div class="flex items-center justify-between gap-3 text-xs mb-2 flex-wrap">
                 <span id="botGithubProgressLabel" class="font-bold text-slate-200"><i class="fa-brands fa-github mr-1.5"></i>Menunggu GitHub Actions...</span>
@@ -1007,22 +1010,41 @@
                 <div id="botGithubProgressBar" class="h-full rounded-full bg-gradient-to-r from-purple-400 to-fuchsia-500 transition-all duration-700" style="width:8%"></div>
               </div>
             </div>
+          </div>
 
-            <div id="botNewsStat" class="grid grid-cols-2 sm:grid-cols-5 gap-3"></div>
-
-            <div class="mini-card">
-              <div class="text-xs font-bold text-slate-200 mb-3"><i class="fa-solid fa-newspaper text-emerald-400 mr-2"></i>LOG ARTIKEL TERBARU (semua status)</div>
-              <div id="botArticleList" class="flex flex-col gap-2 text-xs max-h-[420px] overflow-y-auto"></div>
+          <section class="grid grid-cols-1 xl:grid-cols-12 gap-5">
+            <div class="glass-card rounded-3xl p-5 xl:col-span-8">
+              <div class="bot-subhead">
+                <div class="bot-subhead-ico"><i class="fa-solid fa-chart-column"></i></div>
+                <div class="bot-subhead-txt"><h3>Tren 7 hari terakhir</h3><p>Jumlah artikel yang tayang per hari di tiap jalur (WIB).</p></div>
+                <div class="bot-legend"><span class="lg-blogger">Blogger</span><span class="lg-site">Situs Sendiri</span><span class="lg-fb">Template FB</span></div>
+              </div>
+              <div id="botTrend" class="bot-trend" role="img" aria-label="Grafik 7 hari"></div>
             </div>
+            <div class="glass-card rounded-3xl p-5 xl:col-span-4">
+              <div class="bot-subhead">
+                <div class="bot-subhead-ico"><i class="fa-solid fa-heart-pulse"></i></div>
+                <div class="bot-subhead-txt"><h3>Antrean &amp; kesehatan</h3><p>Kondisi bot saat ini.</p></div>
+              </div>
+              <div id="botHealth" class="bot-health"></div>
+            </div>
+          </section>
+
+          <div class="glass-card rounded-3xl p-5 flex flex-col gap-3">
+            <div class="bot-subhead">
+              <div class="bot-subhead-ico"><i class="fa-solid fa-newspaper"></i></div>
+              <div class="bot-subhead-txt"><h3>Log artikel terbaru</h3><p>40 artikel terakhir, semua status.</p></div>
+            </div>
+            <div id="botArticleList" class="bot-log"></div>
           </div>
         </div>
 
         <!-- ============ SUB-HALAMAN: SUMBER BERITA ============ -->
         <div id="bot-sec-sources" class="flex flex-col gap-5" style="display:none">
           <div class="glass-card rounded-3xl p-6 flex flex-col gap-4">
-            <div>
-              <div class="panel-section-title"><i class="fa-solid fa-rss text-cyan-400 text-sm"></i> SUMBER BERITA</div>
-              <p class="text-[11px] text-slate-500 mt-1">Feed RSS/Google News yang ditarik otomatis buat mengisi antrean artikel.</p>
+            <div class="bot-subhead">
+              <div class="bot-subhead-ico"><i class="fa-solid fa-rss"></i></div>
+              <div class="bot-subhead-txt"><h3>Sumber berita <span id="botSrcCount" class="bot-tab-n"></span></h3><p>Feed RSS/Google News yang ditarik otomatis untuk mengisi antrean artikel.</p></div>
             </div>
             <div id="botSourceList" class="flex flex-col gap-2"></div>
             <div class="cfg-group">
@@ -1055,20 +1077,23 @@
 
         <!-- ============ SUB-HALAMAN: RIWAYAT POSTING ============ -->
         <div id="bot-sec-history" class="flex flex-col gap-5" style="display:none">
-          <div class="glass-card rounded-3xl p-6 flex flex-col gap-4">
-            <div class="flex items-center justify-between gap-3 flex-wrap">
-              <div class="panel-section-title"><i class="fa-solid fa-clock-rotate-left text-indigo-400 text-sm"></i> RIWAYAT POSTING <span id="botHistCount" class="text-slate-500 font-normal normal-case"></span></div>
-              <input id="botHistSearch" oninput="renderBotHistory()" class="glass-inner rounded-lg px-3 py-2 text-xs text-slate-100 w-full sm:w-64" placeholder="cari judul...">
+          <div class="glass-card rounded-3xl p-5 flex flex-col gap-4">
+            <div class="bot-subhead">
+              <div class="bot-subhead-ico"><i class="fa-solid fa-clock-rotate-left"></i></div>
+              <div class="bot-subhead-txt"><h3>Riwayat posting</h3><p>Dua jalur dipisah supaya tidak dobel: artikel di Situs Sendiri tidak ikut diposting ke Blogger.</p></div>
             </div>
-            <div id="botHistoryList" class="flex flex-col gap-1.5 text-xs max-h-[65vh] overflow-y-auto"></div>
-          </div>
-          <div class="glass-card rounded-3xl p-6 flex flex-col gap-4">
-            <div class="flex items-center justify-between gap-3 flex-wrap">
-              <div class="panel-section-title"><i class="fa-solid fa-globe text-emerald-400 text-sm"></i> RIWAYAT SITUS SENDIRI (LapakStore88) <span id="botSiteHistCount" class="text-slate-500 font-normal normal-case"></span></div>
-              <input id="botSiteHistSearch" oninput="renderBotSiteHistory()" class="glass-inner rounded-lg px-3 py-2 text-xs text-slate-100 w-full sm:w-64" placeholder="cari judul...">
+            <div class="bot-tabs" role="tablist">
+              <button type="button" class="bot-tab active" data-hist="blogger" onclick="botHistTab('blogger')"><i class="fa-brands fa-blogger"></i>Blogger <span id="botHistCount" class="bot-tab-n"></span></button>
+              <button type="button" class="bot-tab" data-hist="site" onclick="botHistTab('site')"><i class="fa-solid fa-globe"></i>Situs Sendiri <span id="botSiteHistCount" class="bot-tab-n"></span></button>
             </div>
-            <p class="text-[10px] text-slate-500 -mt-2">Terpisah dari Riwayat Posting Blogger di atas -- artikel di sini TIDAK ikut diposting ke Blogger (anti-dobel).</p>
-            <div id="botSiteHistoryList" class="flex flex-col gap-1.5 text-xs max-h-[65vh] overflow-y-auto"></div>
+            <div data-hist-pane="blogger" class="flex flex-col gap-3">
+              <input id="botHistSearch" oninput="renderBotHistory()" class="glass-inner rounded-lg px-3 py-2 text-xs text-slate-100 w-full sm:w-72" placeholder="cari judul...">
+              <div id="botHistoryList" class="bot-log"></div>
+            </div>
+            <div data-hist-pane="site" class="flex flex-col gap-3" style="display:none">
+              <input id="botSiteHistSearch" oninput="renderBotSiteHistory()" class="glass-inner rounded-lg px-3 py-2 text-xs text-slate-100 w-full sm:w-72" placeholder="cari judul...">
+              <div id="botSiteHistoryList" class="bot-log"></div>
+            </div>
           </div>
         </div>
 
@@ -1076,8 +1101,10 @@
         <div id="bot-sec-fbdirect" class="flex flex-col gap-5" style="display:none">
           <div class="glass-card rounded-3xl p-6 flex flex-col gap-5">
             <div>
-              <div class="panel-section-title"><i class="fa-brands fa-facebook text-blue-400 text-sm"></i> TEMPLATE FB</div>
-              <div class="text-[11px] text-slate-400 mt-1">Ambil 1 artikel terbaru &rarr; siapkan gambar + caption menarik (AI) &rarr; kamu tinggal copy &amp; posting MANUAL ke Facebook Page-mu sendiri. Tidak lewat API Facebook sama sekali, jadi aman dari blokir/pembatasan Facebook.</div>
+              <div class="bot-subhead">
+                <div class="bot-subhead-ico"><i class="fa-brands fa-facebook"></i></div>
+                <div class="bot-subhead-txt"><h3>Template Facebook</h3><p>Ambil 1 artikel terbaru &rarr; siapkan gambar + caption menarik (AI) &rarr; kamu tinggal copy &amp; posting MANUAL ke Facebook Page-mu sendiri. Tidak lewat API Facebook sama sekali, jadi aman dari blokir/pembatasan Facebook.</p></div>
+              </div>
             </div>
 
             <div class="flex items-center gap-2">
