@@ -138,6 +138,27 @@ export async function runAutoPostRouter(env: Env, opts: { force?: boolean; windo
 		summary.message = "Auto Posting dimatikan (Settings: autopost_enabled = FALSE).";
 		return summary;
 	}
+	// Cek MURAH dulu (tanpa DB/KV): adakah slot yang jatuh tempo sekarang? Sebagian besar tick (cron tiap menit) tidak punya
+	// slot -> langsung selesai tanpa query sesi/profil/website dan tanpa menulis kunci KV (dulu ±2.880 KV write/hari yang
+	// melewati kuota Free 1.000/hari sehingga penulisan sesi login/guard ikut gagal diam-diam).
+	const catchup = await getSys(env, "sys_catchup_minutes");
+	{
+		const d0 = now7();
+		const nowMin0 = d0.getUTCHours() * 60 + d0.getUTCMinutes();
+		const dueNow =
+			JADWAL_PREDIKSI_CONFIG.some((c) => {
+				const [hh, mm] = c.jam.split(":").map(Number);
+				return slotDue(nowMin0, hh * 60 + mm, catchup, opts.windowMinutes);
+			}) ||
+			CLOSING_PREDICTION_SLOTS.some((slot) => {
+				const [hh, mm] = slot.split(":").map(Number);
+				return slotDue(nowMin0, hh * 60 + mm, catchup, opts.windowMinutes);
+			});
+		if (!opts.force && !dueNow) {
+			summary.message = "Belum ada slot prediksi yang jatuh tempo.";
+			return summary;
+		}
+	}
 	const usernames = await activeSessionUsernames(env);
 	if (!usernames.length) {
 		summary.message = "Tidak ada user yang sedang login, jadi tidak ada yang diposting.";
@@ -249,7 +270,6 @@ export async function runAutoPostRouter(env: Env, opts: { force?: boolean; windo
 		}
 	};
 
-	const catchup = await getSys(env, "sys_catchup_minutes");
 	for (let index = 0; index < JADWAL_PREDIKSI_CONFIG.length; index++) {
 		const [hh, mm] = JADWAL_PREDIKSI_CONFIG[index].jam.split(":").map(Number);
 		if (!slotDue(nowMinutes, hh * 60 + mm, catchup, opts.windowMinutes)) continue;

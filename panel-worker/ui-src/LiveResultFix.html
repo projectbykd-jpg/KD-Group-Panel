@@ -51,17 +51,15 @@
 
     var root = document.getElementById('app-container') || document.body;
     if (root && window.MutationObserver) {
+      // Cukup memastikan listener terpasang bila #inputText dibuat ulang. JANGAN memanggil autoGenerate() dari sini:
+      // autoGenerate() sendiri mengubah DOM (innerText hasil), sehingga observer terpicu lagi -> loop tak berujung
+      // (±5.500 panggilan/detik saat kotak Result berisi teks). attach() sudah menjadwalkan satu sinkron saat pertama dipasang.
       observer = new MutationObserver(function (records) {
-        var needsAttach = false;
-        for (var i = 0; i < records.length && !needsAttach; i++) {
-          if (records[i].addedNodes && records[i].addedNodes.length) needsAttach = true;
-        }
-        if (needsAttach) {
-          if (attach()) {
+        for (var i = 0; i < records.length; i++) {
+          if (records[i].addedNodes && records[i].addedNodes.length) {
             var el = inputEl();
-            if (el && String(el.value || '').trim()) {
-              setTimeout(function () { lastText = null; syncResultPreview(); }, 0);
-            }
+            if (el && !el.__kdLivePreviewBound) attach();
+            return;
           }
         }
       });

@@ -103,13 +103,28 @@ const hasWebsite = (websites: string[], website: string) => {
 	});
 };
 
-export async function wdListedAdd(env: Env, addedBy: string, rows: WdListedInput[]): Promise<number> {
+/**
+ * `userWebsites`: website milik akun pemanggil. Baris untuk website yang BUKAN miliknya dibuang, dan baris yang sudah ada untuk
+ * pga_ref_no yang sama tetapi milik website lain TIDAK boleh ditimpa (dulu operator website B bisa merebut baris website A
+ * hanya dengan mengirim ulang ref_no-nya).
+ */
+export async function wdListedAdd(env: Env, addedBy: string, rows: WdListedInput[], userWebsites?: string[]): Promise<number> {
 	await ensureTable(env);
 	const db = getTurso(env);
 	let added = 0;
-	for (const r of rows.slice(0, 100)) {
+	let todo = rows.slice(0, 100);
+	if (userWebsites) todo = todo.filter((r) => hasWebsite(userWebsites, r.website));
+	// pemilik baris yang sudah ada (satu query, bukan satu per baris)
+	const owner = new Map<string, string>();
+	const refs = [...new Set(todo.map((r) => norm(r.pgaRefNo, 80)).filter(Boolean))];
+	if (userWebsites && refs.length) {
+		const ex = await db.prepare(`SELECT pga_ref_no, website FROM wd_listed WHERE pga_ref_no IN (${refs.map(() => "?").join(",")})`).bind(...refs).all<{ pga_ref_no: string; website: string }>();
+		for (const e of ex.results ?? []) owner.set(String(e.pga_ref_no), String(e.website ?? ""));
+	}
+	for (const r of todo) {
 		const refNo = norm(r.pgaRefNo, 80);
 		if (!refNo) continue; // tanpa ref no tidak bisa di-CHECK STATUS nanti, jangan disimpan
+		if (userWebsites && owner.has(refNo) && !hasWebsite(userWebsites, owner.get(refNo) || "")) continue; // milik website lain
 		const now = tsNow();
 		const res = await db
 			.prepare(

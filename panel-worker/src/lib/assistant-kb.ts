@@ -9,7 +9,7 @@
 // Jangan menulis rahasia (password, key, token) di sini.
 // ============================================================================
 
-export const ASSISTANT_KB_VERSION = "2026-10-07.10";
+export const ASSISTANT_KB_VERSION = "2026-10-08.1";
 
 /** Penjelasan per menu. Kunci = id navigasi (nav-<kunci>) di ui-src/Index.html. */
 export const KB_PAGES: Record<string, { title: string; text: string }> = {
@@ -23,7 +23,7 @@ export const KB_PAGES: Record<string, { title: string; text: string }> = {
 	},
 	prediction: {
 		title: "Prediksi",
-		text: "Jadwal prediksi per sesi jam (02:35, 06:15, 08:40, 12:40, 16:00, 21:20, 23:25) dan kata-kata penutup (06:15 & 16:00). Per baris: 'Copy' menyalin teks prediksi unik per website; 'Send Auto' mengirim ke semua website milik akun yang belum terkirim hari ini (tanpa duplikat; kolom Status menampilkan 'x dari y website hari ini'). Kartu 'Kata-kata penutup' punya Copy dan Send Auto sendiri dengan pilihan sesi 06:15/16:00. 'Refresh Status' memuat ulang status kirim. Prediksi juga dikirim OTOMATIS oleh Auto Posting (lihat Admin > Maintenance & Log) selama ada operator login; website yang belum punya token Telegram prediksi tidak bisa dikirimi.",
+		text: "Halaman 'Pusat Prediksi Pasaran'. Jadwal prediksi per sesi jam (02:35, 06:15, 08:40, 12:40, 16:00, 21:20, 23:25) dan kata-kata penutup (06:15 & 16:00). Per baris: 'Copy' menyalin teks prediksi unik per website; 'Send Auto' mengirim ke semua website milik akun yang belum terkirim hari ini (tanpa duplikat; kolom Status menampilkan 'x dari y website hari ini'). Kartu 'Kata-kata penutup' punya Copy dan Send Auto sendiri dengan pilihan sesi 06:15/16:00. 'Refresh Status' memuat ulang status kirim. Prediksi juga dikirim OTOMATIS oleh Auto Posting (lihat Admin > Maintenance & Log) selama ada operator login; website yang belum punya token Telegram prediksi tidak bisa dikirimi.",
 	},
 	invest: {
 		title: "AutoCheck Invest",
@@ -59,7 +59,7 @@ export const KB_PAGES: Record<string, { title: string; text: string }> = {
 	},
 	"livechat-sessions": {
 		title: "Sesi Chat (Live Chat)",
-		text: "Auto-reply DayLiveChat. Bot membalas otomatis member yang spam/kasar HANYA di sesi yang Anda aktifkan; sesi lain tetap dibalas manual oleh CS. Daftar sesi muncul otomatis begitu userscript 'daylivechat-autobot' terpasang di Tampermonkey dan Anda login CS di daylivechat.com/cs/chat. Nyalakan switch 'BOT AKTIF' pada sesi member yang ingin dibalas otomatis. 'Sinkron terakhir' menunjukkan kapan userscript terakhir mengirim data. Cara pasang bot (lewat Console browser, tanpa ekstensi dan tanpa unduh file; kode dimuat dari panel jadi selalu terbaru): (1) buka halaman DayLiveChat CS dan login seperti biasa; (2) tekan F12 lalu buka tab Console; (3) pertama kali saja, ketik 'allow pasting' lalu Enter (Chrome meminta izin tempel); (4) di panel klik tombol 'SALIN KODE CONSOLE' (menu Live Chat > Sesi Chat), tempel (Ctrl+V) di Console, tekan Enter — tombol kecil 🤖 muncul di pojok kanan bawah halaman DayLiveChat, F12 boleh ditutup; (5) klik 🤖, tempel Kunci Bot (salin dari kartu 'KUNCI BOT KAMU' di halaman Sesi Chat; alamat panel sudah terisi), simpan, nyalakan — pengaturan diingat browser, cukup sekali; (6) sesi chat muncul di daftar Sesi Chat, nyalakan switch pada sesi yang mau dibalas otomatis. Bot hanya hidup selama tab DayLiveChat CS terbuka: bila halaman di-refresh atau ditutup, ulangi langkah 2-4 (tempel kode Console lagi; Kunci Bot tidak perlu diisi ulang). Kalau muncul popup 'Bot gagal dimuat', situs memblokir skrip dari luar — beri tahu admin. Bookmark/bookmarklet TIDAK bisa dipakai karena halaman DayLiveChat tidak menjalankannya. Kunci Bot bersifat PER PENGGUNA: sesi chat, template balasan, dan riwayat tiap pengguna terpisah (tidak tampil di menu pengguna lain); tombol 'BUAT KUNCI BARU' mematikan kunci lama bila bocor; pengguna baru perlu menambah template sendiri di menu Template Balasan, kalau tidak bot tidak membalas. Bot tidak bisa jalan dari server atau dari halaman panel sendiri: login CS DayLiveChat dikunci ke IP tertentu dan browser melarang panel membaca situs lain. Alternatif: Tampermonkey (userscript) atau Agent Node.js (folder livechat-agent) — jangan dijalankan bersamaan. Hanya ADMIN/OPERATOR.",
+		text: "Auto-reply DayLiveChat. Bot membalas otomatis member yang spam/kasar HANYA di sesi yang Anda aktifkan; sesi lain tetap dibalas manual oleh CS. Daftar sesi (milik Anda saja) muncul otomatis begitu bot 🤖 aktif di halaman DayLiveChat CS (dipasang lewat Console, lihat cara pasang di bawah) dan Anda login CS. Nyalakan switch 'BOT AKTIF' pada sesi member yang ingin dibalas otomatis. 'Sinkron terakhir' menunjukkan kapan userscript terakhir mengirim data. Cara pasang bot (lewat Console browser, tanpa ekstensi dan tanpa unduh file; kode dimuat dari panel jadi selalu terbaru): (1) buka halaman DayLiveChat CS dan login seperti biasa; (2) tekan F12 lalu buka tab Console; (3) pertama kali saja, ketik 'allow pasting' lalu Enter (Chrome meminta izin tempel); (4) di panel klik tombol 'SALIN KODE CONSOLE' (menu Live Chat > Sesi Chat), tempel (Ctrl+V) di Console, tekan Enter — tombol kecil 🤖 muncul di pojok kanan bawah halaman DayLiveChat, F12 boleh ditutup; (5) klik 🤖, tempel Kunci Bot (salin dari kartu 'KUNCI BOT KAMU' di halaman Sesi Chat; alamat panel sudah terisi), simpan, nyalakan — pengaturan diingat browser, cukup sekali; (6) sesi chat muncul di daftar Sesi Chat, nyalakan switch pada sesi yang mau dibalas otomatis. Bot hanya hidup selama tab DayLiveChat CS terbuka: bila halaman di-refresh atau ditutup, ulangi langkah 2-4 (tempel kode Console lagi; Kunci Bot tidak perlu diisi ulang). Kalau muncul popup 'Bot gagal dimuat', situs memblokir skrip dari luar — beri tahu admin. Bookmark/bookmarklet TIDAK bisa dipakai karena halaman DayLiveChat tidak menjalankannya. Kunci Bot bersifat PER PENGGUNA: sesi chat, template balasan, dan riwayat tiap pengguna terpisah (tidak tampil di menu pengguna lain); tombol 'BUAT KUNCI BARU' mematikan kunci lama bila bocor; pengguna baru perlu menambah template sendiri di menu Template Balasan, kalau tidak bot tidak membalas. Bot tidak bisa jalan dari server atau dari halaman panel sendiri: login CS DayLiveChat dikunci ke IP tertentu dan browser melarang panel membaca situs lain. Alternatif: Tampermonkey (userscript) atau Agent Node.js (folder livechat-agent) — jangan dijalankan bersamaan. Hanya ADMIN/OPERATOR.",
 	},
 	"livechat-templates": {
 		title: "Template Balasan (Live Chat)",
@@ -87,7 +87,7 @@ export const KB_PAGES: Record<string, { title: string; text: string }> = {
 	},
 	"bot-config": {
 		title: "Bot News — Setting",
-		text: "Khusus role BOT. Tab: AI Provider (daftar provider: nama, Base URL, API key, model, urutan prioritas, kuota/masa aktif; Tambah Provider; pemakaian terakhir), Konten & Artikel (panjang & gaya), Jadwal Posting, Blogger (hubungkan akun), Sosial & Promo. Simpan lewat tombol SIMPAN SETTING. AI Provider yang aktif di sini juga dipakai Asisten KD.",
+		text: "Khusus role BOT. Tab: AI Provider (daftar provider: nama, Base URL, API key, model, urutan prioritas, kuota/masa aktif; Tambah Provider; pemakaian terakhir), Konten & Artikel (panjang & gaya), Jadwal Posting, Blogger (hubungkan akun), Sosial & Promo. Simpan lewat tombol SIMPAN SETTING. Asisten KD memakai key khusus sendiri (Admin › Pengaturan Sistem › Asisten KD); AI Provider di sini hanya dipakai asisten bila admin belum mengisi key khusus.",
 	},
 };
 
@@ -131,10 +131,130 @@ KEAMANAN: jangan membagikan password, cookie, token, atau API key kepada siapa p
 ASISTEN KD: widget chat melayang di kanan bawah, tersedia untuk SEMUA role (termasuk BOT). Tombol '−' menyembunyikan ke tepi kanan; tombol tab kecil di tepi memunculkannya lagi. Asisten hanya memberi panduan (tidak menjalankan aksi) dan memakai API key khusus yang diisi admin di Admin > Pengaturan Sistem (cadangan: AI Provider di Bot > Setting). SCREENSHOT: pengguna bisa menempelkan gambar langsung ke kolom chat dengan Ctrl+V (atau tombol klip kertas) agar asisten ikut melihat tampilan/galat yang dimaksud; gambar diperkecil di browser, dikirim ke penyedia AI hanya untuk pertanyaan itu, dan tidak disimpan. Hanya model yang mendukung gambar (mis. Gemini) yang bisa membacanya; bila modelnya tidak mendukung, asisten memberi tahu dan pertanyaan teks tetap bisa dikirim. Jangan kirim screenshot yang menampilkan password, saldo, atau data pribadi.
 `.trim();
 
+// ============================================================================
+// KELUHAN UMUM (gejala -> penyebab -> langkah). `k` = frasa yang mungkin diketik user, dipisah '|' (huruf kecil).
+// TAMBAHKAN entri baru setiap ada fitur/galat baru. Jawaban singkat, berurutan, tanpa rahasia.
+// ============================================================================
+export const KB_FAQ: { id: string; k: string; a: string }[] = [
+	// --- Akun & login ---
+	{ id: "lupa-password", k: "lupa password|lupa kata sandi|reset password|ganti password|password salah|tidak bisa login|gak bisa login|ga bisa masuk", a: "Panel tidak punya 'lupa password' mandiri. Minta ADMIN mengganti password di Admin › Users (edit user, isi password baru). Setelah diganti, sesi lama akun itu otomatis dicabut dan Anda login dengan password baru. Pastikan juga Caps Lock mati dan username benar." },
+	{ id: "akun-terkunci", k: "akun terkunci|terkunci|dikunci|locked|terlalu banyak percobaan|salah password berkali", a: "Akun dikunci sementara setelah salah password beberapa kali berturut-turut (bawaan 5 kali, kunci 10 menit; admin bisa mengubahnya di Admin › Pengaturan Sistem). Tunggu sampai kunci habis, atau minta ADMIN membuka kunci (ikon kunci di Admin › Users). Pesan 'Terlalu banyak percobaan login gagal dari jaringan ini' berarti alamat jaringan (IP) dibatasi sementara — tunggu menit yang disebut di pesan." },
+	{ id: "sesi-berakhir", k: "sesi tidak valid|sesi berakhir|keluar sendiri|logout sendiri|terlempar|login ulang terus|session expired panel", a: "Sesi login berlaku 21 hari (bawaan). Sesi juga dicabut otomatis bila ADMIN mengganti password/menonaktifkan/menghapus/me-rename akun Anda, atau bila jumlah sesi melebihi batas per user. Cukup login ulang. Kalau sering terlempar, kemungkinan akun dipakai di banyak perangkat sekaligus atau password baru saja diganti admin." },
+	{ id: "maintenance", k: "maintenance|pemeliharaan|tidak bisa kirim|panel sedang|mode perbaikan", a: "Saat Mode Maintenance aktif, operator tidak bisa login atau mengirim; hanya ADMIN yang tetap bisa. Pesan pemeliharaan tampil di layar. ADMIN mematikannya di Admin › Maintenance & Log. Tunggu admin atau hubungi admin." },
+	{ id: "menu-hilang", k: "menu tidak muncul|menu hilang|tidak ada menu|menu tidak terlihat|tidak bisa buka menu|menu tidak diizinkan|akses ditolak", a: "Menu yang tampil ditentukan role dan 'akses menu' per user di Admin › Users. Pesan 'Menu X tidak diizinkan untuk akun ini' berarti admin belum mencentang menu itu: minta admin membukanya. Menu Auto Prediksi dan Live Chat hanya untuk ADMIN/OPERATOR; menu Admin hanya ADMIN; akun BOT hanya melihat menu Bot News; VIEWER hanya baca." },
+	{ id: "tampilan-lama", k: "tampilan lama|tidak berubah|belum update|fitur baru tidak muncul|cache|ctrl+f5|refresh keras", a: "Setelah ada pembaruan panel, tekan Ctrl+F5 (muat ulang tanpa cache). Di HP: tutup tab lalu buka lagi, atau hapus data situs di pengaturan browser. Pastikan koneksi internet aktif (ada banner merah bila offline)." },
+	{ id: "panel-lemot", k: "lemot|lambat|berat|hang|macet|tidak responsif|loading lama|layar kosong|layar gelap|panas|kipas", a: "Langkah: (1) Ctrl+F5; (2) tutup tab panel yang dobel dan tab berat lain; (3) periksa koneksi (jaringan seluler yang lambat bisa membuat layar gelap sampai ±2 detik); (4) pindah menu lalu kembali; (5) bila hanya satu menu yang lambat, sebutkan menu & waktunya ke admin. Bila laptop terasa panas saat kotak Result berisi teks, itu sudah diperbaiki di versi terbaru — Ctrl+F5." },
+	// --- Result & kirim ---
+	{ id: "result-salah", k: "status salah|teks tidak terbaca|tidak terbaca|pasaran tidak dikenali|hasil tidak muncul|preview kosong|result kosong|tempel tidak jalan", a: "Tempel teks hasil pengeluaran dari Telegram UTUH tanpa diedit (harus memuat nama Pasaran dan Prize 1/2/3). Panel mengenali Pasaran, Prize, Shio, angka 2D lalu menampilkannya di 'Monitor hasil real-time'. Status harus 'BENAR' sebelum 'KIRIM SEMUA SISTEM'. Bila 'SALAH': ada bagian yang hilang/ketik ulang, atau nama pasaran belum dikenali — salin ulang dari sumber. Tombol 'Tempel' butuh izin clipboard browser; bila ditolak, tempel manual (Ctrl+V)." },
+	{ id: "kirim-gagal", k: "kirim gagal|gagal kirim|telegram gagal|linktree gagal|panel-z gagal|panelz gagal|tidak terkirim|pengiriman gagal|diblokir", a: "Lihat hasil per website. TELEGRAM gagal → token/chat ID website belum diisi atau salah (Admin › Website). LINKTREE gagal → email/password LinkTree website salah/kosong. PANEL-Z gagal → URL/user/password Panel-Z salah/kosong. 'DIBLOKIR' → akun Anda belum diberi izin sistem itu di Admin › Users. 'Konfigurasi website tidak ditemukan' → data website belum dibuat admin. Setelah dibetulkan, kirim ulang HANYA sistem yang gagal (tombol kirim ulang); yang sudah berhasil tidak terkirim dobel." },
+	{ id: "duplikat", k: "duplikat|sudah dikirim|sudah pernah dikirim|dobel|ganda|terkirim dua kali|kirim ulang", a: "Sistem mencegah kirim ganda: data yang sama ke website yang sama (oleh siapa pun) ditandai 'SUDAH DIKIRIM' dengan nama pengirim & waktu. Itu normal. Jika memang perlu mengirim ulang satu sistem (mis. Telegram gagal), gunakan kirim ulang per sistem. Peringatan '⚠ ... pencatatan anti-duplikat gagal' berarti pesan SUDAH terkirim — jangan kirim ulang, beri tahu admin." },
+	{ id: "auto-prediksi", k: "auto prediksi|nomor keluar|phpsessid habis|uji gagal|input otomatis gagal|hitung gagal|sesi habis admin website", a: "Auto Prediksi butuh PHPSESSID admin website yang MASIH HIDUP: ambil dari Chrome yang sedang login admin website (F12 › Application › Cookies), tempel di kartu website, klik Simpan, lalu 'Uji (tanpa kirim)'. Bila sesi habis input gagal dan Anda input manual; tempel PHPSESSID baru. Pastikan tombol 'Aktifkan' di atas berstatus AKTIF. Pesan 'sudah sampai tahap mengubah data di admin' berarti cek MANUAL di admin website dan jangan diulang otomatis." },
+	// --- Prediksi ---
+	{ id: "prediksi-tidak-terkirim", k: "prediksi tidak terkirim|auto posting tidak jalan|prediksi otomatis|send auto gagal|prediksi belum terkirim|penutup tidak terkirim", a: "Auto Posting hanya mengirim bila: (1) Auto Posting AKTIF (Admin › Auto Posting); (2) ada operator yang sedang login; (3) website operator punya token & chat ID Telegram PREDIKSI; (4) waktunya jatuh tempo (sesi 02:35, 06:15, 08:40, 12:40, 16:00, 21:20, 23:25; penutup 06:15 & 16:00; toleransi susulan bawaan 25 menit). Tombol 'Send Auto' di menu Prediksi mengirim ke website yang belum terkirim hari ini; kolom Status menunjukkan 'x dari y website'." },
+	// --- Invest ---
+	{ id: "invest-expired", k: "session expired|invest gagal|scan 0 data|scan kosong|scan berhenti|hasil invest kosong|cek koneksi session|phpsessid invest|koderedis", a: "Di AutoCheck Invest: login ulang ke panel agen, ambil PHPSESSID baru (dan koderedis bila tetap 'session expired'), isi di 'Setting panel agen', Simpan, lalu 'Cek koneksi/session' sampai OK. Scan menghasilkan 0 data → isi 'Daftar pasaran' manual. Scan terhenti → 'Lanjutkan scan'; mulai ulang → 'Reset' lalu 'Mulai scan'. Hasil ada di 'User lewat batas' (klik 'Refresh hasil')." },
+	// --- Laporan harian ---
+	{ id: "lap-tarik-lama", k: "tarik data lama|tarik data gagal|progres macet|cookie kedaluwarsa|tarik data tidak jalan|scraper|github actions|menunggu github|lap admin kosong", a: "Tarik data Lap Admin dijalankan scraper di GitHub Actions (±1–3 menit; bila banyak user, antre per sumber admin). Syarat: Link Admin + Cookie Admin di Laporan Harian › Setting masih berlaku. 'Cookie Admin kedaluwarsa/ditolak' → ambil Cookie baru (PHPSESSID=...) dari browser yang login, simpan, tarik ulang. Job yang mati/menggantung otomatis ditutup GAGAL; klik TARIK DATA lagi. Anda boleh pindah menu selama menunggu — progres tampil di 'Progres & riwayat tarik data'." },
+	{ id: "lap-total", k: "total deposit tidak sesuai|total deposit salah|total blazz|total khanpay|operator khusus|total withdraw|history operator", a: "Total Deposit = total tabel History Operator DIKURANGI operator khusus; 'Total <operator>' (mis. Blazz/Khanpay) dan Total Withdraw ikut tanggal yang ditarik. Operator khusus diatur ADMIN di Admin › Pengaturan Sistem (tulis persis seperti nama di History Operator). Bila angka tidak cocok: pastikan rentang tanggal benar, tarik ulang, dan cek nama operator khusus tidak salah ketik." },
+	{ id: "lap-motion-pga", k: "skrip tidak jalan|terkirim ke panel|motion tidak masuk|pga pending kosong|data pga tidak update|update terakhir|token motion|lap motion kosong", a: "Lap Motion/PGA Pending/Mozart diambil lewat Console BROWSER (bukan server): buka tab Motion/Mozart yang sudah login, F12 › Console (ketik 'allow pasting' sekali), tempel skrip dari panduan 'Cara pakai', Enter, tunggu 'terkirim ke panel OK', lalu 'Muat Ulang' di panel. PGA Pending: biarkan tab Motion TETAP TERBUKA; label 'Update terakhir N detik lalu' berwarna merah (>15 dtk) berarti skrip berhenti — jalankan lagi. Token/cookie yang kedaluwarsa membuat data kosong: login ulang di Motion dan jalankan skrip lagi." },
+	// --- Live chat ---
+	{ id: "livechat-bot-tidak-muncul", k: "tombol bot tidak muncul|robot tidak muncul|tidak ada tombol|livechat bot tidak muncul|console livechat|allow pasting|bookmark tidak jalan|pasang bot", a: "Pasang bot lewat Console (bookmark tidak jalan di halaman DayLiveChat): buka halaman DayLiveChat CS & login → F12 › Console → ketik 'allow pasting' + Enter (sekali) → di panel klik 'SALIN KODE CONSOLE' (Live Chat › Sesi Chat) → tempel di Console + Enter. Tombol 🤖 muncul di pojok kanan bawah halaman DayLiveChat. Bila muncul popup 'Bot gagal dimuat', situs memblokir skrip — beri tahu admin. Setelah halaman di-refresh, tempel kode lagi (Kunci Bot tidak perlu diisi ulang)." },
+	{ id: "livechat-sesi-kosong", k: "sesi chat tidak muncul|daftar sesi kosong|sinkron|belum ada sesi|sesi tidak terdeteksi|kunci bot tidak valid|kunci userscript", a: "Sesi muncul di Live Chat › Sesi Chat hanya bila bot (🤖) aktif di tab DayLiveChat dan Kunci Bot benar. Ambil Kunci Bot dari kartu 'KUNCI BOT KAMU' (tombol Tampilkan/Salin) dan tempel di tombol 🤖, simpan, nyalakan. 'Kunci userscript tidak valid' → kunci salah/lama; salin lagi dari kartu (bila pernah menekan 'Buat kunci baru', kunci lama mati). Kunci Bot bersifat PER PENGGUNA: sesi akun lain tidak akan tampil di menu Anda. Tab DayLiveChat harus tetap terbuka." },
+	{ id: "livechat-tidak-membalas", k: "bot tidak membalas|tidak membalas otomatis|auto reply tidak jalan|balasan tidak terkirim|bot aktif tapi diam|template kosong", a: "Bot membalas hanya bila SEMUA ini terpenuhi: (1) tombol 🤖 di halaman DayLiveChat berstatus AKTIF (tombol Nyalakan) dan tab masih terbuka; (2) switch 'BOT AKTIF' sesi itu dinyalakan di panel; (3) ada template balasan AKTIF milik Anda (Live Chat › Template Balasan — tiap pengguna punya template sendiri; tanpa template bot diam); (4) member menulis: pesan pertama dibalas setelah ±30 detik bila belum dibalas CS, pesan ≥2 berturut-turut dibalas langsung dengan jarak minimal 15 detik. Sesi yang member-nya sudah keluar dimatikan otomatis." },
+	{ id: "livechat-ganda", k: "balasan ganda|bot membalas dua kali|bot dobel|balas berulang", a: "Pastikan hanya SATU cara bot yang jalan untuk akun yang sama (Console/Tampermonkey/Agent Node.js) dan hanya satu tab DayLiveChat yang menjalankannya. Tempel kode Console dua kali di tab yang sama tidak menggandakan bot (panel kecil hanya terbuka/tertutup), tetapi dua tab/dua cara berbeda akan membalas ganda." },
+	// --- Asisten ---
+	{ id: "asisten-sibuk", k: "asisten sibuk|asisten tidak menjawab|asisten error|api key bermasalah|asisten belum aktif|jawaban lama", a: "Asisten KD memakai API key khusus yang diisi ADMIN di Admin › Pengaturan Sistem › Asisten KD. 'Asisten sedang sibuk atau API key bermasalah' → minta admin klik TES KONEKSI (membedakan key salah vs model lambat/diblokir) dan memilih model yang cepat (bukan alias '*-latest'). 'Batas pertanyaan per jam tercapai' → tunggu jam berikutnya. 'Asisten KD sedang dimatikan admin' → admin menyalakannya di Pengaturan Sistem. Lampiran screenshot (Ctrl+V/klip) hanya terbaca bila model mendukung gambar (mis. Gemini)." },
+	// --- Admin ---
+	{ id: "admin-tambah-user", k: "tambah user|buat akun|akun baru|user baru|tambah operator|buat user|daftar akun", a: "ADMIN: Admin › Users › TAMBAH USER. Isi username, nama, password (wajib untuk akun baru), role (ADMIN/OPERATOR/VIEWER/BOT), status AKTIF, website yang boleh dipakai (kode dipisah koma, mis. HUGO,FOLA), centang akses menu, serta izin Telegram/LinkTree/Panel-Z. Pengguna baru juga perlu menambah template balasan sendiri bila memakai Live Chat." },
+	{ id: "admin-website-baru", k: "website baru|tambah website|token telegram|chat id|kode website|logo website|data website", a: "ADMIN: Admin › Website › isi data per website: nama tampilan, token & chat ID Telegram (result) dan Telegram prediksi, email & password LinkTree, URL/user/password Panel-Z. Website harus punya kode yang dikenali sistem agar logo & tema tampil. Mengganti kode website memindahkan datanya secara atomik. Operator hanya bisa memakai website yang tercantum di akunnya (Admin › Users)." },
+	{ id: "admin-cron", k: "cron|jalankan sekarang|auto posting mati|url cron|jadwal otomatis", a: "Auto Posting digerakkan cron: Cloudflare (tiap 5 menit) dan/atau layanan cron eksternal yang memanggil 'URL CRON' tiap menit (Admin › Auto Posting). Tombol 'Jalankan Sekarang' memaksa satu putaran. Tick tanpa slot jatuh tempo kini langsung selesai tanpa beban. Pastikan statusnya AKTIF dan ada operator login." },
+	// --- Bot News ---
+	{ id: "bot-blogger", k: "blogger belum terhubung|hubungkan ulang blogger|oauth|client id|izin google|putus tiap 7 hari|kode izin google", a: "Bot News › Setting › Blogger: klik hubungkan, izinkan akun Google, lalu tempel URL LENGKAP dari address bar setelah klik Izinkan ('Kode izin Google tidak ditemukan' = URL tidak lengkap). Isi Blog ID. Agar tidak putus tiap 7 hari: Google Cloud Console › Google Auth Platform › Audience, ubah Publishing status dari Testing ke In production, lalu hubungkan ulang sekali. Jenis client: Desktop app." },
+	{ id: "bot-tidak-posting", k: "artikel tidak diposting|bot berita tidak jalan|ai provider tidak aktif|artikel terlalu pendek|ai balas|auto post berita", a: "Periksa peringatan merah di Bot News › Dashboard: 'Blogger belum terhubung' → Hubungkan Ulang; 'tidak ada AI provider aktif' → Kelola/aktifkan provider di Setting › AI Provider (key, model, kuota/masa aktif belum habis). Galat 'AI balas artikel terlalu pendek' = model terlalu lemah/salah — pilih model lain. Pastikan toggle AUTO-POST menyala dan ada sumber berita aktif di menu Sumber Berita." },
+];
+
+// ============================================================================
+// ARTI PESAN GALAT yang muncul di layar (cocok sebagian teks, huruf kecil).
+// ============================================================================
+export const KB_ERRORS: { m: string; a: string }[] = [
+	{ m: "sesi tidak valid atau telah berakhir", a: "Sesi login habis/dicabut. Login ulang. Jika terjadi berulang, tanyakan admin apakah akun diubah/dikunci." },
+	{ m: "akun terkunci sementara", a: "Terlalu banyak salah password. Tunggu beberapa menit atau minta admin membuka kunci di Admin › Users." },
+	{ m: "terlalu banyak percobaan login gagal dari jaringan ini", a: "IP jaringan dibatasi sementara karena banyak percobaan gagal. Tunggu sesuai menit di pesan." },
+	{ m: "tidak diizinkan untuk akun ini", a: "Menu itu belum dibuka admin untuk akun Anda. Minta admin mencentangnya di Admin › Users." },
+	{ m: "hanya untuk admin atau operator", a: "Menu itu tidak tersedia untuk role Anda (VIEWER/BOT). Hubungi admin bila perlu akses." },
+	{ m: "akun bot hanya bisa mengakses fitur bot", a: "Role BOT hanya boleh memakai modul Bot News. Gunakan akun OPERATOR/ADMIN untuk menu lain." },
+	{ m: "akses ditolak. hanya admin", a: "Fitur itu khusus ADMIN." },
+	{ m: "admin terakhir tidak boleh dihapus", a: "Harus selalu ada minimal satu ADMIN; buat/ubah akun ADMIN lain dulu." },
+	{ m: "username sudah digunakan", a: "Pilih username lain (tidak boleh sama dengan akun yang ada, huruf besar/kecil dianggap sama)." },
+	{ m: "password wajib untuk akun baru", a: "Saat menambah user baru kolom password harus diisi." },
+	{ m: "konfigurasi website", a: "Data website itu (token/URL) belum dibuat. ADMIN mengisinya di Admin › Website." },
+	{ m: "kamu tidak punya akses ke website", a: "Kode website itu tidak ada di daftar website akun Anda. Minta admin menambahkannya di Admin › Users." },
+	{ m: "sudah dikirim", a: "Data yang sama sudah pernah dikirim ke website itu (pencegah ganda) — normal; lihat nama pengirim & waktu di pesan." },
+	{ m: "pengecekan anti-duplikat", a: "Database pencatat anti-duplikat sedang tidak terbaca, jadi pengiriman SENGAJA ditahan agar tidak ganda. Coba lagi sebentar; bila tetap, hubungi admin (Turso)." },
+	{ m: "pencatatan anti-duplikat gagal", a: "Pesan SUDAH terkirim tetapi pencatatannya gagal. JANGAN kirim ulang; beri tahu admin." },
+	{ m: "phpsessid kosong", a: "Isi & simpan PHPSESSID di menu AutoCheck Invest (Setting panel agen) dulu." },
+	{ m: "session expired", a: "Sesi panel agen/admin website habis. Login ulang di sumbernya, ambil PHPSESSID/cookie baru, simpan di panel." },
+	{ m: "cookie admin kedaluwarsa", a: "Cookie Admin di Laporan Harian › Setting sudah tidak berlaku. Ambil yang baru dari browser yang login lalu tarik data lagi." },
+	{ m: "belum dikonfigurasi (secret gh_token", a: "GitHub Actions belum disambungkan di server. Hanya admin server yang bisa memperbaiki (secret GH_TOKEN)." },
+	{ m: "turso belum dikonfigurasi", a: "Database Turso belum disambungkan di server (TURSO_URL/TURSO_TOKEN). Hubungi admin server." },
+	{ m: "live chat bot belum dikonfigurasi", a: "Secret LIVECHAT_BOT_KEY belum diatur di server. Hubungi admin server." },
+	{ m: "kunci userscript tidak valid", a: "Kunci Bot salah/lama. Salin ulang dari kartu 'KUNCI BOT KAMU' di Live Chat › Sesi Chat, tempel di tombol 🤖." },
+	{ m: "job ini sudah sampai tahap mengubah data", a: "Proses sudah mengubah data di admin website. Periksa MANUAL di admin website; jangan diulang otomatis agar tidak dobel." },
+	{ m: "job dihentikan sebelum selesai", a: "Proses scraper berhenti sebelum selesai (runner gagal/dibatalkan/waktu habis). Klik TARIK DATA lagi." },
+	{ m: "melebihi batas waktu", a: "Sumber data terlalu lambat. Coba lagi nanti atau persempit rentang tanggal." },
+	{ m: "blog id belum diisi", a: "Isi Blog ID di Bot News › Setting › Blogger lalu simpan." },
+	{ m: "client id / client secret oauth belum diisi", a: "Isi Client ID & Client Secret (Desktop app) di Bot News › Setting › Blogger › Client OAuth, simpan, lalu hubungkan." },
+	{ m: "kode izin google tidak ditemukan", a: "Tempel URL LENGKAP dari address bar setelah klik Izinkan di Google." },
+	{ m: "ai balas artikel terlalu pendek", a: "Model AI tidak mengikuti instruksi/terlalu lemah. Ganti model di Bot News › Setting › AI Provider." },
+	{ m: "http 403 forbidden", a: "Penyedia AI menolak: key salah/tidak punya izin, atau permintaan diblokir. Admin: Pengaturan Sistem › Asisten KD › TES KONEKSI memberi diagnosa; pastikan model chat yang diizinkan akun." },
+	{ m: "batas pertanyaan per jam tercapai", a: "Kuota pertanyaan Asisten KD per jam habis; coba lagi jam berikutnya atau minta admin menaikkan batasnya." },
+	{ m: "asisten sedang sibuk atau api key bermasalah", a: "Admin perlu TES KONEKSI di Pengaturan Sistem › Asisten KD; kemungkinan model lambat atau key bermasalah." },
+	{ m: "base url diganti ke alamat lain", a: "Demi keamanan key lama tidak dipakai untuk alamat baru; isi API key BARU saat mengganti Base URL." },
+	{ m: "terlalu besar", a: "Berkas/screenshot melebihi batas. Potong bagian yang perlu saja lalu coba lagi." },
+	{ m: "tidak bisa membaca gambar", a: "Model asisten tidak mendukung gambar. Kirim pertanyaan tanpa screenshot, atau admin memakai model yang mendukung gambar (mis. Gemini)." },
+];
+
+// ============================================================================
+// GLOSARIUM KOLOM / ISTILAH (label di layar -> arti). Dipakai pula test gerbang CI: setiap label UI harus tercakup.
+// ============================================================================
+export const KB_GLOSSARY: Record<string, string> = {
+	"Cantumkan sumber + backlink di tiap artikel": "Bot News › Setting › Konten & Artikel: bila dinyalakan tiap artikel mencantumkan sumber + tautan balik (juga keterangan 'Foto: sumber'). Di bawahnya 'Kotak Promo di Artikel': isi link promo; KOSONG = kotak promo tidak dipasang.",
+	"Tanggal Sampai": "Menu Aktivitas (filter): batas akhir rentang tanggal; dipasangkan dengan 'Tanggal Dari'. Klik TERAPKAN untuk memfilter, RESET untuk mengosongkan.",
+	"Role": "Admin › Users: ADMIN (semua menu + Admin), OPERATOR (kerja harian sesuai akses), VIEWER (hanya baca), BOT (khusus Bot News).",
+	"Status Akun": "Admin › Users: AKTIF (boleh login), NONAKTIF (tidak boleh login, sesi dicabut), TERKUNCI (kena batas salah password; buka lewat ikon kunci).",
+	"Catatan Admin": "Admin › Users: catatan bebas admin tentang akun (mis. nama pemilik). Tidak tampil ke pengguna.",
+	"URL feed": "Bot News › Sumber Berita: alamat RSS/Atom feed berawalan http/https; dipilih Jenis (RSS atau Google News) dan Kategori (mis. Umum, Nasional). Nama & URL wajib.",
+	"API key": "Bot News › Setting › AI Provider (dan kartu Asisten KD): kunci penyedia AI. Disimpan di server dan tidak pernah ditampilkan utuh lagi (hanya 4 karakter terakhir). Isi kunci baru bila mengganti Base URL.",
+	"Paragraf minimal": "Bot News › Setting › Konten & Artikel: jumlah paragraf terkecil per artikel (bawaan 12–18 paragraf, ±800–1.500 kata).",
+	"Paragraf maksimal": "Bot News › Setting › Konten & Artikel: jumlah paragraf terbesar per artikel; bersama 'Paragraf minimal' menentukan panjang tulisan.",
+	"Gambar per artikel": "Bot News › Setting: jumlah gambar tiap artikel (bawaan 4: 1 gambar utama + foto dari isi artikel sumber, disebar di antara paragraf).",
+	"Gaya penulisan ulang (prompt)": "Bot News › Setting: instruksi gaya yang dikirim ke AI saat menulis ulang berita. Ubah hanya bila ingin gaya berbeda.",
+	"Label/Tag postingan (pisah koma)": "Bot News › Setting: label Blogger untuk tiap postingan, dipisah koma.",
+	"Interval auto-post (menit)": "Bot News › Setting › Jadwal Posting: jeda antar posting otomatis. Dipadukan dengan 'Jatah Blogger', 'Artikel per proses', dan 'Batas artikel / hari' untuk membatasi laju posting.",
+	"Client OAuth": "Bot News › Setting › Blogger: isi Client ID & Client Secret hanya bila mengganti client di Google Cloud (jenis Desktop app); disimpan lewat SIMPAN SETTING. Agar koneksi tidak putus tiap 7 hari ubah Publishing status ke In production lalu hubungkan ulang.",
+	"Client ID": "Bot News › Setting › Blogger › Client OAuth: ID client Google Cloud (Desktop app).",
+	"Client Secret": "Bot News › Setting › Blogger › Client OAuth: rahasia client Google Cloud; tidak ditampilkan ulang.",
+	"Auto-share tiap post ke Facebook Page": "Bot News › Setting › Sosial & Promo: bila dinyalakan tiap artikel yang terposting dibagikan ke Facebook Page (butuh Page ID dan Page Access Token).",
+	"Ganti Page Access Token": "Bot News › Setting › Sosial & Promo: tempel token halaman Facebook baru bila yang lama kedaluwarsa; token tidak ditampilkan ulang.",
+	"Link Fanspage Facebook": "Bot News › Setting › Sosial & Promo: tautan Fanspage yang dipromosikan otomatis di tiap artikel.",
+	"Link Saluran WhatsApp": "Bot News › Setting › Sosial & Promo: tautan Saluran WhatsApp yang dipromosikan otomatis di tiap artikel.",
+	"Tampilkan banner": "Bot News › Setting › Banner Promosi (Berita Terkini): menampilkan banner di sidebar situs Berita Terkini; isi Gambar banner (URL), Link tujuan banner, dan Teks banner.",
+	"Gambar banner": "Banner Promosi: alamat (URL) gambar banner untuk sidebar Berita Terkini.",
+	"Link tujuan banner": "Banner Promosi: tautan yang dibuka saat banner diklik.",
+	"Teks banner": "Banner Promosi: teks pada banner.",
+	"Memproses Pengiriman": "Popup tunggu saat 'KIRIM SEMUA SISTEM' berjalan (memvalidasi data, menghubungkan sistem, mengirim). Jangan tutup tab sampai hasil per website muncul.",
+	"COPY GAMBAR": "Bot News › Template FB: menyalin gambar artikel terpilih ('buka gambar asli' membukanya di tab baru); bila artikel tidak punya gambar tombolnya tidak aktif.",
+	"COPY CAPTION": "Bot News › Template FB: menyalin caption hasil generate AI untuk dipakai di Facebook. Riwayat yang sudah di-generate dicatat supaya tidak dobel.",
+	"SESI CHAT TERDETEKSI": "Live Chat › Sesi Chat: daftar sesi dari Kotak Masuk DayLiveChat yang disinkronkan bot 🤖 (milik Anda saja). Nyalakan switch 'BOT AKTIF' per sesi.",
+};
+
 export function buildKnowledgeText(): string {
 	const pages = Object.entries(KB_PAGES).map(([k, v]) => `## MENU ${v.title} (id: ${k})\n${v.text}`);
 	const tabs = Object.entries(KB_ADMIN_TABS).map(([k, v]) => `## ADMIN › ${v.title} (tab: ${k})\n${v.text}`);
-	return [KB_GENERAL, ...pages, ...tabs].join("\n\n");
+	const faq = KB_FAQ.map((f) => `## KELUHAN (${f.id})\n${f.a}`);
+	const errs = KB_ERRORS.map((e) => `## GALAT "${e.m}"\n${e.a}`);
+	const gloss = Object.entries(KB_GLOSSARY).map(([l, a]) => `## ISTILAH ${l}\n${a}`);
+	return [KB_GENERAL, ...pages, ...tabs, ...faq, ...errs, ...gloss].join("\n\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -195,5 +315,40 @@ export function selectKnowledge(question: string, history: string[] = [], top = 
 		.slice(0, top);
 	const index = entries.map((e) => `- ${e.tab ? "Admin › " : ""}${e.title}: ${firstSentence(e.text)}`).join("\n");
 	const detail = scored.map(({ e }) => `## ${e.tab ? "ADMIN › " : "MENU "}${e.title}\n${e.text}`).join("\n\n");
-	return `${KB_GENERAL}\n\nINDEKS MENU:\n${index}\n\nPENJELASAN LENGKAP BAGIAN YANG RELEVAN:\n${detail || "(tidak ada yang cocok — tanyakan balik menu mana yang dimaksud)"}`;
+
+	// Keluhan umum yang mirip (frasa cocok = +4, kata cocok = +1). Maks 3, minimal skor 4.
+	const faq = KB_FAQ.map((f) => {
+		let sc = 0;
+		for (const ph of f.k.split("|")) {
+			if (!ph) continue;
+			// cocok bila frasa persis ada, ATAU semua kata bermaknanya ada (urutan bebas): 'bot livechat tidak membalas' ~ 'bot tidak membalas'.
+			const ws = ph.split(/[^a-z0-9\-]+/).filter((w) => w.length >= 3);
+			if (q.includes(ph) || (ws.length >= 2 && ws.every((w) => q.includes(w)))) sc += 4;
+		}
+		const kw = new Set(f.k.split(/[^a-z0-9\-]+/).filter((w) => w.length >= 4));
+		for (const w of words) if (kw.has(w)) sc += 1;
+		return { f, sc };
+	})
+		.filter((x) => x.sc >= 4)
+		.sort((a, b) => b.sc - a.sc)
+		.slice(0, 3);
+	// Pesan galat yang dikutip pengguna (cocok sebagian teks).
+	const errs = KB_ERRORS.filter((x) => q.includes(x.m)).slice(0, 3);
+	// Istilah/kolom yang disebut (label lengkap, atau seluruh kata bermakna label ada di pertanyaan).
+	const gloss = Object.entries(KB_GLOSSARY)
+		.filter(([label]) => {
+			const l = label.toLowerCase();
+			if (q.includes(l)) return true;
+			const ws = l.split(/[^a-z0-9]+/).filter((w) => w.length >= 4);
+			return ws.length >= 2 && ws.every((w) => q.includes(w));
+		})
+		.slice(0, 3);
+	const extra = [
+		faq.length ? "KELUHAN UMUM YANG MIRIP (pakai sebagai dasar jawaban):\n" + faq.map((x) => `- ${x.f.a}`).join("\n") : "",
+		errs.length ? "ARTI PESAN GALAT YANG DISEBUT:\n" + errs.map((x) => `- "${x.m}": ${x.a}`).join("\n") : "",
+		gloss.length ? "ISTILAH/KOLOM YANG DISEBUT:\n" + gloss.map(([l, a]) => `- ${l}: ${a}`).join("\n") : "",
+	]
+		.filter(Boolean)
+		.join("\n\n");
+	return `${KB_GENERAL}\n\nINDEKS MENU:\n${index}\n\nPENJELASAN LENGKAP BAGIAN YANG RELEVAN:\n${detail || "(tidak ada yang cocok — tanyakan balik menu mana yang dimaksud)"}${extra ? "\n\n" + extra : ""}`;
 }

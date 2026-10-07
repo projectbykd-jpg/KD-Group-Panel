@@ -9,7 +9,9 @@
     html.kd-booting body { visibility: hidden !important; }
     html.kd-booting { background: #060a15 !important; }
   </style>
-  <script>document.documentElement.classList.add('kd-booting');</script>
+  <script>document.documentElement.classList.add('kd-booting');
+  // Jaring pengaman: bila CDN lambat/terblokir (jaringan seluler) layar tidak boleh gelap kosong -- tampilkan paling lama 2 dtk.
+  setTimeout(function () { document.documentElement.classList.remove('kd-booting'); }, 2000);</script>
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="apple-touch-icon" href="/logo.png">
   <!-- Buka koneksi ke CDN lebih awal supaya aset (ikon, font) mulai diunduh
@@ -553,7 +555,7 @@
 
           <div class="activity-filter-card">
             <div id="activityFilterGrid" class="activity-filter-grid">
-              <input id="activitySearch" class="activity-filter-control" placeholder="Cari username, aksi, detail, atau isi data...">
+              <input id="activitySearch" class="activity-filter-control" placeholder="Cari username, aksi, detail, atau isi data..." onkeydown="if(event.key==='Enter')applyActivityFilters()">
               <select id="activityUserFilter" class="activity-filter-control activity-admin-only" style="display:none"><option value="">Semua User</option></select>
               <select id="activityActionFilter" class="activity-filter-control"><option value="">Semua Aksi</option></select>
               <select id="activityStatusFilter" class="activity-filter-control"><option value="">Semua Status</option></select>
@@ -640,6 +642,14 @@
               <button type="button" onclick="asstCfgTest()" id="asstTestBtn" class="glass-inner px-4 py-2 rounded-xl text-xs font-bold"><i class="fa-solid fa-plug mr-2"></i>TES KONEKSI</button>
               <button type="button" onclick="asstCfgClear(event)" class="glass-inner px-4 py-2 rounded-xl text-xs font-bold text-rose-300"><i class="fa-solid fa-trash mr-2"></i>HAPUS KEY</button>
               <span id="asstCfgStatus" class="text-xs text-slate-400">Memuat…</span>
+            </div>
+            <div class="border-t border-white/10 pt-3 flex flex-col gap-2">
+              <div class="flex items-center justify-between gap-2 flex-wrap">
+                <div class="text-xs font-bold text-slate-200"><i class="fa-regular fa-circle-question mr-2 text-amber-300"></i>Pertanyaan belum terjawab <span id="asstGapCount" class="text-slate-500 font-normal"></span></div>
+                <button type="button" id="asstGapClear" onclick="asstGapsClear()" class="glass-inner px-3 py-1.5 rounded-xl text-[11px] font-bold" style="display:none">BERSIHKAN</button>
+              </div>
+              <div class="text-[11px] text-slate-500">Pertanyaan terkait panel yang belum ada di panduan asisten (tanpa data rahasia, maks. 50 terbaru). Lengkapi panduan di <code class="text-cyan-300">src/lib/assistant-kb.ts</code> berdasarkan daftar ini.</div>
+              <div id="asstGapList" class="flex flex-col gap-1 text-[11px] text-slate-300"></div>
             </div>
           </div>
           <div class="mini-card flex flex-col gap-4 mb-3">

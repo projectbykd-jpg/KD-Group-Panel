@@ -598,7 +598,9 @@ async function dispatchScrapeJob(
 		.run();
 
 	const callback = env.PUBLIC_URL || "https://panel-worker.projectbykd.workers.dev";
-	const resp = await fetch(`${GH_API}/repos/${env.GH_REPO}/actions/workflows/scrape.yml/dispatches`, {
+	let resp: Response;
+	try {
+		resp = await fetch(`${GH_API}/repos/${env.GH_REPO}/actions/workflows/scrape.yml/dispatches`, {
 		method: "POST",
 		headers: {
 			Authorization: `Bearer ${env.GH_TOKEN}`,
@@ -616,7 +618,14 @@ async function dispatchScrapeJob(
 				queue_key: queueKeyFor(kind, sourceUrl),
 			},
 		}),
-	});
+		});
+	} catch (e) {
+		// Gangguan jaringan ke GitHub: job sudah ter-INSERT 'pending'; tandai error supaya klik berikutnya tidak dijawab
+		// 'masih berjalan' untuk job yang tidak pernah dipicu.
+		const why = e instanceof Error ? e.message : String(e);
+		await getTurso(env).prepare(`UPDATE lap_job SET status='error', message=?, updated_at=? WHERE id=?`).bind("Gagal menghubungi GitHub: " + why.slice(0, 120), tsNow(), jobId).run();
+		return { success: false as const, message: "Gagal menghubungi GitHub (" + why.slice(0, 80) + "). Coba lagi sebentar." };
+	}
 	if (resp.status !== 204) {
 		const body = await resp.text();
 		let hint = "";

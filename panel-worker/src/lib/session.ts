@@ -183,7 +183,9 @@ export async function migrateKvSessionsOnce(env: Env): Promise<void> {
 			}
 		}
 		for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
-		await env.SESS.put("migrated:sessions:v1", "1", { expirationTtl: 31536000 });
+		// Tanpa TTL: dulu flag kedaluwarsa setelah 1 tahun lalu migrasi (list + get satu-satu semua token) jalan lagi tiap tick cron
+		// dan menghabiskan batas subrequest.
+		await env.SESS.put("migrated:sessions:v1", "1");
 	} catch {
 		/* dicoba lagi nanti */
 	}

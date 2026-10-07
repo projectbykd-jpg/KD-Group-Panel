@@ -6,8 +6,10 @@ metadata:
   pinned: true
 ---
 
+**PERINTAH PEMILIK (diulang tegas): SETIAP UPDATE di SESI MANAPUN yang berkaitan dengan panel ini, Asisten KD WAJIB ikut paham semuanya dan lebih pintar dari admin atau Claude.** Aturan ini juga ada di `CLAUDE.md` (root repo) agar dibaca otomatis tiap sesi.
+
 Pemilik meminta **Asisten KD** (widget chat melayang di kanan bawah panel, memakai
-AI Provider dari menu BOT, mis. Groq) harus **selalu lebih paham panel daripada
+key khusus asisten di Admin > Pengaturan Sistem, mis. Gemini/Groq) harus **selalu lebih paham panel daripada
 pemiliknya**.
 
 Aturan untuk setiap sesi/PR berikutnya:
@@ -23,3 +25,6 @@ Aturan untuk setiap sesi/PR berikutnya:
    panduan teks; tidak menjalankan aksi.
 4. Hemat token: hanya bagian relevan yang dikirim ke AI (`selectKnowledge`). Tambahkan
    sinonim di `SYNONYMS` bila ada istilah awam baru.
+5. Tambahkan juga **keluhan/gejala umum** ke `KB_FAQ` (gejala -> penyebab -> langkah); test menggagalkan CI bila judul halaman/kartu
+   baru di `ui-src/Index.html` belum disebut di KB.
+6. Admin melihat **Pertanyaan belum terjawab** di Admin > Pengaturan Sistem > Asisten KD -- gunakan itu untuk melengkapi KB.

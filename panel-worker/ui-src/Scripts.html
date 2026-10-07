@@ -827,6 +827,17 @@
         .checkLogin(u, p);
     }
 
+    // Hentikan SEMUA poller per-menu (PGA Pending, WD Listed, Auto Prediksi, Sesi Chat, ticker job). Dulu hanya Live/Invest
+    // yang berhenti, sehingga timer lain terus menembak server dengan token kosong setelah logout / sesi berakhir.
+    function stopAllPagePollers() {
+      try { stopPgaPendingPolling(); } catch (e) {}
+      if (wdListedTimer) { clearInterval(wdListedTimer); wdListedTimer = null; }
+      clearInterval(autoInputTimer); autoInputTimer = null;
+      try { stopLivechatPolling(); } catch (e) {}
+      if (lapJobsTicker) { clearInterval(lapJobsTicker); lapJobsTicker = null; }
+      currentPage = 'home';
+    }
+
     function handleLogout() {
       const token = currentSessionToken;
       if (token) google.script.run.withFailureHandler(() => {}).logoutSession(token);
@@ -836,6 +847,7 @@
       clearLocalSession();
       stopLivePolling();
       stopInvestPolling();
+      stopAllPagePollers();
       lapResetForLogout();
       pageDataCache.activity = null;
       pageFetchedAt.activity = 0; pageFetchedAt.prediction = 0;
@@ -881,6 +893,7 @@
       clearLocalSession();
       stopLivePolling();
       stopInvestPolling();
+      stopAllPagePollers();
       lapResetForLogout();
       clearTimeout(inactivityTimer);
       headerSummaryLoadedOnce = false;
@@ -1862,6 +1875,7 @@
     // berdasarkan WEBSITE yang sama, bukan cuma yang menambahkan.
     let wdListedRows = [];
     let wdListedTimer = null;
+    let wdListedSig = '';
 
     function pgaPendingConsoleScript() {
       const panel = location.origin;
@@ -1993,13 +2007,19 @@
     function pollPgaPendingStatus() {
       google.script.run.withSuccessHandler(res => {
         if (!res || !res.success) return;
-        pgaPendingRows = res.rows || [];
+        const rows = res.rows || [];
+        const sig = (res.updatedAt || 0) + ':' + JSON.stringify(rows);
+        const unchanged = sig === pgaPendingSig;
+        pgaPendingSig = sig;
+        pgaPendingRows = rows;
         pgaPendingUpdatedAt = res.updatedAt || 0;
-        pgaPendingRepaint();
+        pgaPendingRepaint(unchanged);
       }).withFailureHandler(() => {}).pgaPendingStatus(currentSessionToken);
     }
-    function pgaPendingRepaint() {
-      if (lapTblState['pga_pending']) { lapTblState['pga_pending'].rows = pgaPendingRows; lapTblRepaint('pga_pending'); }
+    let pgaPendingSig = '';
+    function pgaPendingRepaint(onlyLabel) {
+      // onlyLabel: data sama -> cukup segarkan teks 'Update terakhir N detik lalu', jangan bangun ulang tabel.
+      if (!onlyLabel && lapTblState['pga_pending']) { lapTblState['pga_pending'].rows = pgaPendingRows; lapTblRepaint('pga_pending'); }
       const cnt = document.getElementById('pgaPendingLiveCount');
       if (cnt) cnt.textContent = pgaPendingRows.length;
       const upd = document.getElementById('pgaPendingUpdatedAt');
@@ -2130,6 +2150,9 @@
     function loadWdListed() {
       google.script.run.withSuccessHandler(res => {
         if (!res || !res.success) return;
+        const sig = JSON.stringify(res.rows || []);
+        if (sig === wdListedSig && wdListedRows.length) return; // sama -> jangan bangun ulang tabel
+        wdListedSig = sig;
         wdListedRows = res.rows || [];
         if (lapTblState['wd_listed']) { lapTblState['wd_listed'].rows = wdListedRows; lapTblRepaint('wd_listed'); }
       }).withFailureHandler(() => {}).wdListedGetList(currentSessionToken);
@@ -2678,7 +2701,19 @@
         set('asstBase', d.base_url); set('asstModel', d.model); set('asstKey', '');
         const km = document.getElementById('asstKeyMask'); if (km) km.textContent = d.configured ? '(tersimpan: ' + d.key_mask + ')' : '';
         if (st) st.textContent = d.configured ? 'Key khusus aktif · pengetahuan asisten v' + (r.kbVersion || '-') : 'Belum ada key khusus — sementara asisten memakai AI Provider menu BOT.';
+        const gaps = r.gaps || [], gl = document.getElementById('asstGapList'), gc = document.getElementById('asstGapCount'), gb = document.getElementById('asstGapClear');
+        if (gc) gc.textContent = gaps.length ? '(' + gaps.length + ')' : '';
+        if (gb) gb.style.display = gaps.length ? '' : 'none';
+        if (gl) gl.innerHTML = gaps.length
+          ? gaps.map(g => '<div class="mini-card flex items-start justify-between gap-3"><span class="min-w-0 break-words">' + escapeHtml(g.q) + '</span><span class="shrink-0 text-slate-500">' + escapeHtml(g.role || '') + (g.n > 1 ? ' · ' + g.n + '×' : '') + ' · ' + escapeHtml(String(g.at || '').slice(5, 16)) + '</span></div>').join('')
+          : '<div class="text-slate-500">Belum ada — semua pertanyaan sejauh ini bisa dijawab.</div>';
       }).withFailureHandler(e => { if (st) st.textContent = 'Gagal memuat: ' + ((e && e.message) || e); }).assistantGetConfig(currentSessionToken);
+    }
+    function asstGapsClear() {
+      google.script.run.withSuccessHandler(r => {
+        if (!r || !r.success) { toast((r && r.message) || 'Gagal membersihkan'); return; }
+        toast('Daftar dibersihkan'); asstCfgLoad();
+      }).withFailureHandler(e => toast((e && e.message) || String(e))).assistantClearGaps(currentSessionToken);
     }
     function asstCfgSave(clear) {
       const st = document.getElementById('asstCfgStatus'), btn = document.getElementById('asstCfgBtn');
@@ -3262,7 +3297,8 @@
       document.getElementById('live-clock').innerText = now.toTimeString().split(' ')[0];
       document.getElementById('live-date').innerText = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
     }
-    setInterval(updateClock, 1000); updateClock();
+    setInterval(() => { if (!document.hidden) updateClock(); }, 1000); updateClock();
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) updateClock(); });
     // Ringkasan header di-refresh oleh live-poll adaptif (startLivePolling),
     // yang otomatis berhenti saat tab tidak terlihat. Interval lama dihapus.
 
@@ -3803,6 +3839,9 @@
       }
 
       const btn = btnEl || document.getElementById('autoSendBtn');
+      // Cegah klik/ketuk ganda: popup loading baru muncul setelah animasi, jadi tanpa penjaga ini dua pengiriman bisa berjalan.
+      if (btn && btn.dataset.sending === '1') return;
+      if (btn) { btn.dataset.sending = '1'; setTimeout(() => { delete btn.dataset.sending; }, 6000); }
       const launch = launchSendPlane(btn);
 
       // Popup loading (menutupi seluruh kartu) sengaja ditunda sampai animasi
@@ -3869,6 +3908,7 @@
     // ===== Auto Prediksi: input Nomor Keluar + Hitung otomatis di admin website =====
     let autoInputState = null;
     let autoInputTimer = null;
+    let autoInputSig = '';
 
     // Server hanya MEMBUAT job; tiap website dijalankan lewat panggilan terpisah (autoInputRun) karena
     // Worker paket gratis dibatasi 50 subrequest per panggilan.
@@ -3917,6 +3957,10 @@
       google.script.run
         .withSuccessHandler(res => {
           if (apiFailed(res)) { if (!silent) toast(apiMessage(res)); return; }
+          // Poll senyap: render ulang HANYA bila datanya berubah (dulu seluruh halaman ditimpa tiap 6 dtk -> isian yang belum disimpan hilang).
+          const sig = JSON.stringify(res);
+          if (silent && sig === autoInputSig) return;
+          autoInputSig = sig;
           autoInputState = res;
           renderAutoInputPage();
         })
@@ -3925,6 +3969,7 @@
       clearInterval(autoInputTimer);
       autoInputTimer = setInterval(() => {
         if (currentPage !== 'auto-input') { clearInterval(autoInputTimer); return; }
+        if (document.hidden) return;
         // Jangan menimpa kolom yang sedang diketik.
         const ae = document.activeElement;
         if (ae && /^(INPUT|SELECT)$/.test(ae.tagName) && document.getElementById('auto-input-page').contains(ae)) return;
@@ -6526,6 +6571,7 @@ Tindakan ini tidak dapat dibatalkan.`,
     let livechatSessionsCache = [];
     let livechatTemplatesCache = [];
     let livechatPollTimer = null;
+    let livechatSig = '';
 
     // Kode Console pemuat bot: alamat panel diambil dari halaman ini, jadi selalu cocok dengan domain yang dipakai.
     function livechatConsoleCode() {
@@ -6591,7 +6637,7 @@ Tindakan ini tidak dapat dibatalkan.`,
     }
     function startLivechatPolling() {
       stopLivechatPolling();
-      livechatPollTimer = setInterval(() => { if (currentPage === 'livechat-sessions') loadLivechatSessions(true); }, 5000);
+      livechatPollTimer = setInterval(() => { if (currentPage === 'livechat-sessions' && !document.hidden) loadLivechatSessions(true); }, 5000);
     }
     function stopLivechatPolling() {
       if (livechatPollTimer) { clearInterval(livechatPollTimer); livechatPollTimer = null; }
@@ -6600,6 +6646,10 @@ Tindakan ini tidak dapat dibatalkan.`,
     function loadLivechatSessions(silent) {
       google.script.run.withSuccessHandler(r => {
         if (!r || r.success === false) { if (!silent) toast((r && r.message) || 'Gagal memuat sesi chat'); return; }
+        // Render ulang daftar hanya bila isinya berubah (last_seen_at ikut berubah tiap sinkron, jadi tidak ikut dibandingkan).
+        const sig = JSON.stringify((r.sessions || []).map(x => [x.session_key, x.bot_enabled, x.customer_name, x.queue_code, x.divisi, x.last_message, x.last_sender])) + '|' + r.templateCount;
+        if (silent && sig === livechatSig) return;
+        livechatSig = sig;
         livechatSessionsCache = r.sessions || [];
         const noTpl = document.getElementById('livechatNoTpl');
         if (noTpl) noTpl.style.display = (Number(r.templateCount) === 0) ? '' : 'none';

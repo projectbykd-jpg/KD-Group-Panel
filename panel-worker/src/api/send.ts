@@ -74,16 +74,28 @@ async function runSend(env: Env, session: Session, rawText: string, opts: SendOp
 
 	const hash = await sha256Hex(textToSend);
 	const websiteResults: WebsiteResult[] = [];
+	const registryWarnings: string[] = [];
 
 	for (const website of websites) {
-		const previous = await getRegistryEntry(env, website, hash);
-		const acc = await getSiteAccount(env, website);
 		const wr: WebsiteResult = {
 			website,
 			telegram: { status: "SKIP", reason: "Tidak diproses" },
 			linktree: { status: "SKIP", reason: "Tidak diproses" },
 			panelz: { status: "SKIP", reason: "Tidak diproses" },
 		};
+		// Registry anti-duplikat ada di Turso. Bila tidak terbaca (down / belum dikonfigurasi) JANGAN mengirim buta (bisa kirim
+		// ganda) dan JANGAN melempar error mentah: tandai website ini GAGAL dengan alasan jelas, lanjutkan website berikutnya.
+		let previous: Awaited<ReturnType<typeof getRegistryEntry>>;
+		try {
+			previous = await getRegistryEntry(env, website, hash);
+		} catch (e) {
+			const why = "Pengecekan anti-duplikat (database) tidak tersedia — tidak dikirim demi mencegah kirim ganda. Coba lagi sebentar atau hubungi admin.";
+			for (const k of SYSTEMS) if (requested[k]) wr[k] = profile.permissions[k] ? { status: "GAGAL", reason: why } : { status: "DIBLOKIR", reason: "Tidak diizinkan pada data Users" };
+			registryWarnings.push(`${website}: registry tidak terbaca (${e instanceof Error ? e.message.slice(0, 80) : "error"})`);
+			websiteResults.push(wr);
+			continue;
+		}
+		const acc = await getSiteAccount(env, website);
 
 		for (const k of SYSTEMS) {
 			if (!requested[k]) continue;
@@ -128,7 +140,17 @@ async function runSend(env: Env, session: Session, rawText: string, opts: SendOp
 			panelz: !!(previous && previous.panelz) || wr.panelz.status === "BERHASIL",
 		};
 		if (merged.telegram || merged.linktree || merged.panelz) {
-			await upsertRegistry(env, hash, website, profile.username, processed.market, merged, textToSend);
+			// Pesan SUDAH terkirim di titik ini. Gagal mencatat registry tidak boleh melempar (dulu: log aktivitas terlewat dan
+			// operator mengira gagal lalu kirim ulang -> terkirim ganda). Coba 2x, lalu peringatkan dengan jelas.
+			try {
+				await upsertRegistry(env, hash, website, profile.username, processed.market, merged, textToSend);
+			} catch {
+				try {
+					await upsertRegistry(env, hash, website, profile.username, processed.market, merged, textToSend);
+				} catch (e2) {
+					registryWarnings.push(`${website}: terkirim tetapi pencatatan anti-duplikat gagal — JANGAN kirim ulang (${e2 instanceof Error ? e2.message.slice(0, 80) : "error"})`);
+				}
+			}
 		}
 		websiteResults.push(wr);
 	}
@@ -155,7 +177,7 @@ async function runSend(env: Env, session: Session, rawText: string, opts: SendOp
 			};
 			return `[${wr.website}]\n${line("Telegram", wr.telegram)}\n${line("LinkTree", wr.linktree)}\n${line("Panel-Z", wr.panelz)}`;
 		})
-		.join("\n\n");
+		.join("\n\n") + (registryWarnings.length ? "\n\n⚠ " + registryWarnings.join("\n⚠ ") : "");
 
 	const allDuplicate = counters.success === 0 && counters.failed === 0 && counters.already > 0;
 	const logStatus =
@@ -204,7 +226,9 @@ async function runSend(env: Env, session: Session, rawText: string, opts: SendOp
 		blocked: counters.success === 0 && counters.failed === 0,
 		message: allDuplicate
 			? "Semua website yang diizinkan sudah pernah menerima data ini."
-			: "Proses selesai.",
+			: registryWarnings.length
+				? "Proses selesai, TETAPI: " + registryWarnings.join("; ")
+				: "Proses selesai.",
 		websiteResults,
 		counters,
 		content: textToSend,
@@ -235,6 +259,8 @@ export async function retryFailedSystem(
 export async function sendToPanelZOnly(env: Env, token: string, market: string, angka: string) {
 	const session = await requireSession(env, token, { menu: "result" });
 	const profile = session.profile;
+	// Izin Panel-Z pada data Users juga berlaku di sini (runSend sudah memeriksanya; jalur manual ini dulu terlewat).
+	if (!profile.permissions.panelz) return { success: false, message: "Akun ini tidak diizinkan memakai Panel-Z (atur di Admin → Users)." };
 	// Hasil SETIAP website dikumpulkan -- dulu cuma hasil website terakhir yang
 	// disimpan, jadi kegagalan di website sebelumnya tertutup "Berhasil".
 	const results: { website: string; msg: string }[] = [];

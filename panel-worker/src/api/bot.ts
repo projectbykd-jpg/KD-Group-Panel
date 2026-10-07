@@ -4,6 +4,7 @@ import { logActivity } from "../lib/activity";
 import { getTurso } from "../lib/turso";
 import {
 	AI_DEFAULT_VALID_DAYS,
+	assertKeyNotReused,
 	aiChatProvider,
 	aiClearCooldown,
 	aiCooldown,
@@ -436,6 +437,7 @@ export async function botAiSave(env: Env, token: string, data: Record<string, un
 	const key = String(data.key ?? "").trim();
 	if (!prev && !key) throw new Error("API key wajib diisi untuk provider baru.");
 	if (/\s/.test(key)) throw new Error("API key tidak boleh mengandung spasi.");
+	assertKeyNotReused(prev?.base_url, String(data.base_url ?? prev?.base_url ?? ""), key);
 	const model = modelChain(String(data.model ?? prev?.model ?? "")).join(", ");
 	if (!model) throw new Error("Model wajib diisi (mis. deepseek-v4-flash, llama-3.3-70b-versatile). Boleh beberapa, pisahkan koma.");
 	const next: AiProvider = {
@@ -569,6 +571,7 @@ export async function botAiModels(env: Env, token: string, data: Record<string, 
 	const cfg = await botCfg(env);
 	const saved = (await aiLoadProviders(env, cfg)).find((x) => x.id === String(data.id ?? ""));
 	const base_url = normalizeBaseUrl(String(data.base_url ?? "") || saved?.base_url || "");
+	assertKeyNotReused(saved?.base_url, base_url, String(data.key ?? ""));
 	const key = String(data.key ?? "").trim() || saved?.key || "";
 	if (!/^https:\/\//i.test(base_url)) throw new Error("Isi Base URL (https://...) dulu.");
 	if (!key) throw new Error("Isi API key dulu.");

@@ -42,20 +42,20 @@ export async function adminSaveSite(env: Env, token: string, data: Record<string
 	const vals: Record<string, string> = {};
 	for (const f of FIELDS) vals[f] = String(data[f] ?? "").trim();
 
-	// Kalau kode website diganti, pindahkan (hapus baris lama).
-	if (original && original !== website) {
-		await env.DB.prepare(`DELETE FROM site_accounts WHERE website = ?`).bind(original).run();
-	}
-
 	const cols = ["website", ...FIELDS];
 	const placeholders = cols.map(() => "?").join(", ");
 	const updates = FIELDS.map((f) => `${f} = excluded.${f}`).join(", ");
-	await env.DB.prepare(
+	const upsert = env.DB.prepare(
 		`INSERT INTO site_accounts (${cols.join(", ")}) VALUES (${placeholders})
 		 ON CONFLICT(website) DO UPDATE SET ${updates}`,
-	)
-		.bind(website, ...FIELDS.map((f) => vals[f]))
-		.run();
+	).bind(website, ...FIELDS.map((f) => vals[f]));
+	// Ganti kode website: simpan yang baru LALU hapus yang lama dalam SATU batch atomik (dulu hapus dulu -> bila simpan gagal,
+	// token & kredensial website hilang).
+	if (original && original !== website) {
+		await env.DB.batch([upsert, env.DB.prepare(`DELETE FROM site_accounts WHERE website = ?`).bind(original)]);
+	} else {
+		await upsert.run();
+	}
 
 	await logActivity(
 		env,
