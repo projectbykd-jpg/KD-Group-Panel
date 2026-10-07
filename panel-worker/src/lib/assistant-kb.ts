@@ -9,13 +9,13 @@
 // Jangan menulis rahasia (password, key, token) di sini.
 // ============================================================================
 
-export const ASSISTANT_KB_VERSION = "2026-10-08.7";
+export const ASSISTANT_KB_VERSION = "2026-10-08.8";
 
 /** Penjelasan per menu. Kunci = id navigasi (nav-<kunci>) di ui-src/Index.html. */
 export const KB_PAGES: Record<string, { title: string; text: string }> = {
 	home: {
 		title: "Dashboard",
-		text: "Ringkasan hari ini (WIB). Bagian atas: salam sesuai jam + tanggal, chip user & role, chip 'Berikutnya HH:MM · Xj Ym lagi' (hitung mundur ke sesi prediksi berikutnya) dan status 'Panel online' (muncul 'Mode maintenance' bila admin mengaktifkannya). Empat kartu: Berhasil, Gagal, Pengiriman, Aktivitas. 'Aktivitas hari ini per jam': batang aktivitas tiap jam, bagian merah = gagal, batang bergaris putus = jam sekarang, arahkan kursor untuk melihat angka; donat 'sukses' = persen Berhasil dibanding (Berhasil + Gagal). 'Jadwal prediksi hari ini': semua sesi auto-posting + kata-kata penutup dengan lencana SELESAI / BERIKUTNYA / jumlah pasaran (jamnya diatur admin di Admin > Data Master). 'Aktivitas terbaru': riwayat akun Anda hari ini; tombol 'Lihat semua' membuka menu Aktivitas. 'Akses cepat': ubin menu yang sering dipakai. 'Operator teraktif hari ini' (hanya ADMIN): lima user dengan aktivitas terbanyak. Operator/viewer hanya melihat angka milik akunnya sendiri; ADMIN melihat semua user. Data di-cache singkat (bawaan 25 dtk, diatur di Pengaturan Sistem), jadi bisa tertinggal beberapa detik."
+		text: "Ringkasan hari ini (WIB). Bagian atas: salam sesuai jam + tanggal, chip user & role, chip 'Berikutnya HH:MM · Xj Ym lagi' (hitung mundur ke sesi prediksi berikutnya) dan status 'Panel online' (muncul 'Mode maintenance' bila admin mengaktifkannya). Empat kartu: Berhasil, Gagal, Pengiriman, Aktivitas. 'Aktivitas hari ini per jam': batang aktivitas tiap jam (ADMIN: 'Total semua user'; operator/viewer: 'Akun Anda' saja), bagian merah = gagal, batang bergaris putus = jam sekarang, arahkan kursor untuk melihat angka; donat 'sukses' = persen Berhasil dibanding (Berhasil + Gagal). 'Jadwal prediksi hari ini': semua sesi auto-posting + kata-kata penutup dengan lencana SELESAI / BERIKUTNYA / jumlah pasaran (jamnya diatur admin di Admin > Data Master). 'Aktivitas terbaru': riwayat akun Anda hari ini; tombol 'Lihat semua' membuka menu Aktivitas. 'Akses cepat': ubin menu yang sering dipakai. 'Operator teraktif hari ini' (hanya ADMIN): lima user dengan aktivitas terbanyak. Operator/viewer hanya melihat angka milik akunnya sendiri; ADMIN melihat semua user. Data di-cache singkat (bawaan 25 dtk, diatur di Pengaturan Sistem), jadi bisa tertinggal beberapa detik."
 	},
 	result: {
 		title: "Result",
