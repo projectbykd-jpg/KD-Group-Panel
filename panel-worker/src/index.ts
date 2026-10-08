@@ -30,6 +30,8 @@ import {
 import { logTotoEvent, totoDispatchTick, totoMacauRun } from "./lib/toto-macau";
 import {
 	autoInputClearJob,
+	autoInputHideJobs,
+	autoInputDismissToto,
 	autoInputDeleteSession,
 	autoInputGetState,
 	autoInputRun,
@@ -221,6 +223,8 @@ const ROUTES: Record<string, Handler> = {
 	autoInputSaveSession: (env, b) => autoInputSaveSession(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
 	autoInputDeleteSession: (env, b) => autoInputDeleteSession(env, s(b.token), s(b.website)),
 	autoInputClearJob: (env, b) => autoInputClearJob(env, s(b.token), rowId(b.jobId)),
+	autoInputHideJobs: (env, b) => autoInputHideJobs(env, s(b.token), b.ids),
+	autoInputDismissToto: (env, b) => autoInputDismissToto(env, s(b.token), b.ids),
 	autoInputRun: (env, b) => autoInputRun(env, s(b.token), rowId(b.jobId)),
 	autoInputAlerts: (env, b) => autoInputAlerts(env, s(b.token)),
 	autoInputTotoLog: (env, b) => autoInputTotoLog(env, s(b.token)),

@@ -49,6 +49,8 @@ const ARG_MAP = {
 	autoInputSaveSession: ["token", "data"],
 	autoInputDeleteSession: ["token", "website"],
 	autoInputClearJob: ["token", "jobId"],
+	autoInputHideJobs: ["token", "ids"],
+	autoInputDismissToto: ["token", "ids"],
 	autoInputTest: ["token", "website", "market"],
 	autoInputRun: ["token", "jobId"],
 	autoInputAlerts: ["token"],

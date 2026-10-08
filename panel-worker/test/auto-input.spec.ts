@@ -4,7 +4,7 @@ const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: im
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
 import { autoInputAfterSend, autoInputRetryTick, runQueuedJob, type AutoInputNotice } from "../src/api/auto-input";
-import { pruneAutoInputJobs, pendingFailureAlerts, ackFailureAlerts, claimJob, parseCookieInput, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
+import { hideJobs, pruneAutoInputJobs, pendingFailureAlerts, ackFailureAlerts, claimJob, parseCookieInput, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
 import { frameSources, parseAngkaPage, readTopRow, parseHitungPage, runAutoInput, buildPayload, parseForms } from "../src/lib/auto-input-run";
 import { processText } from "../src/lib/parser";
 import { fakeD1, fakeEnv } from "./helpers/fake-env";
@@ -620,6 +620,31 @@ describe("autoInputAfterSend (DB)", () => {
 		expect(await pruneAutoInputJobs(env)).toBe(2);
 		const left = (turso.current!.raw.prepare(`SELECT result_key FROM auto_input_job ORDER BY result_key`).all() as { result_key: string }[]).map((r) => r.result_key);
 		expect(left).toEqual(["baru", "enam-hari", "lama-jalan"]);
+	});
+	it("hapus manual (checkbox): job disembunyikan, hanya milik sendiri, yang berjalan dilewati; tidak dicoba ulang/diperingatkan; pagar anti-input-ganda tetap", async () => {
+		await listJobs(env, "Op");
+		const wib = (msAgo: number) => new Date(Date.now() + 7 * 3600_000 - msAgo).toISOString().slice(0, 19).replace("T", " ");
+		const ins = turso.current!.raw.prepare(
+			`INSERT INTO auto_input_job (username, website, market, result_key, status, stage, attempts, created_at, updated_at) VALUES (?, 'HUGOTOGEL', 'HK', ?, ?, ?, ?, ?, ?)`,
+		);
+		const id = (k: string) => (turso.current!.raw.prepare(`SELECT id FROM auto_input_job WHERE result_key = ?`).get(k) as { id: number }).id;
+		ins.run("Op", "done", "DONE", "selesai", 0, wib(60_000), wib(60_000));
+		ins.run("Op", "gagal", "FAILED", "cek", 2, wib(60_000), wib(60_000));
+		ins.run("Op", "jalan", "RUNNING", "", 0, wib(60_000), wib(60_000));
+		ins.run("Lain", "milik-lain", "DONE", "selesai", 0, wib(60_000), wib(60_000));
+		expect((await listJobs(env, "Op")).map((j) => j.id).length).toBe(3);
+		const r = await hideJobs(env, "Op", [id("done"), id("gagal"), id("jalan"), id("milik-lain"), -5, 999999]);
+		expect(r).toEqual({ hidden: 2, skipped: 3 }); // id negatif disaring sebelum dihitung
+		expect((await listJobs(env, "Op")).map((j) => j.status)).toEqual(["RUNNING"]); // yang berjalan tetap tampil
+		expect((await listJobs(env, "Lain")).length).toBe(1); // milik orang lain tidak tersentuh
+		// job gagal yang disembunyikan tidak memunculkan peringatan
+		expect(await pendingFailureAlerts(env, "Op", 2)).toHaveLength(0);
+		// barisnya tetap ada: UNIQUE (website, result_key) masih menjadi pagar anti-input-ganda
+		expect((turso.current!.raw.prepare(`SELECT COUNT(*) AS n FROM auto_input_job WHERE username = 'Op'`).get() as { n: number }).n).toBe(3);
+		expect(() => ins.run("Op", "done", "DONE", "selesai", 0, wib(1), wib(1))).toThrow(/UNIQUE/i);
+		// pemangkasan harian tetap membuangnya setelah 7 hari
+		turso.current!.raw.prepare(`UPDATE auto_input_job SET created_at = ? WHERE result_key = 'done'`).run(wib(9 * 86400_000));
+		expect(await pruneAutoInputJobs(env)).toBe(1);
 	});
 	it("user lain tidak bisa menjalankan job milik orang lain", async () => {
 		const m = mockSite();

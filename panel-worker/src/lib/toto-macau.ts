@@ -133,6 +133,9 @@ async function ensureTables(env: Env): Promise<void> {
 	await db
 		.prepare(`CREATE TABLE IF NOT EXISTS toto_macau_event (id INTEGER PRIMARY KEY AUTOINCREMENT, website TEXT NOT NULL DEFAULT '', ts TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT 'info', level TEXT NOT NULL DEFAULT 'INFO', msg TEXT NOT NULL DEFAULT '')`)
 		.run();
+	await db
+		.prepare(`CREATE TABLE IF NOT EXISTS toto_macau_dismissed (website TEXT NOT NULL, game TEXT NOT NULL, period INTEGER NOT NULL, at TEXT NOT NULL DEFAULT '', by TEXT NOT NULL DEFAULT '', PRIMARY KEY (website, game, period))`)
+		.run();
 	ensured = true;
 }
 
@@ -296,6 +299,33 @@ export async function listTotoEvents(env: Env, websites: string[], limit = 60): 
 	return { events, running, lastAt: events[0]?.ts ?? "" };
 }
 
+/**
+ * Tandai baris yang sudah ditangani manual oleh user: dihapus dari daftar dan TIDAK diperiksa/diisi/dikoreksi otomatis lagi (berlaku untuk
+ * semua user di website itu, karena pemeriksaan per website). Hanya baris di website milik user. Penanda dipangkas otomatis setelah N hari.
+ */
+export async function dismissTotoRows(env: Env, websites: string[], ids: number[], by: string): Promise<{ dismissed: number }> {
+	await ensureTables(env);
+	const ws = [...new Set(websites.map((w) => String(w).trim().toUpperCase()).filter(Boolean))];
+	const list = [...new Set(ids.map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 300);
+	if (!ws.length || !list.length) return { dismissed: 0 };
+	const db = getTurso(env);
+	const rows = await db
+		.prepare(`SELECT id, website, game, period, market, row_at FROM toto_macau_log WHERE period > 0 AND website IN (${ws.map(() => "?").join(",")}) AND id IN (${list.map(() => "?").join(",")})`)
+		.bind(...ws, ...list)
+		.all<{ id: number; website: string; game: string; period: number; market: string; row_at: string }>();
+	const found = rows.results ?? [];
+	if (!found.length) return { dismissed: 0 };
+	const now = tsNow();
+	const stmts: LogStmt[] = [];
+	for (const r of found) {
+		stmts.push(db.prepare(`INSERT OR REPLACE INTO toto_macau_dismissed (website, game, period, at, by) VALUES (?, ?, ?, ?, ?)`).bind(r.website, r.game, r.period, now, by));
+		stmts.push(db.prepare(`DELETE FROM toto_macau_log WHERE id = ?`).bind(r.id));
+		stmts.push(evStmt(env, String(r.website), "info", "INFO", `${r.market} ${String(r.row_at).slice(0, 10)}: dihapus manual oleh ${by} (ditangani manual) — tidak diperiksa otomatis lagi`));
+	}
+	for (let i = 0; i < stmts.length; i += 40) await db.batch(stmts.slice(i, i + 40));
+	return { dismissed: found.length };
+}
+
 /** Hapus catatan Toto Macau yang lebih lama dari N hari (log per draw berdasarkan waktu draw; catatan gagal-baca/penanda putaran berdasarkan pembaruan terakhir; kejadian berdasarkan waktu). */
 export async function pruneTotoMacau(env: Env, days?: number): Promise<{ log: number; events: number }> {
 	await ensureTables(env);
@@ -304,6 +334,7 @@ export async function pruneTotoMacau(env: Env, days?: number): Promise<{ log: nu
 	const [a, b] = await db.batch([
 		db.prepare(`DELETE FROM toto_macau_log WHERE (period > 0 AND row_at <> '' AND row_at < ?) OR (period <= 0 AND updated_at < ?)`).bind(from, from),
 		db.prepare(`DELETE FROM toto_macau_event WHERE ts < ?`).bind(from),
+		db.prepare(`DELETE FROM toto_macau_dismissed WHERE at < ?`).bind(from),
 	]);
 	return { log: a.meta.changes, events: b.meta.changes };
 }
@@ -402,6 +433,10 @@ async function reconcileWebsite(
 	const db = getTurso(env);
 	const buf: LogStmt[] = [];
 	const sum0 = { posted: sum.posted, corrected: sum.corrected, failed: sum.failed };
+	// baris yang sudah ditangani manual oleh user (dihapus dari daftar): tidak diperiksa/diisi/dikoreksi lagi
+	budget.used++;
+	const dis = await db.prepare(`SELECT game, period FROM toto_macau_dismissed WHERE website = ?`).bind(website).all<{ game: string; period: number }>();
+	const dismissed = new Set((dis.results ?? []).map((r) => `${r.game}|${r.period}`));
 	const today = dayOf(deps.nowMs);
 	const since = dayOf(deps.nowMs, deps.lookback);
 	const adminRows: AdminRow[] = [];
@@ -460,6 +495,7 @@ async function reconcileWebsite(
 			buf.push(evStmt(env, website, "info", "INFO", `Admin ${gameLabel(game)}: halaman ${pg + 1} dibaca (${pageRows.length} baris, terlama ${pageRows.reduce((m, r) => (m && m < r.date ? m : r.date), "")})`));
 		}
 		for (const r of all.values()) {
+			if (dismissed.has(`${game.game}|${r.period}`)) continue; // ditangani manual oleh user
 			if (r.hitung !== "yes" || r.date < since || r.date > today) continue; // belum dihitung admin / terlalu lama / tanggal aneh
 			const market = game.slots[r.hour];
 			const bad = !market ? `jam ${r.hour} bukan jam draw yang dikenal` : !new RegExp(`^\\d{${game.digits}}$`).test(r.number) ? `angka "${r.number}" bukan ${game.digits} digit` : "";
