@@ -27,7 +27,7 @@ import {
 	adminSetAutoPost,
 	pruneActivityLogCron,
 } from "./api/admin";
-import { totoMacauRun } from "./lib/toto-macau";
+import { totoDispatchTick, totoMacauRun } from "./lib/toto-macau";
 import {
 	autoInputClearJob,
 	autoInputDeleteSession,
@@ -749,7 +749,9 @@ export default {
 				console.error("auto-input retry error", e);
 				return false;
 			});
-			if (!retried) await investPump(env).catch((e) => console.error("invest pump error", e));
+			// Auto Check Toto Macau/5D: cron ini hanya MEMICU workflow GitHub Actions (1 panggilan GitHub); prosesnya di Actions. Bila memicu, pump Invest menunggu tick berikutnya.
+			const totoDispatched = retried ? false : await totoDispatchTick(env, () => dispatchTotoMacau(env)).catch(() => false);
+			if (!retried && !totoDispatched) await investPump(env).catch((e) => console.error("invest pump error", e));
 		}
 	},
 } satisfies ExportedHandler<Env>;
