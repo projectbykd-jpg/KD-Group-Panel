@@ -196,7 +196,7 @@ export async function ackTotoAlerts(env: Env, ids: number[]): Promise<void> {
 // ---------------------------------------------------------------------------
 // Rekonsiliasi: admin AG/AGWL  <->  Panel-Z, per website, per (pasaran, TANGGAL)
 // ---------------------------------------------------------------------------
-export type PanelOpen = (cfg: PanelZCfg) => Promise<PanelZHandle | string>;
+export type PanelOpen = (cfg: PanelZCfg, opts?: { sinceDate?: string }) => Promise<PanelZHandle | string>;
 export interface TotoDeps {
 	fetchFn?: Fetcher;
 	panel?: PanelOpen;
@@ -379,9 +379,9 @@ async function reconcileWebsite(
 	adminRows.sort((a, b) => (a.date + a.time < b.date + b.time ? -1 : 1));
 
 	// Panel-Z: masuk sekali, baca daftar result.
-	budget.used += 2;
 	sum.net = true;
-	const panel = await deps.panel(pz);
+	const panel = await deps.panel(pz, { sinceDate: since });
+	budget.used += typeof panel === "string" ? 2 : (panel.fetches ?? 2);
 	if (typeof panel === "string") {
 		await recordFailure(env, website, "pz", today, reader, `Panel-Z tidak bisa dibuka: ${panel}`);
 		sum.failed++;
@@ -465,10 +465,10 @@ async function reconcileWebsite(
 
 	// Baca ulang Panel-Z: angka yang baru dikirim HARUS tampil di baris yang benar.
 	if (posted.length) {
-		budget.used++;
+		budget.used += 2; // baca ulang halaman yang memuat baris terkirim (biasanya 1-2 halaman)
 		let after: PanelZRow2[] = [];
 		try {
-			after = parsePanelZRows(await panel.reload());
+			after = parsePanelZRows(await panel.reload(posted.map((x) => x.rowId)));
 		} catch {
 			after = [];
 		}

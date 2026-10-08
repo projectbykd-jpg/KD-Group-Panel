@@ -4,7 +4,7 @@ const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: im
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
 import { ackTotoAlerts, listTotoLog, parseTotoRows, passIntervalMin, pendingTotoAlerts, resetTotoTablesFlag, totoMacauRun } from "../src/lib/toto-macau";
-import { parsePanelZRows, type PanelZHandle } from "../src/senders/panelz";
+import { openPanelZ, panelZPageCount, parsePanelZRows, type PanelZHandle } from "../src/senders/panelz";
 import { defaultAdminBase, resetAutoInputTablesFlag, saveSession, setEnabled } from "../src/lib/auto-input";
 import { resetSysCache, saveSys } from "../src/lib/settings";
 import { fakeD1, fakeEnv } from "./helpers/fake-env";
@@ -26,13 +26,23 @@ const adminPage = (title: string, rows: [string, string, string, string][]) => `
 // Tabel "Semua Result" Panel-Z (pendekatan dari screenshot pemilik: #, Pasaran, Angka (xxxx = kosong), Tanggal, Action).
 type ZRow = { id: number; market: string; date: string; value: string };
 const MONTH = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const zHtml = (rows: ZRow[]) =>
-	`<table id="tbl"><thead><tr><th>#</th><th>Pasaran</th><th>Angka</th><th>Tanggal</th><th>Action</th></tr></thead><tbody>${rows
-		.map((r) => {
+// Bentuk HTML ASLI Panel-Z (dikirim pemilik): <th scope="row">, <form> membungkus <td> di dalam <tr>, nama pasaran huruf kecil, input name="updangka".
+const zHtml = (rows: ZRow[], pages = 1) =>
+	`<table id="prediksi-block" class="table font-weight-bold"><thead><tr><th scope="col">#</th><th scope="col">Pasaran</th><th scope="col">Angka</th><th scope="col">Tanggal</th><th scope="col">Action</th></tr></thead><tbody>${rows
+		.map((r, i) => {
 			const [y, m, d] = r.date.split("-");
-			return `<tr><td>${r.id}</td><td><img src="assets/img/${r.market.toLowerCase()}.png"> ${r.market}</td><td><input type="text" class="form-control" value="${r.value}" placeholder="xxxx"></td><td>${d} ${MONTH[Number(m) - 1]} ${y} | 00:25:02</td><td><form action="config/update-resultlotto.php?row=${r.id}" method="post"><button>Edit</button></form><a href="hapus.php?id=${r.id}">Hapus</a></td></tr>`;
+			const mk = r.market.toLowerCase();
+			return `<tr>
+                <th scope="row">${101 + i}</th>
+                <td class="text-uppercase"><img class="rounded" src="assets/images/icon-market/${mk}.webp" width="50" /> ${mk}</td>
+                <form method="post" action="config/update-resultlotto.php?row=${r.id}">
+                <td class="text-capitalize"><input type="text" class="form-control" name="updangka" maxlength="6" value="${r.value}" /></td>
+                <td> ${d} ${MONTH[Number(m) - 1]} ${y} | 00:25:02</td>
+                <td><button type="submit" class="btn btn-primary"><i class="fas fa-check"></i> Edit</button> <a href="config/delresult.php?row=${r.id}" class="btn btn-danger"><i class="fas fa-times"></i> Hapus</a></td>
+                </form>
+                </tr>`;
 		})
-		.join("")}</tbody></table>`;
+		.join("\n")}</tbody></table><ul class="pagination">${Array.from({ length: pages }, (_, i) => `<li class="page-item"><a class="page-link font-weight-bold" href="?hal=result&no=${i + 1}">${i + 1}</a></li>`).join("")}</ul>`;
 
 // 09-10-2026 01:52 WIB (saat pemilik menekan tombol) = 18:52 UTC 08-10
 const NOW = Date.UTC(2026, 9, 8, 18, 52);
@@ -65,6 +75,73 @@ describe("pembaca tabel admin & Panel-Z", () => {
 	it("jeda putaran: 3 menit setelah jam draw, 30 menit di luar itu", () => {
 		expect(passIntervalMin(Date.UTC(2026, 9, 8, 6, 20))).toBe(3); // 13:20 WIB
 		expect(passIntervalMin(Date.UTC(2026, 9, 8, 4, 0))).toBe(30); // 11:00 WIB
+	});
+});
+
+// Panel-Z asli membagi daftar per halaman (100 baris, terbaru dulu): 08 Oct terpotong antara halaman 1 dan 2.
+const PZ_PAGES: ZRow[][] = [
+	[
+		{ id: 242901, market: "TOTOMACAU-00", date: "2026-10-08", value: "xxxx" },
+		{ id: 242903, market: "TOTOMACAU-13", date: "2026-10-08", value: "4518" },
+	],
+	[
+		{ id: 242908, market: "TOTOMACAU-16", date: "2026-10-08", value: "xxxx" },
+		{ id: 242925, market: "TOTOMACAU-22", date: "2026-10-08", value: "xxxx" },
+		{ id: 242831, market: "TOTOMACAU-13", date: "2026-10-07", value: "2492" },
+	],
+	[{ id: 242700, market: "TOTOMACAU-13", date: "2026-10-06", value: "1111" }],
+	[{ id: 242600, market: "TOTOMACAU-13", date: "2026-10-05", value: "2222" }],
+];
+function stubPanelZ(pages: ZRow[][]) {
+	const urls: string[] = [];
+	vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+		urls.push(`${init?.method ?? "GET"} ${url}`);
+		if (url.includes("authentication.php")) return new Response("", { status: 302, headers: { "set-cookie": "PHPSESSID=zzz; path=/" } });
+		const m = url.match(/hal=result(?:&no=(\d+))?/);
+		if (m) return new Response(zHtml(pages[Number(m[1] || 1) - 1] ?? [], pages.length), { status: 200 });
+		if (url.includes("update-resultlotto.php")) {
+			const id = url.match(/row=(\d+)/)![1];
+			const angka = new URLSearchParams(String(init?.body)).get("updangka")!;
+			for (const pg of pages) for (const r of pg) if (String(r.id) === id) r.value = angka;
+			return new Response("", { status: 302 });
+		}
+		return new Response("", { status: 404 });
+	});
+	return urls;
+}
+describe("daftar Panel-Z per halaman", () => {
+	const cfg = { url: "https://pz.test", user: "u", pass: "p", user2: "u2", pass2: "p2" } as never;
+	it("pagination dibaca dari tautan ?hal=result&no=N", () => {
+		expect(panelZPageCount(zHtml([], 5))).toBe(5);
+		expect(panelZPageCount("<table></table>")).toBe(1);
+	});
+	it("memuat halaman berikutnya sampai tanggal paling lama melewati batas; baris 08 Oct di halaman 2 ikut terbaca", async () => {
+		const urls = stubPanelZ(structuredClone(PZ_PAGES));
+		const h = (await openPanelZ(cfg, { sinceDate: "2026-10-07" })) as PanelZHandle;
+		const rows = parsePanelZRows(h.html);
+		expect(rows.find((r) => r.market === "TOTOMACAU-16" && r.date === "2026-10-08")).toMatchObject({ id: "242908", filled: false });
+		expect(rows.find((r) => r.market === "TOTOMACAU-22" && r.date === "2026-10-08")).toMatchObject({ id: "242925", filled: false });
+		// halaman 1 (oldest 08 >= 07) -> halaman 2 (oldest 07, belum < 07) -> halaman 3 (oldest 06 < 07) -> berhenti; halaman 4 tidak dimuat
+		expect(urls.filter((u) => u.includes("hal=result")).length).toBe(3);
+		expect(h.fetches).toBe(4); // login + 3 halaman
+		vi.unstubAllGlobals();
+	});
+	it("baca ulang hanya halaman yang memuat baris yang dikirim", async () => {
+		const urls = stubPanelZ(structuredClone(PZ_PAGES));
+		const h = (await openPanelZ(cfg, { sinceDate: "2026-10-08" })) as PanelZHandle;
+		const before = urls.length;
+		expect(await h.push("242908", "6360")).toBe("Berhasil dikirim");
+		const html = await h.reload(["242908"]);
+		expect(urls.slice(before).filter((u) => u.includes("hal=result"))).toEqual(["GET https://pz.test/dashboard.php?hal=result&no=2"]);
+		expect(parsePanelZRows(html).find((r) => r.id === "242908")).toMatchObject({ value: "6360", filled: true });
+		vi.unstubAllGlobals();
+	});
+	it("tidak melewati batas halaman maksimum", async () => {
+		const many = Array.from({ length: 12 }, (_, i) => [{ id: 1000 + i, market: "TOTOMACAU-13", date: "2026-10-08", value: "1234" }]);
+		const urls = stubPanelZ(many);
+		await openPanelZ(cfg, { sinceDate: "2026-01-01" });
+		expect(urls.filter((u) => u.includes("hal=result")).length).toBeLessThanOrEqual(6);
+		vi.unstubAllGlobals();
 	});
 });
 
@@ -170,6 +247,43 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 		// jaringan panel/admin: 2 halaman admin + 2 login/daftar Panel-Z + 1 baca ulang + 1 push per baris
 		const net = adminHits.length + 3 + pushed.length;
 		expect(calls + net).toBeLessThan(45);
+	});
+	it("end-to-end halaman berbagi: baris kosong 08 Oct di halaman 2 diisi & diverifikasi, baris di halaman 1 tidak ikut tersentuh", async () => {
+		await addUser("tester");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("tester");
+		await setMode(2);
+		const pages: ZRow[][] = [
+			[
+				{ id: 242901, market: "TOTOMACAU-00", date: "2026-10-08", value: "xxxx" },
+				{ id: 242903, market: "TOTOMACAU-13", date: "2026-10-08", value: "4518" },
+				{ id: 242950, market: "TOTOMACAU-00", date: "2026-10-09", value: "xxxx" },
+			],
+			[
+				{ id: 242908, market: "TOTOMACAU-16", date: "2026-10-08", value: "xxxx" },
+				{ id: 242917, market: "TOTOMACAU-19", date: "2026-10-08", value: "2144" },
+				{ id: 242925, market: "TOTOMACAU-22", date: "2026-10-08", value: "xxxx" },
+				{ id: 242933, market: "TOTOMACAU-15-5D", date: "2026-10-08", value: "92018" },
+				{ id: 242934, market: "TOTOMACAU-21-5D", date: "2026-10-08", value: "xxxx" },
+				{ id: 242935, market: "TOTOMACAU-23", date: "2026-10-08", value: "xxxx" },
+			],
+		];
+		const urls = stubPanelZ(pages);
+		const sum = await totoMacauRun(env, { fetchFn, nowMs: NOW, force: true });
+		expect(sum.failed).toBe(0);
+		const vals = Object.fromEntries(pages.flat().map((r) => [r.id, r.value]));
+		expect(vals[242908]).toBe("6360"); // -16 08 Oct (halaman 2)
+		expect(vals[242925]).toBe("0522"); // -22 08 Oct
+		expect(vals[242935]).toBe("5747"); // -23 08 Oct
+		expect(vals[242934]).toBe("08346"); // -21-5D 08 Oct
+		expect(vals[242901]).toBe("7036"); // -00 08 Oct (halaman 1)
+		expect(vals[242950]).toBe("2412"); // -00 09 Oct
+		expect(vals[242903]).toBe("4518"); // sudah benar, tidak diubah
+		const st = await byMarketDate();
+		expect(st["TOTOMACAU-16 2026-10-08"]).toBe("SENT");
+		expect(st["TOTOMACAU-22 2026-10-08"]).toBe("SENT");
+		expect(urls.some((u) => u.startsWith("POST") && u.includes("row=242908"))).toBe(true);
+		vi.unstubAllGlobals();
 	});
 	it("mode 1: membandingkan saja -- tidak ada yang dikirim; status per (pasaran, tanggal)", async () => {
 		addUser("Op");
