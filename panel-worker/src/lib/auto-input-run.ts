@@ -339,7 +339,7 @@ export function buildPayload(form: ParsedForm, fill: Record<string, string>, but
 const UA =
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36";
 
-async function adminReq(
+export async function adminReq(
 	f: Fetcher,
 	sess: AdminSession,
 	path: string,
