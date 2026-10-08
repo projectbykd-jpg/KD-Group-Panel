@@ -12,6 +12,7 @@
 //   * ragu = berhenti dan minta input manual.
 import { adminDomain } from "./integrations";
 import { getTurso } from "./turso";
+import { getSys } from "./settings";
 import { tsNow, tsPlusMinutes } from "./time";
 import type { Processed } from "./parser";
 import { PREDICTION_SITE_NAMES } from "./prediction";
@@ -452,12 +453,16 @@ export async function claimJob(env: Env, username: string, jobId: number): Promi
 	return row ? rowToJob(row) : null;
 }
 
-export async function listJobs(env: Env, username: string, limit = 30): Promise<JobRow[]> {
+/** Riwayat job N hari terakhir (WIB, mulai 00:00 hari ke-N lalu) -- BUKAN "30 terakhir": dulu hari yang ramai mendorong job
+ * lama keluar dari tabel sebelum 7 hari. N diatur admin (sys_auto_input_history_days, bawaan 7). Batas baris hanya pengaman. */
+export async function listJobs(env: Env, username: string, days?: number): Promise<JobRow[]> {
 	await ensureAutoInputTables(env);
 	await expireRunning(env);
+	const n = days ?? (await getSys(env, "sys_auto_input_history_days"));
+	const from = new Date(Date.now() + 7 * 3600_000 - n * 86400_000).toISOString().slice(0, 10) + " 00:00:00";
 	const res = await getTurso(env)
-		.prepare(`SELECT * FROM auto_input_job WHERE username = ? ORDER BY id DESC LIMIT ?`)
-		.bind(username, limit)
+		.prepare(`SELECT * FROM auto_input_job WHERE username = ? AND created_at >= ? ORDER BY id DESC LIMIT 2000`)
+		.bind(username, from)
 		.all<Record<string, unknown>>();
 	return (res.results ?? []).map(rowToJob);
 }

@@ -4284,7 +4284,7 @@
           <td class="p-2 text-xs">${esc(j.market)}<div class="font-mono text-amber-300">${esc((j.prizes || []).join(' / '))}</div></td>
           <td class="p-2 text-[10px] font-extrabold ${stColor[j.status] || ''}">${stLabel[j.status] || esc(j.status)}${manual ? '<div class="text-rose-300">CEK MANUAL</div>' : ''}</td>
           <td class="p-2 text-[11px] text-slate-300">${esc(j.detail)} ${again}</td></tr>`;
-      }).join('') || '<tr><td colspan="5" class="p-4 text-center text-xs text-slate-500">Belum ada.</td></tr>';
+      }).join('') || '<tr><td colspan="5" class="p-4 text-center text-xs text-slate-500">Belum ada job dalam ' + (Number(st.historyDays) || 7) + ' hari terakhir.</td></tr>';
       host.innerHTML = `
         <div class="glass-card rounded-3xl p-5 sm:p-6 flex flex-col gap-5">
           <div class="page-head tone-amber">
@@ -4306,7 +4306,8 @@
             Hanya website yang akunmu boleh akses yang muncul di bawah. Ambil <b>PHPSESSID</b> dari Chrome yang sedang login admin (F12 → Application → Cookies), tempel, <b>Simpan</b>, lalu klik <b>Uji</b> sebelum mengaktifkan. Sesi bisa habis kapan saja — kalau habis, hasilnya <b>gagal sebelum menyentuh admin</b> dan kamu input manual. Nilai PHPSESSID tidak pernah ditampilkan ulang.
           </div>
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">${rows}</div>
-          <div class="overflow-x-auto glass-inner rounded-2xl border border-white/5">
+          <div class="text-[11px] font-extrabold text-slate-300 tracking-wider">RIWAYAT ${Number(st.historyDays) || 7} HARI TERAKHIR <span class="text-slate-500 font-semibold">(${(st.jobs || []).length} job)</span></div>
+          <div class="overflow-auto glass-inner rounded-2xl border border-white/5" style="max-height:70vh">
             <table class="w-full text-left"><thead><tr class="text-[10px] text-slate-400 uppercase tracking-wider"><th class="p-2">Waktu</th><th class="p-2">Website</th><th class="p-2">Result</th><th class="p-2">Status</th><th class="p-2">Keterangan</th></tr></thead><tbody>${jobs}</tbody></table>
           </div>
         </div>`;

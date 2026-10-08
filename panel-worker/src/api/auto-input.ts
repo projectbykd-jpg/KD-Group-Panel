@@ -1,5 +1,6 @@
 // Endpoint menu "Auto Prediksi" + kaitan ke alur KIRIM SEMUA SISTEM (send.ts).
 // Logika inti: lib/auto-input.ts (rencana, sesi, antrean) & lib/auto-input-run.ts (eksekutor).
+import { getSys } from "../lib/settings";
 import { requireSession } from "./auth";
 import { logActivity } from "../lib/activity";
 import { dateKeyNow } from "../lib/time";
@@ -57,6 +58,7 @@ export async function autoInputGetState(env: Env, token: string) {
 			};
 		}),
 		jobs,
+		historyDays: await getSys(env, "sys_auto_input_history_days"),
 	};
 }
 
