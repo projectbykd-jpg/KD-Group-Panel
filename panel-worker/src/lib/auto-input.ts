@@ -18,6 +18,8 @@ import type { Processed } from "./parser";
 import { PREDICTION_SITE_NAMES } from "./prediction";
 
 export const RUNNING_TTL_MIN = 5;
+/** Percobaan ulang otomatis hanya untuk job yang baru (job lama sudah tidak relevan: periode sudah lewat). */
+export const RETRY_WINDOW_MIN = 60;
 
 export type JobStatus = "QUEUED" | "RUNNING" | "DONE" | "FAILED" | "SKIPPED";
 
@@ -62,6 +64,8 @@ export async function ensureAutoInputTables(env: Env): Promise<void> {
 		`CREATE INDEX IF NOT EXISTS ix_auto_input_job_user ON auto_input_job(username, id)`,
 		// attempts = jumlah percobaan ULANG otomatis yang sudah dilakukan (0 = hanya percobaan awal).
 		`ALTER TABLE auto_input_job ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0`,
+		// alerted = 1 setelah popup peringatan 'gagal & perlu dicek' ditampilkan ke user (supaya tidak muncul berulang).
+		`ALTER TABLE auto_input_job ADD COLUMN alerted INTEGER NOT NULL DEFAULT 0`,
 		`CREATE INDEX IF NOT EXISTS ix_auto_input_job_retry ON auto_input_job(status, updated_at)`,
 	]) {
 		try {
@@ -508,9 +512,9 @@ export async function dueRetryJobs(env: Env, maxRetries: number, gapMin: number,
 	const res = await getTurso(env)
 		.prepare(
 			`SELECT j.* FROM auto_input_job j JOIN auto_input_config c ON c.username = j.username AND c.enabled = 1
-			 WHERE j.status = 'FAILED' AND j.attempts < ? AND j.updated_at <= ? ORDER BY j.updated_at ASC, j.id ASC LIMIT ?`,
+			 WHERE j.status = 'FAILED' AND j.attempts < ? AND j.updated_at <= ? AND j.created_at >= ? ORDER BY j.updated_at ASC, j.id ASC LIMIT ?`,
 		)
-		.bind(maxRetries, tsPlusMinutes(-gapMin), limit)
+		.bind(maxRetries, tsPlusMinutes(-gapMin), tsPlusMinutes(-RETRY_WINDOW_MIN), limit)
 		.all<Record<string, unknown>>();
 	return (res.results ?? []).map(rowToJob);
 }
@@ -525,4 +529,35 @@ export async function claimRetry(env: Env, jobId: number, maxRetries: number, ga
 	if (r.meta.changes !== 1) return null;
 	const row = await db.prepare(`SELECT * FROM auto_input_job WHERE id = ?`).bind(jobId).first<Record<string, unknown>>();
 	return row ? rowToJob(row) : null;
+}
+
+export interface FailedAlert {
+	id: number;
+	website: string;
+	market: string;
+	prizes: string[];
+	stage: string;
+	detail: string;
+	attempts: number;
+}
+
+/** Job GAGAL yang percobaan otomatisnya sudah HABIS (peringatan terakhir) dan belum pernah ditampilkan ke user. 24 jam terakhir. */
+export async function pendingFailureAlerts(env: Env, username: string, maxRetries: number): Promise<FailedAlert[]> {
+	await ensureAutoInputTables(env);
+	await expireRunning(env);
+	const res = await getTurso(env)
+		.prepare(`SELECT * FROM auto_input_job WHERE username = ? AND status = 'FAILED' AND attempts >= ? AND alerted = 0 AND updated_at >= ? ORDER BY id ASC LIMIT 20`)
+		.bind(username, Math.max(0, maxRetries), tsPlusMinutes(-24 * 60))
+		.all<Record<string, unknown>>();
+	return (res.results ?? []).map(rowToJob).map((j) => ({ id: j.id, website: j.website, market: j.market, prizes: j.prizes, stage: j.stage, detail: j.detail, attempts: j.attempts }));
+}
+
+export async function ackFailureAlerts(env: Env, username: string, ids: number[]): Promise<void> {
+	const list = ids.filter((n) => Number.isInteger(n) && n > 0).slice(0, 50);
+	if (!list.length) return;
+	await ensureAutoInputTables(env);
+	await getTurso(env)
+		.prepare(`UPDATE auto_input_job SET alerted = 1 WHERE username = ? AND id IN (${list.map(() => "?").join(",")})`)
+		.bind(username, ...list)
+		.run();
 }

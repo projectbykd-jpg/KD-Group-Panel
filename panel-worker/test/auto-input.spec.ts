@@ -4,7 +4,7 @@ const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: im
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
 import { autoInputAfterSend, autoInputRetryTick, runQueuedJob, type AutoInputNotice } from "../src/api/auto-input";
-import { claimJob, parseCookieInput, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
+import { pendingFailureAlerts, ackFailureAlerts, claimJob, parseCookieInput, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
 import { frameSources, parseAngkaPage, readTopRow, parseHitungPage, runAutoInput, buildPayload, parseForms } from "../src/lib/auto-input-run";
 import { processText } from "../src/lib/parser";
 import { fakeD1, fakeEnv } from "./helpers/fake-env";
@@ -543,6 +543,33 @@ describe("autoInputAfterSend (DB)", () => {
 			const j = (await listJobs(env, "Op"))[0];
 			expect(j).toMatchObject({ status: "FAILED", attempts: 2 });
 			expect(j.detail).toMatch(/percobaan otomatis habis/);
+		});
+		it("peringatan terakhir: baru muncul setelah SEMUA percobaan habis, sekali saja (ack)", async () => {
+			const m = mockSite({ expired: true });
+			await setEnabled(env, "Op", true);
+			await withSession();
+			await go(m);
+			expect(await pendingFailureAlerts(env, "Op", 2)).toHaveLength(0); // masih akan dicoba ulang
+			age(3);
+			await autoInputRetryTick(env, m.fetchFn);
+			expect(await pendingFailureAlerts(env, "Op", 2)).toHaveLength(0);
+			age(3);
+			await autoInputRetryTick(env, m.fetchFn); // percobaan ulang ke-2 (terakhir) gagal
+			const al = await pendingFailureAlerts(env, "Op", 2);
+			expect(al).toHaveLength(1);
+			expect(al[0]).toMatchObject({ website: "HUGOTOGEL", market: "FLORIDAEVE", attempts: 2 });
+			expect(await pendingFailureAlerts(env, "Other", 2)).toHaveLength(0); // milik user lain tidak bocor
+			await ackFailureAlerts(env, "Op", [al[0].id]);
+			expect(await pendingFailureAlerts(env, "Op", 2)).toHaveLength(0);
+		});
+		it("job lama (>1 jam) tidak dicoba ulang otomatis", async () => {
+			const m = mockSite({ expired: true });
+			await setEnabled(env, "Op", true);
+			await withSession();
+			await go(m);
+			const old = new Date(Date.now() + 7 * 3600_000 - 3 * 3600_000).toISOString().slice(0, 19).replace("T", " ");
+			turso.current!.raw.prepare(`UPDATE auto_input_job SET created_at = ?, updated_at = ?`).run(old, old);
+			expect(await autoInputRetryTick(env, m.fetchFn)).toBe(false);
 		});
 		it("fitur dimatikan user -> job gagal tidak dicoba ulang", async () => {
 			const m = mockSite({ expired: true });

@@ -33,6 +33,8 @@ import {
 	autoInputGetState,
 	autoInputRun,
 	autoInputRetryTick,
+	autoInputAlerts,
+	autoInputAckAlerts,
 	autoInputSaveSession,
 	autoInputSetEnabled,
 	autoInputTest,
@@ -214,6 +216,8 @@ const ROUTES: Record<string, Handler> = {
 	autoInputDeleteSession: (env, b) => autoInputDeleteSession(env, s(b.token), s(b.website)),
 	autoInputClearJob: (env, b) => autoInputClearJob(env, s(b.token), rowId(b.jobId)),
 	autoInputRun: (env, b) => autoInputRun(env, s(b.token), rowId(b.jobId)),
+	autoInputAlerts: (env, b) => autoInputAlerts(env, s(b.token)),
+	autoInputAckAlerts: (env, b) => autoInputAckAlerts(env, s(b.token), Array.isArray(b.ids) ? (b.ids as unknown[]).map(Number) : []),
 	autoInputTest: (env, b) => autoInputTest(env, s(b.token), s(b.website), s(b.market)),
 
 	// prediksi

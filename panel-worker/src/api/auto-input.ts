@@ -9,7 +9,9 @@ import type { Processed } from "../lib/parser";
 import type { UserProfile } from "../lib/db";
 import {
 	claimJob,
+	ackFailureAlerts,
 	claimRetry,
+	pendingFailureAlerts,
 	dueRetryJobs,
 	clearRetryable,
 	defaultAdminBase,
@@ -217,4 +219,17 @@ export async function autoInputRun(env: Env, token: string, jobId: number, fetch
 	const s = await gate(env, token);
 	const o = await runQueuedJob(env, s.username, Number(jobId), fetchFn);
 	return { success: o.status === "BERHASIL", ...o };
+}
+
+/** Peringatan terakhir: job yang tetap GAGAL setelah semua percobaan otomatis. Dipoll browser dari menu mana pun. */
+export async function autoInputAlerts(env: Env, token: string) {
+	const s = await gate(env, token);
+	const maxRetries = await getSys(env, "sys_auto_input_retry_max");
+	return { success: true, alerts: await pendingFailureAlerts(env, s.username, maxRetries) };
+}
+
+export async function autoInputAckAlerts(env: Env, token: string, ids: number[]) {
+	const s = await gate(env, token);
+	await ackFailureAlerts(env, s.username, (Array.isArray(ids) ? ids : []).map(Number));
+	return { success: true };
 }

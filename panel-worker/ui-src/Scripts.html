@@ -4339,6 +4339,37 @@
       if (tb) tb.innerHTML = autoInputJobsRows();
     }
 
+    // Peringatan terakhir Auto Prediksi: job tetap GAGAL setelah semua percobaan ulang otomatis -> popup tengah layar di menu mana pun.
+    let aiAlertBusy = false;
+    function autoInputAlertTick() {
+      if (aiAlertBusy || document.hidden || !currentSessionToken || !currentUser || !currentProfile) return;
+      if (!menuAllowed('auto-input')) return;
+      const role = String(currentProfile.role || '').trim().toUpperCase();
+      if (role !== 'ADMIN' && role !== 'OPERATOR') return;
+      aiAlertBusy = true;
+      google.script.run
+        .withSuccessHandler(res => {
+          aiAlertBusy = false;
+          const list = (res && res.success && Array.isArray(res.alerts)) ? res.alerts : [];
+          if (!list.length) return;
+          google.script.run.withFailureHandler(() => {}).autoInputAckAlerts(currentSessionToken, list.map(a => Number(a.id)));
+          const lines = list.slice(0, 6).map(a => '• ' + a.website + ' · ' + a.market + ' ' + (a.prizes || []).join('/') + (a.stage && a.stage !== 'cek' ? ' (angka mungkin sudah masuk)' : ''));
+          const more = list.length > 6 ? '\n…dan ' + (list.length - 6) + ' lainnya' : '';
+          openCenterNotice({
+            type: 'warning',
+            alert: true,
+            title: 'PERINGATAN: Auto Prediksi GAGAL',
+            message: list.length + ' job tetap gagal setelah dicoba ulang otomatis. Segera cek di admin website:\n' + lines.join('\n') + more,
+            confirmText: 'BUKA AUTO PREDIKSI',
+            cancelText: 'TUTUP',
+            showCancel: true
+          }).then(go => { if (go) switchPage('auto-input'); });
+        })
+        .withFailureHandler(() => { aiAlertBusy = false; })
+        .autoInputAlerts(currentSessionToken);
+    }
+    setInterval(autoInputAlertTick, 20000);
+
     function autoInputToggle(on) {
       google.script.run
         .withSuccessHandler(res => { if (apiFailed(res)) { toast(apiMessage(res)); return; } toast(on ? 'Auto Prediksi AKTIF' : 'Auto Prediksi dimatikan'); loadAutoInputPage(true); })
@@ -5502,6 +5533,8 @@
         danger: 'fa-trash-can'
       };
 
+      const noticeCard = modal.querySelector('.center-notice-card');
+      if (noticeCard) noticeCard.classList.toggle('center-notice-alert', !!config.alert);
       iconBox.className = `center-notice-icon ${type}`;
       icon.className = `fa-solid ${iconMap[type] || iconMap.info}`;
       title.textContent = config.title || 'Informasi';
