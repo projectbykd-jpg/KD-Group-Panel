@@ -60,8 +60,15 @@ export async function ensureAutoInputTables(env: Env): Promise<void> {
 			UNIQUE (website, result_key)
 		)`,
 		`CREATE INDEX IF NOT EXISTS ix_auto_input_job_user ON auto_input_job(username, id)`,
+		// attempts = jumlah percobaan ULANG otomatis yang sudah dilakukan (0 = hanya percobaan awal).
+		`ALTER TABLE auto_input_job ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0`,
+		`CREATE INDEX IF NOT EXISTS ix_auto_input_job_retry ON auto_input_job(status, updated_at)`,
 	]) {
-		await db.prepare(stmt).run();
+		try {
+			await db.prepare(stmt).run();
+		} catch (e) {
+			if (!/duplicate column/i.test(e instanceof Error ? e.message : String(e))) throw e;
+		}
 	}
 	tablesEnsured = true;
 }
@@ -325,6 +332,8 @@ export interface JobRow {
 	period: string;
 	createdAt: string;
 	updatedAt: string;
+	/** Percobaan ulang otomatis yang sudah dilakukan. */
+	attempts: number;
 }
 
 function rowToJob(r: Record<string, unknown>): JobRow {
@@ -348,6 +357,7 @@ function rowToJob(r: Record<string, unknown>): JobRow {
 		period: String(r.period ?? ""),
 		createdAt: String(r.created_at ?? ""),
 		updatedAt: String(r.updated_at ?? ""),
+		attempts: Number(r.attempts ?? 0) || 0,
 	};
 }
 
@@ -485,4 +495,34 @@ export async function clearRetryable(env: Env, username: string, jobId: number):
 		throw new Error("Job ini sudah sampai tahap mengubah data di admin — cek manual di admin website, jangan diulang otomatis.");
 	}
 	await db.prepare(`DELETE FROM auto_input_job WHERE id = ?`).bind(jobId).run();
+}
+
+/**
+ * Job GAGAL yang sudah waktunya dicoba ulang otomatis: status FAILED, percobaan ulang < batas, dan sudah `gapMin` menit sejak
+ * gagal terakhir (updated_at). Hanya akun yang fiturnya masih AKTIF. Terlama dulu.
+ */
+export async function dueRetryJobs(env: Env, maxRetries: number, gapMin: number, limit: number): Promise<JobRow[]> {
+	await ensureAutoInputTables(env);
+	await expireRunning(env);
+	if (maxRetries <= 0) return [];
+	const res = await getTurso(env)
+		.prepare(
+			`SELECT j.* FROM auto_input_job j JOIN auto_input_config c ON c.username = j.username AND c.enabled = 1
+			 WHERE j.status = 'FAILED' AND j.attempts < ? AND j.updated_at <= ? ORDER BY j.updated_at ASC, j.id ASC LIMIT ?`,
+		)
+		.bind(maxRetries, tsPlusMinutes(-gapMin), limit)
+		.all<Record<string, unknown>>();
+	return (res.results ?? []).map(rowToJob);
+}
+
+/** Ambil hak percobaan ulang (FAILED -> RUNNING, attempts+1), atomik: dua tick bersamaan tidak menjalankan job yang sama. */
+export async function claimRetry(env: Env, jobId: number, maxRetries: number, gapMin: number): Promise<JobRow | null> {
+	const db = getTurso(env);
+	const r = await db
+		.prepare(`UPDATE auto_input_job SET status = 'RUNNING', attempts = attempts + 1, updated_at = ? WHERE id = ? AND status = 'FAILED' AND attempts < ? AND updated_at <= ?`)
+		.bind(tsNow(), jobId, maxRetries, tsPlusMinutes(-gapMin))
+		.run();
+	if (r.meta.changes !== 1) return null;
+	const row = await db.prepare(`SELECT * FROM auto_input_job WHERE id = ?`).bind(jobId).first<Record<string, unknown>>();
+	return row ? rowToJob(row) : null;
 }

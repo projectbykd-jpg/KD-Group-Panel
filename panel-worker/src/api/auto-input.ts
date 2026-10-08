@@ -9,6 +9,8 @@ import type { Processed } from "../lib/parser";
 import type { UserProfile } from "../lib/db";
 import {
 	claimJob,
+	claimRetry,
+	dueRetryJobs,
 	clearRetryable,
 	defaultAdminBase,
 	deleteSession,
@@ -59,6 +61,8 @@ export async function autoInputGetState(env: Env, token: string) {
 		}),
 		jobs,
 		historyDays: await getSys(env, "sys_auto_input_history_days"),
+		retryMax: await getSys(env, "sys_auto_input_retry_max"),
+		retryGapMin: await getSys(env, "sys_auto_input_retry_gap_min"),
 	};
 }
 
@@ -181,6 +185,32 @@ export async function runQueuedJob(env: Env, username: string, jobId: number, fe
 	await finishJob(env, job.id, r.ok ? "DONE" : "FAILED", r.ok ? "selesai" : r.stage, r.detail, r.period);
 	await logActivity(env, username, "AUTO PREDIKSI", `[${website}] ${job.market} ${job.prizes.join("/")} — ${r.detail}`, r.ok ? "BERHASIL" : "GAGAL", "").catch(() => {});
 	return { website, status: r.ok ? "BERHASIL" : "GAGAL", detail: r.detail, manual: !r.ok };
+}
+
+/** Percobaan ulang otomatis untuk job GAGAL (dipanggil cron tiap menit). Maks 1 job per tick (batas 50 subrequest). Return true bila ada yang dijalankan. */
+export async function autoInputRetryTick(env: Env, fetchFn?: Fetcher): Promise<boolean> {
+	const [maxRetries, gapMin] = await Promise.all([getSys(env, "sys_auto_input_retry_max"), getSys(env, "sys_auto_input_retry_gap_min")]);
+	if (maxRetries <= 0) return false;
+	const due = await dueRetryJobs(env, maxRetries, gapMin, 3);
+	for (const cand of due) {
+		const job = await claimRetry(env, cand.id, maxRetries, gapMin);
+		if (!job) continue; // sudah diambil tick lain
+		const n = job.attempts;
+		const tag = `[Percobaan ulang ${n}/${maxRetries}] `;
+		const sess = await getSession(env, job.username, job.website);
+		if (!sess?.phpsessid) {
+			await finishJob(env, job.id, "FAILED", job.stage || "cek", tag + "PHPSESSID belum disimpan — input manual.", job.period);
+			continue;
+		}
+		const plan = { ok: true as const, market: job.market, prizes: job.prizes, date: job.resultDate, key: "" };
+		const r = await runAutoInput({ session: sess, plan, fetchFn, resumePeriod: job.period || undefined, onStage: (st, period) => setStage(env, job.id, st, period) });
+		const left = maxRetries - n;
+		const note = r.ok ? "" : left > 0 ? ` (dicoba lagi otomatis ±${gapMin} menit)` : " (percobaan otomatis habis — CEK MANUAL)";
+		await finishJob(env, job.id, r.ok ? "DONE" : "FAILED", r.ok ? "selesai" : r.stage, tag + r.detail + note, r.period || job.period);
+		await logActivity(env, job.username, "AUTO PREDIKSI", `[${job.website}] ${job.market} ${job.prizes.join("/")} — ${tag}${r.detail}`, r.ok ? "BERHASIL" : "GAGAL", "").catch(() => {});
+		return true; // satu job per tick
+	}
+	return false;
 }
 
 export async function autoInputRun(env: Env, token: string, jobId: number, fetchFn?: Fetcher) {

@@ -32,6 +32,7 @@ import {
 	autoInputDeleteSession,
 	autoInputGetState,
 	autoInputRun,
+	autoInputRetryTick,
 	autoInputSaveSession,
 	autoInputSetEnabled,
 	autoInputTest,
@@ -720,7 +721,13 @@ export default {
 			// PERNAH menyentuh artikel yang sudah tayang (lihat komentar di fungsinya).
 			await newsPruneQueueDaily(env).catch((e) => console.error("news queue prune error", e));
 		} else {
-			await investPump(env).catch((e) => console.error("invest pump error", e));
+			// Percobaan ulang otomatis Auto Prediksi (job gagal -> coba lagi tiap ±2 menit). Maks 1 job/tick; kalau jalan, pump Invest
+			// menunggu tick berikutnya supaya tidak berebut batas 50 subrequest per invocation.
+			const retried = await autoInputRetryTick(env).catch((e) => {
+				console.error("auto-input retry error", e);
+				return false;
+			});
+			if (!retried) await investPump(env).catch((e) => console.error("invest pump error", e));
 		}
 	},
 } satisfies ExportedHandler<Env>;
