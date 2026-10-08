@@ -41,7 +41,6 @@ const CFG = {
 
 // Toleransi/antar-balasan: HARUS sama dengan userscript.
 const GRACE_MS = 30_000;
-const SPAM_INTERVAL_MS = 15_000;
 const BURST_RESET_MS = 90_000;
 
 export function log(msg) {
@@ -239,22 +238,15 @@ function sendReply(chatId, text) {
 
 // ---------- logika burst (SAMA dengan userscript) ----------
 const burst = new Map();
-const getBurst = (id) => burst.get(id) || { count: 0, lastMsgAt: 0, lastReplyAt: 0, lastTemplateId: null };
+const getBurst = (id) => burst.get(id) || { count: 0, lastMsgAt: 0, lastReplyAt: 0, lastTemplateId: null, replied: false };
 
 async function tryReply(chatId) {
 	if (!enabledKeys.includes(String(chatId))) return;
 	const b = getBurst(chatId);
 	if (!b.lastMsgAt || b.lastMsgAt <= b.lastReplyAt) return;
-	const now = Date.now();
-	if (b.count >= 2) {
-		const nextAllowed = b.lastReplyAt ? b.lastReplyAt + SPAM_INTERVAL_MS : now;
-		if (now < nextAllowed) {
-			setTimeout(() => tryReply(chatId), nextAllowed - now);
-			return;
-		}
-	} else if (b.count !== 1) {
-		return;
-	}
+	// Sudah dibalas di burst ini -> diam, seberapa pun member spam (cukup 1 balasan per burst).
+	if (b.replied) return;
+	if (b.count < 1) return;
 	const tpl = pickTemplate(templates, b.lastTemplateId);
 	if (!tpl) {
 		log("Tidak ada template balasan aktif -- lewati sesi " + chatId);
@@ -271,6 +263,7 @@ async function tryReply(chatId) {
 	}
 	b.lastReplyAt = Date.now();
 	b.lastTemplateId = tpl.id;
+	b.replied = true;
 	burst.set(chatId, b);
 	log("Auto-balas terkirim ke sesi " + chatId + ".");
 	panelApi("livechatBotReport", { sessionKey: String(chatId), customerMessage: "", matchedTemplateId: tpl.id || null, replyText: tpl.reply_text });
@@ -284,7 +277,10 @@ function handleMemberMessage(chatId, content, hint) {
 	saveReplied();
 	const now = Date.now();
 	const b = getBurst(chatId);
-	if (b.lastMsgAt && now - b.lastMsgAt > BURST_RESET_MS) b.count = 0;
+	if (b.lastMsgAt && now - b.lastMsgAt > BURST_RESET_MS) {
+		b.count = 0;
+		b.replied = false; // burst baru -> boleh dibalas 1x lagi
+	}
 	b.count += 1;
 	b.lastMsgAt = now;
 	burst.set(chatId, b);
