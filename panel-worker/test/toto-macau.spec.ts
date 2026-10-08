@@ -3,10 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: import("node:sqlite").DatabaseSync } }));
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
-import { ackTotoAlerts, listTotoLog, parseTotoRows, passIntervalMin, pendingTotoAlerts, resetTotoTablesFlag, totoMacauRun } from "../src/lib/toto-macau";
+import { ackTotoAlerts, listTotoEvents, listTotoLog, logTotoEvent, parseTotoRows, passIntervalMin, pendingTotoAlerts, resetTotoTablesFlag, totoDispatchTick, totoMacauRun } from "../src/lib/toto-macau";
 import { openPanelZ, panelZPageCount, parsePanelZRows, type PanelZHandle } from "../src/senders/panelz";
 import { defaultAdminBase, resetAutoInputTablesFlag, saveSession, setEnabled } from "../src/lib/auto-input";
 import { resetSysCache, saveSys } from "../src/lib/settings";
+import { tsPlusMinutes } from "../src/lib/time";
 import { fakeD1, fakeEnv } from "./helpers/fake-env";
 
 const SID = "FAKEsession000000000000001";
@@ -231,22 +232,31 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 		await setMode(2);
 		const real = turso.current!.d1 as { prepare: (s: string) => unknown; batch: (s: unknown[]) => Promise<unknown> };
 		let calls = 0;
+		let inBatch = false;
 		const origPrepare = real.prepare.bind(real);
 		const origBatch = real.batch.bind(real);
 		real.prepare = (sql: string) => {
 			const st = origPrepare(sql) as Record<string, (...a: unknown[]) => unknown>;
 			for (const k of ["run", "all", "first"]) {
 				const fn = st[k].bind(st);
-				st[k] = (...a: unknown[]) => (calls++, fn(...a));
+				st[k] = (...a: unknown[]) => (inBatch || calls++, fn(...a));
 			}
 			return st;
 		};
-		real.batch = (s: unknown[]) => (calls++, origBatch(s));
+		real.batch = async (s: unknown[]) => {
+			calls++; // satu batch = satu panggilan HTTP ke Turso
+			inBatch = true;
+			try {
+				return await origBatch(s);
+			} finally {
+				inBatch = false;
+			}
+		};
 		await run();
 		expect(pushed.length).toBeGreaterThan(0);
 		// jaringan panel/admin: 2 halaman admin + 2 login/daftar Panel-Z + 1 baca ulang + 1 push per baris
 		const net = adminHits.length + 3 + pushed.length;
-		expect(calls + net).toBeLessThan(45);
+		expect(calls + net).toBeLessThan(40);
 	});
 	it("end-to-end halaman berbagi: baris kosong 08 Oct di halaman 2 diisi & diverifikasi, baris di halaman 1 tidak ikut tersentuh", async () => {
 		await addUser("tester");
@@ -284,6 +294,108 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 		expect(st["TOTOMACAU-22 2026-10-08"]).toBe("SENT");
 		expect(urls.some((u) => u.startsWith("POST") && u.includes("row=242908"))).toBe(true);
 		vi.unstubAllGlobals();
+	});
+	it("log kegiatan: tiap langkah tercatat (mulai, baca admin, buka Panel-Z, kirim, terverifikasi, selesai) dan 'sedang berjalan' hanya sebelum selesai", async () => {
+		await addUser("tester");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("tester");
+		await setMode(2);
+		await run();
+		const ev = await listTotoEvents(env, ["HUGOTOGEL"], 100);
+		const msgs = ev.events.map((e) => e.msg).reverse(); // urut kejadian
+		expect(msgs[0]).toMatch(/^Mulai memeriksa HUGOTOGEL/);
+		expect(msgs.some((m) => /Admin Toto Macau: \d+ baris terbaca/.test(m))).toBe(true);
+		expect(msgs.some((m) => /Admin Toto Macao 5D: \d+ baris terbaca/.test(m))).toBe(true);
+		expect(msgs.some((m) => /Panel-Z dibuka: .* baris Toto Macau terbaca/.test(m))).toBe(true);
+		expect(msgs.some((m) => /TOTOMACAU-00 2026-10-08: baris kosong → mengirim 7036/.test(m))).toBe(true);
+		expect(msgs.some((m) => /TOTOMACAU-00 2026-10-08: TERKIRIM 7036 — terbaca ulang/.test(m))).toBe(true);
+		expect(msgs[msgs.length - 1]).toMatch(/^Selesai HUGOTOGEL: \d+ dikirim/);
+		expect(ev.running).toBe(false);
+		await logTotoEvent(env, "HUGOTOGEL", "start", "INFO", "Mulai memeriksa HUGOTOGEL (uji)");
+		expect((await listTotoEvents(env, ["HUGOTOGEL"], 100)).running).toBe(true); // 'start' segar tanpa 'end'
+		expect((await listTotoEvents(env, ["LAIN"], 100)).running).toBe(false); // milik website lain tidak bocor
+	});
+	it("log kegiatan: galat tak terduga tidak menggantung — tercatat 'Berhenti karena galat' dan putaran berikutnya tetap jalan", async () => {
+		await addUser("tester");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("tester");
+		await setMode(2);
+		await run({ panel: async () => { throw new Error("boom"); } });
+		const ev = await listTotoEvents(env, ["HUGOTOGEL"], 20);
+		expect(ev.events[0].kind).toBe("end");
+		expect(ev.events[0].msg).toMatch(/Berhenti karena galat: boom/);
+		expect(ev.running).toBe(false);
+	});
+	it("baris belum dibuat Panel-Z (dibuat 00:25) -> menunggu, dicek tiap 3 menit (bukan 30), lalu DIISI begitu baris muncul", async () => {
+		await addUser("tester");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("tester");
+		await setMode(2);
+		const full = zRows.slice();
+		zRows = zRows.filter((r) => !(r.market === "TOTOMACAU-00" && r.date === "2026-10-09")); // baris 09 Oct -00 belum dibuat
+		await run();
+		expect((await byMarketDate())["TOTOMACAU-00 2026-10-09"]).toBe("MISSING");
+		expect(pushed.some((p) => p.angka === "2412")).toBe(false);
+		// segera sesudahnya (non-force): belum waktunya
+		expect((await run({ force: false })).websites).toBe(0);
+		// 4 menit kemudian (jam 01:52 WIB = di luar jendela draw -> jeda dasar 30 menit); karena ada baris MENUNGGU, jeda 3 menit
+		turso.current!.raw.prepare(`UPDATE toto_macau_log SET updated_at = ? WHERE game = 'pass'`).run(tsPlusMinutes(-4));
+		zRows = full; // Panel-Z membuat barisnya
+		const sum = await run({ force: false });
+		expect(sum.websites).toBe(1);
+		expect(sum.posted).toBeGreaterThanOrEqual(1);
+		expect(zRows.find((r) => r.id === 69)!.value).toBe("2412");
+		expect((await byMarketDate())["TOTOMACAU-00 2026-10-09"]).toBe("SENT");
+	});
+	it("tanpa baris menunggu, jeda tetap 30 menit di luar jendela draw (hemat)", async () => {
+		await addUser("tester");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("tester");
+		await setMode(2);
+		await run(); // semua terisi -> tidak ada yang menunggu
+		turso.current!.raw.prepare(`UPDATE toto_macau_log SET status = 'SENT' WHERE period > 0`).run();
+		turso.current!.raw.prepare(`UPDATE toto_macau_log SET updated_at = ? WHERE game = 'pass'`).run(tsPlusMinutes(-4));
+		expect((await run({ force: false })).websites).toBe(0);
+	});
+	it("gagal kirim 3x: ditahan 60 menit, sesudahnya siklus percobaan baru dimulai (baris kosong tidak terlewat)", async () => {
+		await addUser("tester");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("tester");
+		await setMode(2);
+		panelOpts.failPush = true;
+		for (let i = 0; i < 3; i++) await run();
+		expect(((await listTotoLog(env, ["HUGOTOGEL"])).find((r) => r.market === "TOTOMACAU-00" && r.rowAt.startsWith("2026-10-08")))!.attempts).toBe(3);
+		pushed.length = 0;
+		await run();
+		expect(pushed.length).toBe(0); // masih dalam masa tahan 60 menit
+		turso.current!.raw.prepare(`UPDATE toto_macau_log SET updated_at = ? WHERE status = 'FAILED' AND period > 0`).run(tsPlusMinutes(-120));
+		panelOpts.failPush = false;
+		await run();
+		expect(zRows.find((r) => r.id === 71)!.value).toBe("7036"); // baris kosong akhirnya terisi
+		expect((await byMarketDate())["TOTOMACAU-00 2026-10-08"]).toBe("SENT");
+	});
+	it("pemicu cron: memicu workflow sesuai jeda, tidak dobel, dipercepat bila ada baris menunggu, mati bila mode 0", async () => {
+		await setMode(2);
+		const calls: number[] = [];
+		const dispatch = async () => void calls.push(1);
+		const t0 = Date.UTC(2026, 9, 8, 4, 0); // 11:00 WIB: di luar jendela draw -> jeda 30 menit
+		expect(await totoDispatchTick(env, dispatch, t0)).toBe(true);
+		expect(await totoDispatchTick(env, dispatch, t0 + 60_000)).toBe(false);
+		expect(await totoDispatchTick(env, dispatch, t0 + 10 * 60_000)).toBe(false); // 10 menit < 30
+		expect(await totoDispatchTick(env, dispatch, t0 + 31 * 60_000)).toBe(true);
+		expect(calls.length).toBe(2);
+		// ada baris MENUNGGU (tercatat baru-baru ini) -> 3 menit
+		const now = tsPlusMinutes(0);
+		turso.current!.raw.prepare(`INSERT INTO toto_macau_log (website, game, period, slot_key, status, created_at, updated_at) VALUES ('HUGOTOGEL','m17',99,'k','MISSING',?,?)`).run(now, now);
+		expect(await totoDispatchTick(env, dispatch, t0 + 35 * 60_000)).toBe(true);
+		expect(calls.length).toBe(3);
+		await setMode(0);
+		expect(await totoDispatchTick(env, dispatch, t0 + 200 * 60_000)).toBe(false);
+		// galat pemicu tidak melempar & tercatat di log kegiatan
+		await setMode(2);
+		expect(await totoDispatchTick(env, async () => { throw new Error("token kosong"); }, t0 + 400 * 60_000)).toBe(true);
+		const ev = await listTotoEvents(env, ["HUGOTOGEL"], 10);
+		expect(ev.events[0].msg).toMatch(/Gagal memicu GitHub Actions: token kosong/);
 	});
 	it("mode 1: membandingkan saja -- tidak ada yang dikirim; status per (pasaran, tanggal)", async () => {
 		addUser("Op");
@@ -331,8 +443,10 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 		expect((await byMarketDate())["TOTOMACAU-00 2026-10-09"]).toBe("SENT");
 	});
 
-	it("Panel-Z berisi angka BEDA -> tidak ditimpa, jadi peringatan", async () => {
+	it("koreksi dimatikan (sys_totomacau_correct=0): angka BEDA tidak ditimpa, jadi peringatan", async () => {
 		await setMode(2);
+		await saveSys(env, { sys_totomacau_correct: 0 });
+		resetSysCache();
 		zRows.find((r) => r.id === 100)!.value = "9999"; // admin 13:10 = 4518
 		addUser("Op");
 		addPanelZ("HUGOTOGEL");
@@ -344,6 +458,59 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 		expect(al.length).toBeGreaterThanOrEqual(1);
 		await ackTotoAlerts(env, al.map((a) => a.id));
 		expect(await pendingTotoAlerts(env, ["HUGOTOGEL"])).toHaveLength(0);
+	});
+	it("mode 1: angka BEDA tidak pernah dikoreksi (hanya ditandai), walau koreksi=1", async () => {
+		await setMode(1);
+		zRows.find((r) => r.id === 100)!.value = "9999";
+		addUser("Op");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("Op");
+		await run();
+		expect(zRows.find((r) => r.id === 100)!.value).toBe("9999");
+		expect(pushed).toHaveLength(0);
+		expect((await byMarketDate())["TOTOMACAU-13 2026-10-08"]).toBe("CONFLICT");
+	});
+	it("angka admin dianggap benar (mode 2, bawaan): angka SALAH di Panel-Z otomatis dikoreksi, angka lama tercatat, dan diverifikasi baca-ulang", async () => {
+		await setMode(2);
+		zRows.find((r) => r.id === 100)!.value = "9999"; // salah (admin 13:10 = 4518)
+		addUser("Op");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("Op");
+		const sum = await run();
+		expect(zRows.find((r) => r.id === 100)!.value).toBe("4518");
+		expect(sum.corrected).toBe(1);
+		const row = (await listTotoLog(env, ["HUGOTOGEL"])).find((r) => r.market === "TOTOMACAU-13" && r.rowAt.startsWith("2026-10-08"))!;
+		expect(row.status).toBe("SENT");
+		expect(row.detail).toMatch(/DIKOREKSI: Panel-Z berisi 9999, diperbaiki ke angka admin 4518/);
+		const ev = (await listTotoEvents(env, ["HUGOTOGEL"], 100)).events.map((e) => e.msg);
+		expect(ev.some((m) => /TOTOMACAU-13 2026-10-08: Panel-Z berisi 9999 ≠ admin 4518 → KOREKSI ke 4518/.test(m))).toBe(true);
+		expect(ev.some((m) => /DIKOREKSI 9999 → 4518 — terbaca ulang di Panel-Z/.test(m))).toBe(true);
+		expect(await pendingTotoAlerts(env, ["HUGOTOGEL"])).toHaveLength(0); // diperbaiki = tidak perlu peringatan
+		// putaran berikutnya: sudah sama -> tidak dikirim ulang
+		pushed.length = 0;
+		await run();
+		expect(pushed).toHaveLength(0);
+	});
+	it("angka yang tadinya benar diubah orang lain di Panel-Z -> dikoreksi lagi (siklus baru walau percobaan lama sudah 3)", async () => {
+		await setMode(2);
+		addUser("Op");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("Op");
+		await run();
+		expect(zRows.find((r) => r.id === 100)!.value).toBe("4518");
+		turso.current!.raw.prepare(`UPDATE toto_macau_log SET status = 'SENT', attempts = 3 WHERE market = 'TOTOMACAU-13'`).run();
+		zRows.find((r) => r.id === 100)!.value = "1111"; // ada yang mengedit manual
+		await run();
+		expect(zRows.find((r) => r.id === 100)!.value).toBe("4518");
+	});
+	it("koreksi hanya ke baris (pasaran+tanggal) yang cocok persis: baris tanggal lain tidak tersentuh", async () => {
+		await setMode(2);
+		zRows.push({ id: 777, market: "TOTOMACAU-13", date: "2026-10-07", value: "0000" }); // tanggal lain, tidak ada di admin (>jendela data admin)
+		addUser("Op");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("Op");
+		await run();
+		expect(zRows.find((r) => r.id === 777)!.value).toBe("0000");
 	});
 
 	it("terkirim tetapi tidak tampil saat dibaca ulang -> GAGAL (tidak dianggap berhasil)", async () => {

@@ -4377,12 +4377,26 @@
     // Peringatan terakhir Auto Prediksi: job tetap GAGAL setelah semua percobaan ulang otomatis -> popup tengah layar di menu mana pun.
     // Auto Check Toto Macau / Toto Macao 5D: baca angka di admin lalu (mode 2) posting ke Panel-Z. Tampilan = catatan per draw.
     let aiTotoAt = 0;
+    let aiTotoTimer = null;
+    let aiTotoBurstUntil = 0;
+    function autoInputTotoSchedule() {
+      clearTimeout(aiTotoTimer);
+      const box = document.getElementById('aiTotoBox');
+      if (!box) return;
+      const fast = (aiTotoData && aiTotoData.running) || Date.now() < aiTotoBurstUntil;
+      aiTotoTimer = setTimeout(() => {
+        if (!document.getElementById('aiTotoBox')) return; // pindah menu -> berhenti
+        const ae = document.activeElement;
+        if (document.hidden || (ae && box.contains(ae))) { autoInputTotoSchedule(); return; } // tab tersembunyi / pilihan Urutkan sedang dibuka: jangan menggambar ulang
+        autoInputTotoLoad(true);
+      }, fast ? 5000 : 30000);
+    }
     function autoInputTotoLoad(force) {
-      if (!force && Date.now() - aiTotoAt < 30000) { autoInputTotoPaint(); return; }
+      if (!force && Date.now() - aiTotoAt < 30000) { autoInputTotoPaint(); autoInputTotoSchedule(); return; }
       aiTotoAt = Date.now();
       google.script.run
-        .withSuccessHandler(r => { aiTotoData = (r && r.success) ? r : null; autoInputTotoPaint(); })
-        .withFailureHandler(() => { aiTotoData = null; autoInputTotoPaint(); })
+        .withSuccessHandler(r => { aiTotoData = (r && r.success) ? r : null; autoInputTotoPaint(); autoInputTotoSchedule(); })
+        .withFailureHandler(() => { aiTotoData = null; autoInputTotoPaint(); autoInputTotoSchedule(); })
         .autoInputTotoLog(currentSessionToken);
     }
     let aiTotoData = null;
@@ -4395,7 +4409,7 @@
           if (apiFailed(r)) { toast(apiMessage(r)); return; }
           showActionPopup('DONE', r && r.viaGithub ? 'Cek & Isi Dipicu' : 'Cek & Isi Selesai', (r && r.message) || 'Selesai.', 'fa-check');
           autoInputTotoLoad(true);
-          if (r && r.viaGithub) { setTimeout(() => autoInputTotoLoad(true), 60000); setTimeout(() => autoInputTotoLoad(true), 120000); }
+          if (r && r.viaGithub) { aiTotoBurstUntil = Date.now() + 180000; autoInputTotoSchedule(); }
         })
         .withFailureHandler(err => { if (btn) { btn.disabled = false; btn.style.opacity = ''; } toast((err && err.message) || 'Gagal memeriksa'); })
         .autoInputTotoRun(currentSessionToken);
@@ -4406,9 +4420,9 @@
       const esc = escapeHtml;
       const d = aiTotoData;
       if (!d) { box.textContent = 'Auto Check Toto Macau belum bisa dimuat.'; return; }
-      const modeTxt = d.mode === 2 ? '<span class="text-emerald-400 font-extrabold">MODE 2 · CEK + ISI PANEL-Z YANG KOSONG</span>' : d.mode === 1 ? '<span class="text-amber-300 font-extrabold">MODE 1 · HANYA BACA &amp; CATAT (belum posting)</span>' : '<span class="text-slate-500 font-extrabold">MATI</span>';
+      const modeTxt = d.mode === 2 ? '<span class="text-emerald-400 font-extrabold">MODE 2 · OTOMATIS ISI &amp; KOREKSI PANEL-Z</span>' : d.mode === 1 ? '<span class="text-amber-300 font-extrabold">MODE 1 · HANYA BACA &amp; CATAT (belum posting)</span>' : '<span class="text-slate-500 font-extrabold">MATI</span>';
       const stCls = { SENT: 'text-emerald-400', VERIFIED: 'text-emerald-300', RECORDED: 'text-sky-300', PENDING: 'text-amber-300', CONFLICT: 'text-rose-400', MISSING: 'text-slate-400', FAILED: 'text-rose-400', SKIPPED: 'text-slate-400', SENDING: 'text-amber-300' };
-      const stTxt = { SENT: 'TERKIRIM', VERIFIED: 'SUDAH ADA', RECORDED: 'TERCATAT', PENDING: 'BELUM TERISI', CONFLICT: 'BEDA ANGKA', MISSING: 'BARIS TIDAK ADA', FAILED: 'GAGAL', SKIPPED: 'DILEWATI', SENDING: 'MENGIRIM' };
+      const stTxt = { SENT: 'TERKIRIM', VERIFIED: 'SUDAH ADA', RECORDED: 'TERCATAT', PENDING: 'BELUM TERISI', CONFLICT: 'BEDA ANGKA', MISSING: 'MENUNGGU BARIS', FAILED: 'GAGAL', SKIPPED: 'DILEWATI', SENDING: 'MENGIRIM' };
       const totoAttn = r => ({ CONFLICT: 0, FAILED: 0, PENDING: 1, MISSING: 2, SENDING: 2, SKIPPED: 3 }[r.status] ?? 4);
       const sortedRows = aiSortList(d.rows || [], { time: r => String(r.rowAt || ''), attn: totoAttn, site: r => String(r.website || ''), market: r => String(r.market || ''), status: r => String(stTxt[r.status] || r.status || '') });
       const rows = sortedRows.slice(0, 80).map(r => `<tr class="border-t border-white/5 align-top">
@@ -4418,10 +4432,17 @@
           <td class="p-2 text-xs font-mono font-extrabold text-amber-300" data-label="Angka">${esc(r.number)}</td>
           <td class="p-2 text-[10px] font-extrabold ${stCls[r.status] || ''}" data-label="Status">${stTxt[r.status] || esc(r.status)}</td>
           <td class="p-2 text-[11px] text-slate-300 stack-full" data-label="Keterangan">${esc(r.detail)}${r.attempts ? ' (' + Number(r.attempts) + '/' + Number(d.maxAttempts) + ' percobaan)' : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="p-3 text-center text-slate-500">Belum ada draw tercatat (3 hari terakhir).</td></tr>';
+      const keepScroll = ['aiTotoLogScroll', 'aiTotoTblScroll'].map(id => { const el = document.getElementById(id); return [id, el ? el.scrollTop : 0]; });
+      const evCol = { OK: 'text-emerald-300', WARN: 'text-amber-300', ERR: 'text-rose-400', INFO: 'text-slate-300' };
+      const evRows = (d.events || []).slice(0, 40).map(e => `<div class="flex gap-2 py-0.5 border-t border-white/5 first:border-0"><span class="text-slate-500 whitespace-nowrap">${esc(String(e.ts || '').slice(5, 19))}</span><span class="${evCol[e.level] || 'text-slate-300'}">${e.website ? '<b class="text-cyan-300">' + esc(e.website) + '</b> · ' : ''}${esc(e.msg)}</span></div>`).join('') || '<div class="text-slate-500">Belum ada kegiatan tercatat. Tekan CEK &amp; ISI SEKARANG atau tunggu jadwal otomatis.</div>';
+      const runBadge = d.running ? '<span class="text-emerald-300 font-extrabold"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i>SEDANG BERJALAN</span>' : '<span class="text-slate-400 font-bold">Siaga' + (d.lastAt ? ' · terakhir aktif ' + esc(String(d.lastAt).slice(5, 19)) : '') + '</span>';
+      const logBox = `<div class="mb-2 rounded-xl border border-white/5 bg-black/20 p-2"><div class="flex items-center justify-between gap-2 mb-1 text-[10px]"><span class="font-extrabold text-slate-300 tracking-wider">LOG KEGIATAN</span>${runBadge}</div><div class="overflow-auto font-mono text-[10px] leading-snug" id="aiTotoLogScroll" style="max-height:26vh">${evRows}</div></div>`;
       box.innerHTML = `<div class="flex flex-wrap items-center justify-between gap-2 mb-2">
           <div class="text-[11px] font-extrabold text-slate-300 tracking-wider">AUTO CHECK TOTO MACAU &amp; TOTO MACAO 5D</div><div class="flex flex-wrap items-center gap-2"><span class="ai-sort-host">${aiSortSelect()}</span><span class="text-[10px]">${modeTxt}</span><button onclick="autoInputTotoRunNow(this)" class="bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-extrabold px-3 py-1.5 rounded-lg text-[10px]"><i class="fa-solid fa-bolt mr-1"></i>CEK &amp; ISI SEKARANG</button></div></div>
-        <div class="text-[11px] text-slate-400 leading-relaxed mb-2">Membaca daftar nomor di admin AG/AGWL (3 hari terakhir, hanya yang <b>Hitung: Yes</b>) memakai PHPSESSID tersimpan akun yang punya izin Panel-Z &amp; menu Result, lalu mencocokkannya dengan baris <b>pasaran + tanggal</b> yang sama di Panel-Z: kosong (xxxx) = diisi, sudah sama = ditandai, beda angka = <b>tidak ditimpa</b> &amp; diperingatkan. Mode diatur admin di Pengaturan Sistem.</div>
-        <div class="overflow-auto rounded-xl border border-white/5" style="max-height:40vh"><table class="w-full text-left stack-sm"><thead><tr class="text-[10px] text-slate-400 uppercase tracking-wider"><th class="p-2">Tanggal &amp; jam draw</th><th class="p-2">Website</th><th class="p-2">Pasaran tujuan</th><th class="p-2">Angka</th><th class="p-2">Status</th><th class="p-2">Keterangan</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+        ${logBox}
+        <div class="text-[11px] text-slate-400 leading-relaxed mb-2">Membaca daftar nomor di admin AG/AGWL (3 hari terakhir, hanya yang <b>Hitung: Yes</b>) memakai PHPSESSID tersimpan akun yang punya izin Panel-Z &amp; menu Result, lalu mencocokkannya dengan baris <b>pasaran + tanggal</b> yang sama di Panel-Z: kosong (xxxx) = <b>diisi otomatis</b>, sudah sama = ditandai, angka berbeda = <b>dikoreksi ke angka admin</b> (angka lama dicatat). Berjalan otomatis tanpa klik; tombol hanya untuk memaksa sekarang. Pengaturan di Admin › Pengaturan Sistem.</div>
+        <div class="overflow-auto rounded-xl border border-white/5" id="aiTotoTblScroll" style="max-height:40vh"><table class="w-full text-left stack-sm"><thead><tr class="text-[10px] text-slate-400 uppercase tracking-wider"><th class="p-2">Tanggal &amp; jam draw</th><th class="p-2">Website</th><th class="p-2">Pasaran tujuan</th><th class="p-2">Angka</th><th class="p-2">Status</th><th class="p-2">Keterangan</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      keepScroll.forEach(([id, top]) => { const el = document.getElementById(id); if (el) el.scrollTop = top; });
     }
 
     let aiAlertBusy = false;

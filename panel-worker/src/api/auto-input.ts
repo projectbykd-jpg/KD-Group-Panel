@@ -2,7 +2,7 @@
 // Logika inti: lib/auto-input.ts (rencana, sesi, antrean) & lib/auto-input-run.ts (eksekutor).
 import { getSys } from "../lib/settings";
 import { ghToken, investTurboRepo, loadIntegrations } from "../lib/integrations";
-import { ackTotoAlerts, listTotoLog, pendingTotoAlerts, TOTO_MAX_ATTEMPTS, totoMacauRun } from "../lib/toto-macau";
+import { ackTotoAlerts, listTotoEvents, listTotoLog, logTotoEvent, pendingTotoAlerts, TOTO_MAX_ATTEMPTS, totoMacauRun } from "../lib/toto-macau";
 import { requireSession } from "./auth";
 import { logActivity } from "../lib/activity";
 import { dateKeyNow } from "../lib/time";
@@ -256,6 +256,7 @@ export async function autoInputTotoLog(env: Env, token: string) {
 		mode: await getSys(env, "sys_totomacau_mode"),
 		maxAttempts: TOTO_MAX_ATTEMPTS,
 		rows: await listTotoLog(env, s.profile.websites, 3),
+		...(await listTotoEvents(env, s.profile.websites, 60)),
 	};
 }
 
@@ -279,6 +280,7 @@ export async function autoInputTotoRun(env: Env, token: string) {
 	const s = await gate(env, token);
 	try {
 		await dispatchTotoMacau(env, s.username);
+		await logTotoEvent(env, "", "info", "INFO", `Tombol CEK & ISI SEKARANG ditekan oleh ${s.username} → GitHub Actions dipicu`);
 		await logActivity(env, s.username, "TOTO MACAU AUTO", "Cek & Isi Sekarang — dipicu lewat GitHub Actions", "BERHASIL", "").catch(() => {});
 		return { success: true, viaGithub: true, message: "Dipicu di GitHub Actions. Hasilnya masuk ±1–2 menit — daftar di kartu akan diperbarui otomatis." };
 	} catch (e) {
