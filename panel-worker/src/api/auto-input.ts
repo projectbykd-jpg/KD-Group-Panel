@@ -1,6 +1,7 @@
 // Endpoint menu "Auto Prediksi" + kaitan ke alur KIRIM SEMUA SISTEM (send.ts).
 // Logika inti: lib/auto-input.ts (rencana, sesi, antrean) & lib/auto-input-run.ts (eksekutor).
 import { getSys } from "../lib/settings";
+import { ackTotoAlerts, listTotoLog, pendingTotoAlerts, TOTO_MAX_ATTEMPTS } from "../lib/toto-macau";
 import { requireSession } from "./auth";
 import { logActivity } from "../lib/activity";
 import { dateKeyNow } from "../lib/time";
@@ -221,15 +222,38 @@ export async function autoInputRun(env: Env, token: string, jobId: number, fetch
 	return { success: o.status === "BERHASIL", ...o };
 }
 
-/** Peringatan terakhir: job yang tetap GAGAL setelah semua percobaan otomatis. Dipoll browser dari menu mana pun. */
+/** Peringatan terakhir: job yang tetap GAGAL setelah semua percobaan + Toto Macau gagal dibaca/dikirim. Dipoll browser dari menu mana pun. */
 export async function autoInputAlerts(env: Env, token: string) {
 	const s = await gate(env, token);
 	const maxRetries = await getSys(env, "sys_auto_input_retry_max");
-	return { success: true, alerts: await pendingFailureAlerts(env, s.username, maxRetries) };
+	const jobs = await pendingFailureAlerts(env, s.username, maxRetries);
+	const toto = (await pendingTotoAlerts(env, s.profile.websites)).map((t) => ({
+		id: -t.id, // id negatif = catatan Toto Macau (dibedakan saat ack)
+		website: t.website,
+		market: t.market || (t.game === "m51" ? "TOTO MACAO 5D" : "TOTO MACAU"),
+		prizes: t.number ? [t.number] : [],
+		stage: "cek",
+		detail: t.detail,
+		attempts: t.attempts,
+	}));
+	return { success: true, alerts: [...jobs, ...toto] };
 }
 
 export async function autoInputAckAlerts(env: Env, token: string, ids: number[]) {
 	const s = await gate(env, token);
-	await ackFailureAlerts(env, s.username, (Array.isArray(ids) ? ids : []).map(Number));
+	const all = (Array.isArray(ids) ? ids : []).map(Number);
+	await ackFailureAlerts(env, s.username, all.filter((n) => n > 0));
+	await ackTotoAlerts(env, all.filter((n) => n < 0).map((n) => -n));
 	return { success: true };
+}
+
+/** Riwayat Auto Check Toto Macau/5D untuk website milik akun ini (3 hari terakhir). */
+export async function autoInputTotoLog(env: Env, token: string) {
+	const s = await gate(env, token);
+	return {
+		success: true,
+		mode: await getSys(env, "sys_totomacau_mode"),
+		maxAttempts: TOTO_MAX_ATTEMPTS,
+		rows: await listTotoLog(env, s.profile.websites, 3),
+	};
 }

@@ -201,6 +201,13 @@ export interface TotoDeps {
 	nowMs?: number;
 }
 
+/** Tanggal (WIB) slot jam `hour` yang sedang dicek: bila jam itu belum lewat hari ini berarti slot kemarin (mis. jam 23 dicek pukul 00:05). */
+export function slotDate(nowMs: number, hour: number): string {
+	const d = new Date(nowMs + 7 * 3600_000);
+	const minOfDay = d.getUTCHours() * 60 + d.getUTCMinutes();
+	return new Date(d.getTime() - (hour * 60 > minOfDay ? 24 * 3600_000 : 0)).toISOString().slice(0, 10);
+}
+
 /** Game yang sedang "jatuh tempo": ada jam draw yang terlewat 3..110 menit lalu (WIB). */
 export function dueGames(nowMs: number): { game: TotoGame; hour: number }[] {
 	const d = new Date(nowMs + 7 * 3600_000);
@@ -211,7 +218,8 @@ export function dueGames(nowMs: number): { game: TotoGame; hour: number }[] {
 			const h = Number(hs);
 			let diff = minOfDay - h * 60;
 			if (diff < 0) diff += 24 * 60; // jam 00 setelah tengah malam / draw kemarin
-			if (diff >= 3 && diff <= 110) out.push({ game: g, hour: h });
+			// 3..40 menit setelah jam draw: tiap menit (angka admin biasanya terbit ±10 menit setelah jam); sesudahnya tiap 5 menit sampai 110.
+			if (diff >= 3 && diff <= 110 && (diff <= 40 || d.getUTCMinutes() % 5 === 0)) out.push({ game: g, hour: h });
 		}
 	}
 	return out;
@@ -261,7 +269,7 @@ export async function totoMacauTick(env: Env, deps: TotoDeps = {}): Promise<bool
 		for (const { game, hour } of due) {
 			if (reads >= READ_BUDGET) return net;
 			// Sudah ada catatan terkirim/tercatat untuk slot jam ini hari ini? (cek murah sebelum membuka halaman admin)
-			const dayKey = new Date(nowMs + 7 * 3600_000 - (hour * 60 > (new Date(nowMs + 7 * 3600_000).getUTCHours() * 60 + new Date(nowMs + 7 * 3600_000).getUTCMinutes()) ? 24 * 3600_000 : 0)).toISOString().slice(0, 10);
+			const dayKey = slotDate(nowMs, hour);
 			const slotKey = `${dayKey} ${String(hour).padStart(2, "0")}`;
 			const have = await db
 				.prepare(`SELECT status, attempts FROM toto_macau_log WHERE website = ? AND game = ? AND slot_key = ? AND period > 0`)
@@ -271,6 +279,14 @@ export async function totoMacauTick(env: Env, deps: TotoDeps = {}): Promise<bool
 				const done = have.status === "SENT" || have.status === "SKIPPED" || (have.status === "RECORDED" && mode === 1) || (have.status === "FAILED" && Number(have.attempts) >= TOTO_MAX_ATTEMPTS);
 				if (done) continue;
 			}
+
+			// Sesi/halaman sudah gagal berulang untuk slot ini -> jangan dihantam tiap menit; coba lagi tiap 10 menit.
+			const pseudoKey = -Number(slotKey.replace(/\D/g, "")) || -1;
+			const bad = await db
+				.prepare(`SELECT attempts, updated_at FROM toto_macau_log WHERE website = ? AND game = ? AND period = ?`)
+				.bind(website, game.game, pseudoKey)
+				.first<{ attempts: number; updated_at: string }>();
+			if (bad && Number(bad.attempts) >= TOTO_MAX_ATTEMPTS && String(bad.updated_at) > tsPlusMinutes(-10)) continue;
 
 			// Baca halaman admin dengan sesi user pertama yang masih hidup.
 			let html = "";
@@ -288,7 +304,7 @@ export async function totoMacauTick(env: Env, deps: TotoDeps = {}): Promise<bool
 				}
 			}
 			if (!reader) {
-				await recordSessionFailure(env, website, game, slotKey, cands[0].username, lastErr);
+				await recordSessionFailure(env, website, game, slotKey, cands[0].username, `Sesi admin ${website} habis atau halaman tidak bisa dibuka — tempel PHPSESSID baru di menu Auto Prediksi (${lastErr})`);
 				continue;
 			}
 			if (!game.title.test(htmlText(html))) {
