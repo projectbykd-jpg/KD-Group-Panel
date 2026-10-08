@@ -399,6 +399,7 @@ async function reconcileWebsite(
 ): Promise<void> {
 	const db = getTurso(env);
 	const buf: LogStmt[] = [];
+	const sum0 = { posted: sum.posted, corrected: sum.corrected, failed: sum.failed };
 	const today = dayOf(deps.nowMs);
 	const since = dayOf(deps.nowMs, deps.lookback);
 	const adminRows: AdminRow[] = [];
@@ -473,7 +474,7 @@ async function reconcileWebsite(
 		return;
 	}
 	await flushLog(env, buf, budget); // kejadian awal tampil di layar sebelum membuka Panel-Z
-	adminRows.sort((a, b) => (a.date + a.time < b.date + b.time ? -1 : 1));
+	adminRows.sort((a, b) => (a.date + a.time < b.date + b.time ? 1 : -1)); // terbaru dulu: draw yang paling kelihatan diselesaikan lebih awal, backlog lama menyusul
 
 	// Panel-Z: masuk sekali, baca daftar result.
 	sum.net = true;
@@ -486,7 +487,9 @@ async function reconcileWebsite(
 		await flushLog(env, buf, budget);
 		return;
 	}
-	const zRows = parsePanelZRows(panel.html);
+	// halaman yang bergeser saat baris baru dibuat bisa memuat baris yang sama dua kali -> satu baris per id
+	const zRows = [...new Map(parsePanelZRows(panel.html).map((r) => [r.id, r])).values()];
+	const zOldest = zRows.reduce((m, r) => (m && m < r.date ? m : r.date), "");
 	buf.push(evStmt(env, website, "info", zRows.length ? "INFO" : "ERR", `Panel-Z dibuka: ${panel.fetches ? panel.fetches - 1 : 1} halaman daftar Result, ${zRows.length} baris Toto Macau terbaca`));
 	if (!zRows.length) {
 		await recordFailure(env, website, "pz", today, reader, "Daftar result Panel-Z tidak terbaca (bentuk halaman berubah / belum ada baris Toto Macau).");
@@ -496,7 +499,7 @@ async function reconcileWebsite(
 	}
 
 	await flushLog(env, buf, budget);
-	const posted: { a: AdminRow; rowId: string; old: string }[] = [];
+	const posted: { a: AdminRow; rowIds: string[]; old: string }[] = [];
 	// satu kali baca status lama semua baris (hemat subrequest)
 	budget.used++;
 	const curRes = await db
@@ -504,38 +507,47 @@ async function reconcileWebsite(
 		.bind(website, tsPlusMinutes(-(deps.lookback + 2) * 24 * 60))
 		.all<{ game: string; period: number; status: string; attempts: number; updated_at: string }>();
 	const curMap = new Map((curRes.results ?? []).map((r) => [`${r.game}|${r.period}`, r]));
+	const targetsOf = (a: AdminRow) => zRows.filter((z) => z.market === a.market && z.date === a.date);
 	// Pengaman koreksi massal: bila terlalu banyak angka Panel-Z yang berbeda sekaligus, itu tanda pemetaan keliru (bukan salah ketik) -> jangan ditimpa
-	const diffCount = adminRows.filter((a) => {
-		const t = zRows.filter((z) => z.market === a.market && z.date === a.date);
-		return t.length === 1 && t[0].filled && t[0].value !== a.number;
-	}).length;
+	const diffCount = adminRows.filter((a) => targetsOf(a).some((t) => t.filled && t.value !== a.number)).length;
 	const bulkHold = deps.correct && diffCount > deps.maxCorrect;
 	if (bulkHold) buf.push(evStmt(env, website, "info", "ERR", `${diffCount} angka Panel-Z berbeda dari admin (batas koreksi massal ${deps.maxCorrect}) — kemungkinan pemetaan tanggal/pasaran keliru; TIDAK dikoreksi otomatis, cek manual`));
 	const correctNow = deps.correct && !bulkHold;
 	for (const a of adminRows) {
 		const base = { website, game: a.game.game, period: a.period, slotKey: `${a.date} ${String(a.hour).padStart(2, "0")}`, market: a.market, number: a.number, rowAt: `${a.date} ${a.time}`, username: reader };
-		const targets = zRows.filter((z) => z.market === a.market && z.date === a.date);
-		if (targets.length !== 1) {
-			const have = [...new Set(zRows.filter((z) => z.market === a.market).map((z) => z.date))].slice(0, 5).join(", ") || "tidak ada";
-			await upsertLog(env, { ...base, status: "MISSING", detail: targets.length ? `Baris ganda (${targets.length}x) untuk ${a.market} ${a.date} di Panel-Z — tidak diisi` : `Baris ${a.market} tanggal ${a.date} belum ada di Panel-Z (Panel-Z membuat baris tiap hari pukul 00:25) — diisi otomatis begitu baris muncul. Tanggal terbaca untuk pasaran ini: ${have}; total ${zRows.length} baris Toto Macau terbaca` }, buf);
+		const targets = targetsOf(a);
+		if (!targets.length) {
+			if (zOldest && a.date < zOldest) {
+				// Panel-Z hanya menyimpan beberapa hari terakhir: tanggal ini sudah lewat dari yang tersedia -> tidak akan pernah muncul, jangan ditunggu
+				await upsertLog(env, { ...base, status: "SKIPPED", detail: `Dilewati: Panel-Z hanya menyimpan sampai ${zOldest} — baris ${a.market} ${a.date} sudah tidak ada di Panel-Z` }, buf);
+				buf.push(evStmt(env, website, "info", "INFO", `${a.market} ${a.date}: di luar jangkauan Panel-Z (terlama ${zOldest}) — dilewati`));
+				continue;
+			}
+			const dates = zRows.filter((z) => z.market === a.market).map((z) => z.date).sort();
+			const have = dates.length ? `${dates[0]} s/d ${dates[dates.length - 1]}` : "tidak ada";
+			await upsertLog(env, { ...base, status: "MISSING", detail: `Baris ${a.market} tanggal ${a.date} belum ada di Panel-Z (Panel-Z membuat baris tiap hari pukul 00:25) — diisi otomatis begitu baris muncul. Tanggal terbaca untuk pasaran ini: ${have}; total ${zRows.length} baris Toto Macau terbaca` }, buf);
 			sum.missing++;
 			buf.push(evStmt(env, website, "info", "WARN", `${a.market} ${a.date}: baris belum ada di Panel-Z → menunggu (admin ${a.number})`));
 			continue;
 		}
-		const z = targets[0];
 		const cur = curMap.get(`${a.game.game}|${a.period}`);
-		if (cur?.status === "SENDING" && String(cur.updated_at) > tsPlusMinutes(-10)) continue; // putaran lain sedang mengirim baris ini
-		if (z.filled && z.value === a.number) {
+		const sendingAge = cur?.status === "SENDING" ? String(cur.updated_at) : "";
+		if (sendingAge && sendingAge > tsPlusMinutes(-10)) continue; // putaran lain sedang mengirim baris ini
+		const dupNote = targets.length > 1 ? ` (${targets.length} baris ganda di Panel-Z, semuanya diperlakukan sama)` : "";
+		const need = targets.filter((t) => !(t.filled && t.value === a.number)); // kosong/xxxx ATAU angka berbeda
+		if (!need.length) {
 			await upsertLog(env, { ...base, status: cur?.status === "SENT" ? "SENT" : "VERIFIED", detail: cur?.status === "SENT" ? "Terkirim & terbaca di Panel-Z" : "Panel-Z sudah berisi angka yang sama" }, buf);
 			sum.already++;
-			buf.push(evStmt(env, website, "info", "OK", `${a.market} ${a.date}: sudah sama dengan admin (${a.number})`));
+			buf.push(evStmt(env, website, "info", "OK", `${a.market} ${a.date}: sudah sama dengan admin (${a.number})${dupNote}`));
 			continue;
 		}
-		const wrong = z.filled && z.value !== a.number; // angka admin dianggap benar: angka Panel-Z yang berbeda = salah
+		const wrongRows = need.filter((t) => t.filled); // berisi angka yang berbeda dari admin (angka admin dianggap benar)
+		const wrong = wrongRows.length > 0;
+		const oldVal = wrongRows[0]?.value ?? "";
 		if (wrong && !correctNow) {
-			await upsertLog(env, { ...base, status: "CONFLICT", detail: `BEDA: Panel-Z berisi ${z.value}, admin ${a.number} — tidak ditimpa, cek manual` }, buf);
+			await upsertLog(env, { ...base, status: "CONFLICT", detail: `BEDA: Panel-Z berisi ${wrongRows.map((t) => t.value).join(" / ")}, admin ${a.number} — tidak ditimpa, cek manual` }, buf);
 			sum.conflict++;
-			buf.push(evStmt(env, website, "info", "ERR", `${a.market} ${a.date}: BEDA — Panel-Z ${z.value}, admin ${a.number} (tidak ditimpa)`));
+			buf.push(evStmt(env, website, "info", "ERR", `${a.market} ${a.date}: BEDA — Panel-Z ${wrongRows.map((t) => t.value).join(" / ")}, admin ${a.number} (tidak ditimpa)`));
 			continue;
 		}
 		// baris ada & (kosong ATAU berisi angka salah yang harus dikoreksi)
@@ -555,34 +567,46 @@ async function reconcileWebsite(
 		} else if (wrong && (cur?.status === "SENT" || cur?.status === "VERIFIED") && Number(cur.attempts) >= TOTO_MAX_ATTEMPTS) {
 			resetAttempts = true; // angka yang tadinya benar diubah orang lain: koreksi lagi (siklus baru; terlihat di log bila terus bolak-balik)
 		}
-		if (budget.used >= SUBREQ_BUDGET) {
+		if (budget.used + need.length > SUBREQ_BUDGET) {
 			await upsertLog(env, { ...base, status: "PENDING", detail: "Antre — dikirim pada putaran berikutnya" }, buf);
 			sum.pending++;
 			sum.more = true;
 			buf.push(evStmt(env, website, "info", "INFO", `${a.market} ${a.date}: antre — dikirim pada putaran berikutnya`));
 			continue;
 		}
-		// klaim atomik: hanya satu putaran yang berhasil mengubah ke SENDING (upsert + klaim dalam satu batch)
+		// klaim atomik: hanya satu putaran yang berhasil mengubah ke SENDING (upsert + klaim dalam satu batch).
+		// SENDING yang sudah >10 menit = putaran sebelumnya mati di tengah jalan -> boleh diklaim ulang (kalau tidak, baris tersangkut selamanya).
 		const pre: LogStmt[] = [];
 		await upsertLog(env, { ...base, status: "PENDING", detail: "Mengirim ke Panel-Z…" }, pre);
-		pre.push(evStmt(env, website, "info", "INFO", wrong ? `${a.market} ${a.date}: Panel-Z berisi ${z.value} ≠ admin ${a.number} → KOREKSI ke ${a.number}…` : `${a.market} ${a.date}: baris kosong → mengirim ${a.number} ke Panel-Z…`));
+		pre.push(evStmt(env, website, "info", "INFO", wrong ? `${a.market} ${a.date}: Panel-Z berisi ${oldVal} ≠ admin ${a.number} → KOREKSI ke ${a.number}…${dupNote}` : `${a.market} ${a.date}: baris kosong → mengirim ${a.number} ke Panel-Z…${dupNote}`));
 		if (resetAttempts) pre.push(db.prepare(`UPDATE toto_macau_log SET attempts = 0 WHERE website = ? AND game = ? AND period = ?`).bind(website, a.game.game, a.period));
 		pre.push(
 			db
-				.prepare(`UPDATE toto_macau_log SET status = 'SENDING', attempts = attempts + 1, updated_at = ? WHERE website = ? AND game = ? AND period = ? AND status <> 'SENDING' AND attempts < ?`)
-				.bind(tsNow(), website, a.game.game, a.period, TOTO_MAX_ATTEMPTS),
+				.prepare(`UPDATE toto_macau_log SET status = 'SENDING', attempts = attempts + 1, updated_at = ? WHERE website = ? AND game = ? AND period = ? AND (status <> 'SENDING' OR updated_at < ?) AND attempts < ?`)
+				.bind(tsNow(), website, a.game.game, a.period, tsPlusMinutes(-10), TOTO_MAX_ATTEMPTS),
 		);
 		budget.used++;
 		const claim = await db.batch(pre);
 		if (claim[claim.length - 1].meta.changes !== 1) continue; // evStmt di batch yang sama tidak mengubah baris -> indeks terakhir tetap klaim
-		budget.used++;
-		const r = await panel.push(z.id, a.number);
-		if (/Berhasil/i.test(r)) posted.push({ a, rowId: z.id, old: wrong ? z.value : "" });
+		let failMsg = "";
+		for (const t of need) {
+			budget.used++;
+			let r: string;
+			try {
+				r = await panel.push(t.id, a.number);
+			} catch (e) {
+				r = "Error: " + (e instanceof Error ? e.message : String(e));
+			}
+			if (!/Berhasil/i.test(r)) {
+				failMsg = r;
+				break;
+			}
+		}
+		if (!failMsg) posted.push({ a, rowIds: need.map((t) => t.id), old: wrong ? oldVal : "" });
 		else {
-			buf.push(db.prepare(`UPDATE toto_macau_log SET status = 'FAILED', detail = ?, updated_at = ? WHERE website = ? AND game = ? AND period = ?`).bind(("Panel-Z: " + r).slice(0, 300), tsNow(), website, a.game.game, a.period));
-			await logActivity(env, reader, "TOTO MACAU AUTO", `[${website}] ${a.market} ${a.date} — Panel-Z: ${r}`, "GAGAL", `Angka: ${a.number}`).catch(() => {});
+			buf.push(db.prepare(`UPDATE toto_macau_log SET status = 'FAILED', detail = ?, updated_at = ? WHERE website = ? AND game = ? AND period = ?`).bind(("Panel-Z: " + failMsg).slice(0, 300), tsNow(), website, a.game.game, a.period));
 			sum.failed++;
-			buf.push(evStmt(env, website, "info", "ERR", `${a.market} ${a.date}: gagal kirim ke Panel-Z — ${r}`));
+			buf.push(evStmt(env, website, "info", "ERR", `${a.market} ${a.date}: gagal kirim ke Panel-Z — ${failMsg}`));
 		}
 	}
 
@@ -591,19 +615,20 @@ async function reconcileWebsite(
 		budget.used += 2; // baca ulang halaman yang memuat baris terkirim (biasanya 1-2 halaman)
 		let after: PanelZRow2[] = [];
 		try {
-			after = parsePanelZRows(await panel.reload(posted.map((x) => x.rowId)));
+			after = parsePanelZRows(await panel.reload(posted.flatMap((x) => x.rowIds)));
 		} catch {
 			after = [];
 		}
-		for (const { a, rowId, old } of posted) {
-			const z = after.find((x) => x.id === rowId);
-			const okRead = !!z && z.filled && z.value === a.number;
+		for (const { a, rowIds, old } of posted) {
+			const okRead = rowIds.every((id) => {
+				const z = after.find((x) => x.id === id);
+				return !!z && z.filled && z.value === a.number;
+			});
 			buf.push(
 				db
 					.prepare(`UPDATE toto_macau_log SET status = ?, detail = ?, updated_at = ? WHERE website = ? AND game = ? AND period = ?`)
 					.bind(okRead ? "SENT" : "FAILED", okRead ? (old ? `DIKOREKSI: Panel-Z berisi ${old}, diperbaiki ke angka admin ${a.number} & terverifikasi (dibaca ulang)` : "Terkirim ke Panel-Z & terverifikasi (dibaca ulang)") : "Terkirim tetapi angka belum tampil di baris Panel-Z — cek manual", tsNow(), website, a.game.game, a.period),
 			);
-			await logActivity(env, reader, "TOTO MACAU AUTO", `[${website}] ${a.market} ${a.date} — ${okRead ? "terkirim & terverifikasi di Panel-Z" : "terkirim tapi belum terbaca di Panel-Z"}`, okRead ? "BERHASIL" : "GAGAL", `Angka: ${a.number}`).catch(() => {});
 			buf.push(evStmt(env, website, "info", okRead ? "OK" : "ERR", `${a.market} ${a.date}: ${okRead ? (old ? `DIKOREKSI ${old} → ${a.number} — terbaca ulang di Panel-Z` : `TERKIRIM ${a.number} — terbaca ulang di Panel-Z`) : `terkirim ${a.number} tetapi belum tampil di Panel-Z — cek manual`}`));
 			if (okRead) {
 				sum.posted++;
@@ -612,6 +637,12 @@ async function reconcileWebsite(
 		}
 	}
 	await flushLog(env, buf, budget);
+	// SATU catatan Aktivitas per putaran (bukan per baris): tiap penulisan log = 1 panggilan ke database dan ikut menghabiskan batas 50 per invocation
+	const dPosted = sum.posted - sum0.posted;
+	const dFailed = sum.failed - sum0.failed;
+	if (dPosted || dFailed) {
+		await logActivity(env, reader, "TOTO MACAU AUTO", `[${website}] ${dPosted} angka diposting ke Panel-Z (${sum.corrected - sum0.corrected} dikoreksi), ${dFailed} gagal`, dFailed ? "GAGAL" : "BERHASIL", "Rincian per baris: LOG KEGIATAN di menu Auto Prediksi").catch(() => {});
+	}
 }
 type PanelZRow2 = ReturnType<typeof parsePanelZRows>[number];
 
@@ -636,6 +667,13 @@ async function hotWebsites(env: Env, mode: number): Promise<Set<string>> {
 		.bind(tsPlusMinutes(-HOT_MIN))
 		.all<{ website: string }>();
 	return new Set((res.results ?? []).map((r) => String(r.website)));
+}
+
+/** Kapan cron terakhir memicu workflow (WIB "yyyy-MM-dd HH:mm:ss"), "" bila belum pernah. Dipakai kartu untuk menampilkan apakah pemicu otomatis hidup. */
+export async function totoDispatchAt(env: Env): Promise<string> {
+	const row = await env.DB.prepare(`SELECT value FROM settings WHERE key = 'toto_dispatch_at'`).first<{ value: string }>();
+	const ms = Number(row?.value || 0);
+	return ms ? new Date(ms + 7 * 3600_000).toISOString().slice(0, 19).replace("T", " ") : "";
 }
 
 /**
@@ -702,7 +740,8 @@ export async function totoMacauRun(env: Env, opts: { only?: string[]; exclude?: 
 	const correct = mode === 2 && (await getSys(env, "sys_totomacau_correct")) === 1;
 	const lookback = await getSys(env, "sys_totomacau_lookback_days");
 	const maxCorrect = await getSys(env, "sys_totomacau_max_correct");
-	const budget = { used: 0 };
+	// panggilan di luar hitungan eksplisit (baca profil/akun/sesi di D1, tulis log awal/akhir/penanda, baca daftar) ikut dihitung supaya tidak menembus batas 50
+	const budget = { used: 12 };
 	for (const website of due) {
 		if (budget.used >= SUBREQ_BUDGET) break;
 		sum.websites++;
