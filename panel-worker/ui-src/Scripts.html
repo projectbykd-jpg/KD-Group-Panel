@@ -2751,14 +2751,14 @@
         }
         const rows = jobs.filter(j => j !== active).slice(0, 5);
         if (rows.length) {
-          html += '<div class="lap-jobs-table-wrap"><table class="lap-jobs-table"><thead><tr><th>Waktu</th><th>Periode</th><th>Status</th><th>Durasi</th><th>Keterangan</th></tr></thead><tbody>' +
+          html += '<div class="lap-jobs-table-wrap"><table class="lap-jobs-table stack-sm"><thead><tr><th>Waktu</th><th>Periode</th><th>Status</th><th>Durasi</th><th>Keterangan</th></tr></thead><tbody>' +
             rows.map(j => {
               const dur = lapWibMs(j.updatedAt) - lapWibMs(j.createdAt);
-              return '<tr><td>' + escapeHtml(String(j.createdAt).slice(5, 16)) + '</td>' +
-                '<td>' + escapeHtml(j.startDate || '-') + (j.endDate && j.endDate !== j.startDate ? '<br><span class="text-slate-500">s/d ' + escapeHtml(j.endDate) + '</span>' : '') + '</td>' +
-                '<td>' + lapJobStatusBadge(j) + '</td>' +
-                '<td>' + (j.source === 'import' ? '<span class="text-slate-500">import</span>' : (dur > 0 ? lapFmtDur(dur) : '-')) + '</td>' +
-                '<td class="lap-job-msg">' + escapeHtml(j.message || '') + '</td></tr>';
+              return '<tr><td data-label="Waktu">' + escapeHtml(String(j.createdAt).slice(5, 16)) + '</td>' +
+                '<td data-label="Periode">' + escapeHtml(j.startDate || '-') + (j.endDate && j.endDate !== j.startDate ? '<br><span class="text-slate-500">s/d ' + escapeHtml(j.endDate) + '</span>' : '') + '</td>' +
+                '<td data-label="Status">' + lapJobStatusBadge(j) + '</td>' +
+                '<td data-label="Durasi">' + (j.source === 'import' ? '<span class="text-slate-500">import</span>' : (dur > 0 ? lapFmtDur(dur) : '-')) + '</td>' +
+                '<td class="lap-job-msg stack-full" data-label="Keterangan">' + escapeHtml(j.message || '') + '</td></tr>';
             }).join('') + '</tbody></table></div>';
         } else if (!active) {
           html += '<div class="lap-jobs-empty">' + (lapJobsState.fetchedAt ? 'Belum ada riwayat tarik data ' + escapeHtml(label) + '.' : '<i class="fa-solid fa-circle-notch fa-spin mr-1.5"></i>Memuat riwayat...') + '</div>';
@@ -3285,10 +3285,10 @@
             const ui = getPredictionRowUi(item, 'prediction-send-btn');
             return `
               <tr class="hover:bg-white/5 transition-all">
-                <td class="p-4 font-bold text-white">${escapeHtml(item.name)}</td>
-                <td class="p-4 text-center font-mono text-cyan-400 font-bold">${escapeHtml(item.time)}</td>
-                <td class="p-4 text-center">${ui.statusBadge}${ui.countText}</td>
-                <td class="p-4 text-right">
+                <td class="p-4 font-bold text-white stack-full">${escapeHtml(item.name)}</td>
+                <td class="p-4 text-center font-mono text-cyan-400 font-bold" data-label="Jam">${escapeHtml(item.time)}</td>
+                <td class="p-4 text-center" data-label="Status">${ui.statusBadge}${ui.countText}</td>
+                <td class="p-4 text-right stack-full stack-actions">
                   <div class="prediction-action-group">
                     <button onclick="copyPredictionText(${index})" class="prediction-btn prediction-copy-btn" title="Salin paket prediksi unik per website; sama dengan isi SEND AUTO untuk sesi hari ini">
                       <i class="fa-solid fa-copy"></i> Copy
@@ -4301,7 +4301,7 @@
             <input id="aiJobsSearch" type="search" autocomplete="off" value="${esc(aiJobsQuery)}" oninput="autoInputSearch(this.value)" placeholder="Cari website, pasaran, angka, status (GAGAL/SELESAI), keterangan…" class="glass-inner border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none w-full sm:w-80">
           </div>
           <div class="overflow-auto glass-inner rounded-2xl border border-white/5" style="max-height:70vh">
-            <table class="w-full text-left"><thead><tr class="text-[10px] text-slate-400 uppercase tracking-wider"><th class="p-2">Waktu</th><th class="p-2">Website</th><th class="p-2">Result</th><th class="p-2">Status</th><th class="p-2">Keterangan</th></tr></thead><tbody id="aiJobsBody">${jobs}</tbody></table>
+            <table class="w-full text-left stack-sm"><thead><tr class="text-[10px] text-slate-400 uppercase tracking-wider"><th class="p-2">Waktu</th><th class="p-2">Website</th><th class="p-2">Result</th><th class="p-2">Status</th><th class="p-2">Keterangan</th></tr></thead><tbody id="aiJobsBody">${jobs}</tbody></table>
           </div>
         </div>`;
       autoInputSearch(aiJobsQuery); // isi hitungan 'x dari y job'
@@ -4327,11 +4327,11 @@
           ? `<button onclick="autoInputClearJob(${Number(j.id)})" class="retry-mini" title="Hapus catatan supaya result ini bisa dicoba lagi">COBA LAGI</button>` : '';
         const retryNote = willRetry ? `<div class="text-amber-300">Dicoba ulang otomatis ±${S.retryGap} menit (${att}/${S.retryMax} sudah dicoba)</div>` : (att > 0 && j.status === 'FAILED' ? `<div class="text-slate-400">Percobaan ulang otomatis habis (${att}/${S.retryMax})</div>` : (att > 0 && j.status === 'DONE' ? `<div class="text-emerald-300">Berhasil pada percobaan ulang ke-${att}</div>` : ''));
         return `<tr class="border-t border-white/5 align-top">
-          <td class="p-2 text-[10px] text-slate-400 whitespace-nowrap">${esc(j.createdAt)}</td>
-          <td class="p-2 text-xs font-bold text-cyan-300">${esc(j.website)}</td>
-          <td class="p-2 text-xs">${esc(j.market)}<div class="font-mono text-amber-300">${esc((j.prizes || []).join(' / '))}</div></td>
-          <td class="p-2 text-[10px] font-extrabold ${S.stColor[j.status] || ''}">${S.stLabel[j.status] || esc(j.status)}${manual ? '<div class="text-rose-300">CEK MANUAL</div>' : ''}</td>
-          <td class="p-2 text-[11px] text-slate-300">${esc(j.detail)} ${again}${retryNote}</td></tr>`;
+          <td class="p-2 text-[10px] text-slate-400 whitespace-nowrap" data-label="Waktu">${esc(j.createdAt)}</td>
+          <td class="p-2 text-xs font-bold text-cyan-300" data-label="Website">${esc(j.website)}</td>
+          <td class="p-2 text-xs" data-label="Result">${esc(j.market)}<div class="font-mono text-amber-300">${esc((j.prizes || []).join(' / '))}</div></td>
+          <td class="p-2 text-[10px] font-extrabold ${S.stColor[j.status] || ''}" data-label="Status">${S.stLabel[j.status] || esc(j.status)}${manual ? '<div class="text-rose-300">CEK MANUAL</div>' : ''}</td>
+          <td class="p-2 text-[11px] text-slate-300 stack-full" data-label="Keterangan">${esc(j.detail)} ${again}${retryNote}</td></tr>`;
       }).join('') || '<tr><td colspan="5" class="p-4 text-center text-xs text-slate-500">' + (words.length ? 'Tidak ada job yang cocok dengan pencarian.' : 'Belum ada job dalam ' + S.days + ' hari terakhir.') + '</td></tr>';
     }
     function autoInputSearch(v) {
@@ -5271,13 +5271,13 @@
       }
       body.innerHTML = rows.map(s => `
             <tr class="activity-log-row" data-role="${escapeHtml(s.role || '')}">
-              <td class="p-3 font-extrabold text-white">${escapeHtml(s.username)}<div class="text-[9px] text-slate-500 font-normal">${escapeHtml(s.displayName || '')}</div></td>
-              <td class="p-3"><span class="px-2 py-1 rounded-full bg-amber-500/10 text-amber-300 text-[9px] font-bold">${escapeHtml(s.role || '-')}</span></td>
-              <td class="p-3 text-slate-300">${escapeHtml(s.websites || '-')}</td>
-              <td class="p-3 text-center font-mono text-cyan-300">${Number(s.sessions || 0)}</td>
-              <td class="p-3 text-slate-400 font-mono text-[10px]">${escapeHtml(s.loginAt || '-')}</td>
-              <td class="p-3 text-slate-400 font-mono text-[10px]">${escapeHtml(s.expiresAt || '-')}</td>
-              <td class="p-3 text-center">${s.autoPostEligible
+              <td class="p-3 font-extrabold text-white" data-label="Username">${escapeHtml(s.username)}<div class="text-[9px] text-slate-500 font-normal">${escapeHtml(s.displayName || '')}</div></td>
+              <td class="p-3" data-label="Role"><span class="px-2 py-1 rounded-full bg-amber-500/10 text-amber-300 text-[9px] font-bold">${escapeHtml(s.role || '-')}</span></td>
+              <td class="p-3 text-slate-300 stack-full" data-label="Website">${escapeHtml(String(s.websites || '-').replace(/,\s*/g, ', '))}</td>
+              <td class="p-3 text-center font-mono text-cyan-300" data-label="Sesi">${Number(s.sessions || 0)}</td>
+              <td class="p-3 text-slate-400 font-mono text-[10px]" data-label="Login">${escapeHtml(s.loginAt || '-')}</td>
+              <td class="p-3 text-slate-400 font-mono text-[10px]" data-label="Sesi berakhir">${escapeHtml(s.expiresAt || '-')}</td>
+              <td class="p-3 text-center" data-label="Auto Post">${s.autoPostEligible
                 ? '<span class="px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-300 text-[9px] font-bold">✓ IKUT</span>'
                 : '<span class="px-2 py-1 rounded-full bg-slate-500/15 text-slate-400 text-[9px] font-bold">— tidak</span>'}</td>
             </tr>`).join('');
@@ -5322,16 +5322,16 @@
         <tr data-search="${escapeHtml([u.username,u.displayName,u.websites,u.role,u.status].join(' ').toLowerCase())}"
             data-role="${escapeHtml(u.role)}"
             data-status="${escapeHtml(u.status)}">
-          <td class="font-extrabold text-white" title="${escapeHtml(u.username)}">${escapeHtml(u.username)}</td>
-          <td title="${escapeHtml(u.displayName||'-')}">${escapeHtml(u.displayName||'-')}</td>
-          <td title="${escapeHtml(u.websites||'-')}">${escapeHtml(u.websites||'-')}</td>
-          <td><span class="px-2 py-1 rounded-full bg-amber-500/10 text-amber-300 text-[9px] font-bold">${escapeHtml(u.role)}</span><div class="user-menu-chip" title="Menu yang boleh dibuka"><i class="fa-solid fa-key"></i>Menu ${escapeHtml(userMenuSummary(u))}</div></td>
-          <td><span class="px-2 py-1 rounded-full ${u.status==='AKTIF'?'bg-emerald-500/10 text-emerald-300':'bg-rose-500/10 text-rose-300'} text-[9px] font-bold">${escapeHtml(u.status)}</span></td>
-          <td>${boolBadge(u.telegram,'')}</td>
-          <td>${boolBadge(u.linktree,'')}</td>
-          <td>${boolBadge(u.panelz,'')}</td>
-          <td>${formatLogin(u.lastLogin)}</td>
-          <td>
+          <td class="font-extrabold text-white" data-label="Username" title="${escapeHtml(u.username)}">${escapeHtml(u.username)}</td>
+          <td data-label="Nama" title="${escapeHtml(u.displayName||'-')}">${escapeHtml(u.displayName||'-')}</td>
+          <td class="stack-full" data-label="Website" title="${escapeHtml(u.websites||'-')}">${escapeHtml(String(u.websites||'-').replace(/,\s*/g, ', '))}</td>
+          <td data-label="Role"><span class="px-2 py-1 rounded-full bg-amber-500/10 text-amber-300 text-[9px] font-bold">${escapeHtml(u.role)}</span><div class="user-menu-chip" title="Menu yang boleh dibuka"><i class="fa-solid fa-key"></i>Menu ${escapeHtml(userMenuSummary(u))}</div></td>
+          <td data-label="Status"><span class="px-2 py-1 rounded-full ${u.status==='AKTIF'?'bg-emerald-500/10 text-emerald-300':'bg-rose-500/10 text-rose-300'} text-[9px] font-bold">${escapeHtml(u.status)}</span></td>
+          <td data-label="Telegram">${boolBadge(u.telegram,'')}</td>
+          <td data-label="LinkTree">${boolBadge(u.linktree,'')}</td>
+          <td data-label="Panel-Z">${boolBadge(u.panelz,'')}</td>
+          <td data-label="Login terakhir">${formatLogin(u.lastLogin)}</td>
+          <td class="stack-full stack-actions">
             <div class="admin-action-group">
               <button onclick="openUserModal(${i})" class="admin-icon-btn admin-icon-edit" title="Edit user">
                 <i class="fa-solid fa-pen"></i>

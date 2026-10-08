@@ -27,6 +27,7 @@ let tablesEnsured = false;
 /** Hanya untuk test (tiap test memakai database baru). */
 export function resetAutoInputTablesFlag(): void {
 	tablesEnsured = false;
+	lastExpireAt = 0;
 }
 export async function ensureAutoInputTables(env: Env): Promise<void> {
 	if (tablesEnsured) return;
@@ -418,8 +419,12 @@ export async function setStage(env: Env, jobId: number, stage: string, period = 
 		.run();
 }
 
-/** Worker bisa mati di tengah job. RUNNING yang basi jadi GAGAL -- tidak pernah diulang otomatis. */
+/** Worker bisa mati di tengah job. RUNNING yang basi jadi GAGAL -- tidak pernah diulang otomatis.
+ * Paling sering sekali per 60 dtk per isolate: dulu 3 UPDATE ke Turso di SETIAP buka menu / poll / tick cron. */
+let lastExpireAt = 0;
 async function expireRunning(env: Env): Promise<void> {
+	if (Date.now() - lastExpireAt < 60_000) return;
+	lastExpireAt = Date.now();
 	const db = getTurso(env);
 	const now = tsNow();
 	const old = tsPlusMinutes(-RUNNING_TTL_MIN);
@@ -543,8 +548,7 @@ export interface FailedAlert {
 
 /** Job GAGAL yang percobaan otomatisnya sudah HABIS (peringatan terakhir) dan belum pernah ditampilkan ke user. Hanya job BARU (gagal dalam 6 jam terakhir) -- riwayat gagal yang lama tidak pernah memicu peringatan. */
 export async function pendingFailureAlerts(env: Env, username: string, maxRetries: number): Promise<FailedAlert[]> {
-	await ensureAutoInputTables(env);
-	await expireRunning(env);
+	await ensureAutoInputTables(env); // tanpa expireRunning: dipoll tiap 20 dtk, cukup cron/menu yang merapikan job basi
 	const res = await getTurso(env)
 		.prepare(`SELECT * FROM auto_input_job WHERE username = ? AND status = 'FAILED' AND attempts >= ? AND alerted = 0 AND updated_at >= ? AND created_at >= ? ORDER BY id ASC LIMIT 20`)
 		.bind(username, Math.max(0, maxRetries), tsPlusMinutes(-6 * 60), tsPlusMinutes(-6 * 60))
