@@ -142,30 +142,89 @@ export function parsePanelZRows(html: string): PanelZRow[] {
 }
 
 export interface PanelZHandle {
+	/** HTML semua halaman daftar result yang dimuat (digabung) */
 	html: string;
+	/** jumlah panggilan jaringan yang dipakai membuka daftar (untuk hitungan subrequest) */
+	fetches?: number;
 	push(rowId: string, angka: string): Promise<string>;
-	reload(): Promise<string>;
+	/** baca ulang; rowIds = baris yang baru dikirim -> hanya halaman yang memuat baris itu */
+	reload(rowIds?: string[]): Promise<string>;
 }
 
-/** Masuk Panel-Z satu kali, ambil daftar result, kembalikan pegangan untuk mengisi baris & membaca ulang. String = pesan galat. */
-export async function openPanelZ(cfg: PanelZCfg): Promise<PanelZHandle | string> {
+export const PANELZ_MAX_PAGES = 6;
+
+/** Jumlah halaman dari tautan pagination "?hal=result&no=N". */
+export function panelZPageCount(html: string): number {
+	let max = 1;
+	for (const m of html.matchAll(/[?&]no=(\d+)/g)) max = Math.max(max, Number(m[1]));
+	return max;
+}
+
+/** Tanggal (yyyy-MM-dd) paling lama di satu halaman daftar result; "" bila tidak ada baris. */
+function oldestDate(html: string): string {
+	let min = "";
+	for (const chunk of html.split(/<tr\b/i).slice(1)) {
+		if (!/update-resultlotto\.php\?row=\d+/i.test(chunk)) continue;
+		const text = chunk.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
+		const dm = text.match(/(\d{1,2})\s+([A-Za-z]{3})[A-Za-z]*\s+(\d{4})/);
+		const month = dm ? MON[dm[2].toLowerCase()] : undefined;
+		if (!dm || !month) continue;
+		const d = `${dm[3]}-${String(month).padStart(2, "0")}-${dm[1].padStart(2, "0")}`;
+		if (!min || d < min) min = d;
+	}
+	return min;
+}
+
+/**
+ * Masuk Panel-Z satu kali, baca daftar result, kembalikan pegangan untuk mengisi baris & membaca ulang. String = pesan galat.
+ * Daftar result Panel-Z DIPECAH PER HALAMAN (100 baris/halaman, "?hal=result&no=N", terbaru dulu): halaman berikutnya dimuat
+ * selama baris paling lama di halaman terakhir masih >= sinceDate (batas maks PANELZ_MAX_PAGES).
+ */
+export async function openPanelZ(cfg: PanelZCfg, opts: { sinceDate?: string; maxPages?: number } = {}): Promise<PanelZHandle | string> {
 	try {
 		if (!cfg.url || !cfg.user) return "Konfigurasi Panel-Z kosong";
 		const session = await loginPanelZ(cfg);
 		if (typeof session === "string") return session;
-		const load = async (): Promise<string> => {
-			const res = await fetch(cfg.url + "/dashboard.php?hal=result", { headers: { Authorization: session.basicAuth, Cookie: session.cookie } });
-			if (!res.ok) throw new Error("HTTP " + res.status + " dari Panel-Z");
+		const load = async (page: number): Promise<string> => {
+			const res = await fetch(cfg.url + "/dashboard.php?hal=result" + (page > 1 ? "&no=" + page : ""), { headers: { Authorization: session.basicAuth, Cookie: session.cookie } });
+			if (!res.ok) throw new Error("HTTP " + res.status + " dari Panel-Z (halaman " + page + ")");
 			return res.text();
 		};
-		const html = await load();
+		const pages = new Map<number, string>();
+		const pageOf = new Map<string, number>();
+		const remember = (n: number, h: string): void => {
+			pages.set(n, h);
+			for (const r of parsePanelZRows(h)) pageOf.set(r.id, n);
+		};
+		let fetches = 1; // login
+		const first = await load(1);
+		fetches++;
+		remember(1, first);
+		const total = Math.min(panelZPageCount(first), opts.maxPages ?? PANELZ_MAX_PAGES);
+		let last = first;
+		for (let p = 2; p <= total; p++) {
+			if (opts.sinceDate) {
+				const old = oldestDate(last);
+				if (old && old < opts.sinceDate) break; // halaman terakhir yang dimuat sudah melewati batas tanggal
+			}
+			last = await load(p);
+			fetches++;
+			remember(p, last);
+		}
+		const joined = (): string => [...pages.entries()].sort((a, b) => a[0] - b[0]).map((e) => e[1]).join("\n");
 		return {
-			html,
+			html: joined(),
+			fetches,
 			push: async (rowId, angka) => {
 				const r = await pushAngka(session, cfg, rowId, angka);
 				return r === "Terkirim" ? "Berhasil dikirim" : r;
 			},
-			reload: load,
+			reload: async (rowIds) => {
+				const want = rowIds?.length ? [...new Set(rowIds.map((id) => pageOf.get(id) ?? 1))] : [...pages.keys()];
+				const out: string[] = [];
+				for (const n of want.sort((a, b) => a - b)) out.push(await load(n));
+				return out.join("\n");
+			},
 		};
 	} catch (e) {
 		return "Error: " + (e instanceof Error ? e.message : String(e));
