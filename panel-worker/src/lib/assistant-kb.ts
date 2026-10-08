@@ -9,7 +9,7 @@
 // Jangan menulis rahasia (password, key, token) di sini.
 // ============================================================================
 
-export const ASSISTANT_KB_VERSION = "2026-10-08.17";
+export const ASSISTANT_KB_VERSION = "2026-10-08.18";
 
 /** Penjelasan per menu. Kunci = id navigasi (nav-<kunci>) di ui-src/Index.html. */
 export const KB_PAGES: Record<string, { title: string; text: string }> = {
@@ -201,6 +201,7 @@ export const KB_FAQ: { id: string; k: string; a: string }[] = [
 // ARTI PESAN GALAT yang muncul di layar (cocok sebagian teks, huruf kecil).
 // ============================================================================
 export const KB_ERRORS: { m: string; a: string }[] = [
+	{ m: "galat tampilan (", a: "Data dari server sudah diterima tetapi layar gagal menggambarnya (bug tampilan, bukan data Anda yang hilang). Muat ulang halaman (Ctrl+F5); bila berulang, catat nama menu di dalam kurung dan laporkan ke admin." },
 	{ m: "sesi tidak valid atau telah berakhir", a: "Sesi login habis/dicabut. Login ulang. Jika terjadi berulang, tanyakan admin apakah akun diubah/dikunci." },
 	{ m: "akun terkunci sementara", a: "Terlalu banyak salah password. Tunggu beberapa menit atau minta admin membuka kunci di Admin › Users." },
 	{ m: "terlalu banyak percobaan login gagal dari jaringan ini", a: "IP jaringan dibatasi sementara karena banyak percobaan gagal. Tunggu sesuai menit di pesan." },

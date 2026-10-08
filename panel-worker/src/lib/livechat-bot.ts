@@ -154,14 +154,16 @@ export async function syncSessionsFromScript(
 	const now = tsNow();
 	let n = 0;
 	const keys: string[] = [];
+	const stmts: ReturnType<typeof db.prepare>[] = [];
 	for (const row of rows) {
 		const id = String(row.sessionKey || "").trim();
 		if (!id) continue;
 		const key = innerKey(owner, id);
 		keys.push(key);
-		await db
-			.prepare(
-				`INSERT INTO livechat_session (session_key, owner, queue_code, customer_name, divisi, last_message, last_sender, bot_enabled, last_seen_at, bot_updated_at)
+		stmts.push(
+			db
+				.prepare(
+					`INSERT INTO livechat_session (session_key, owner, queue_code, customer_name, divisi, last_message, last_sender, bot_enabled, last_seen_at, bot_updated_at)
 				 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, '')
 				 ON CONFLICT(session_key) DO UPDATE SET
 					queue_code = excluded.queue_code,
@@ -170,20 +172,22 @@ export async function syncSessionsFromScript(
 					last_message = excluded.last_message,
 					last_sender = excluded.last_sender,
 					last_seen_at = excluded.last_seen_at`,
-			)
-			.bind(
-				key,
-				owner,
-				String(row.queueCode ?? "").slice(0, 100),
-				String(row.customerName ?? "").slice(0, 200),
-				String(row.divisi ?? "").slice(0, 100),
-				String(row.lastMessage ?? "").slice(0, 2000),
-				String(row.lastSender ?? "").slice(0, 30),
-				now,
-			)
-			.run();
+				)
+				.bind(
+					key,
+					owner,
+					String(row.queueCode ?? "").slice(0, 100),
+					String(row.customerName ?? "").slice(0, 200),
+					String(row.divisi ?? "").slice(0, 100),
+					String(row.lastMessage ?? "").slice(0, 2000),
+					String(row.lastSender ?? "").slice(0, 30),
+					now,
+				) as never,
+		);
 		n++;
 	}
+	// Satu round-trip per 25 baris (dulu satu per baris -> N+1 ke Turso tiap sinkron).
+	for (let i = 0; i < stmts.length; i += 25) await db.batch(stmts.slice(i, i + 25) as never);
 	// `rows` SELALU daftar LENGKAP Kotak Masuk akun itu (termasuk kosong). Sesi MILIK OWNER INI yang tidak ada lagi:
 	// matikan bot-nya dulu, lalu buang barisnya.
 	if (keys.length) {

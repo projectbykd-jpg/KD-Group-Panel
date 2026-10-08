@@ -27,11 +27,11 @@
       if (event.key === 'Escape') {
         const notice = document.getElementById('centerNoticeModal');
         if (notice && notice.classList.contains('open') && centerNoticeResolver) {
-          notice.classList.remove('open');
-          document.body.classList.remove('modal-open');
-          const resolver = centerNoticeResolver;
-          centerNoticeResolver = null;
-          resolver(false);
+          // Lewat tombol yang ada supaya finish() berjalan penuh (reset penanda 'sedang tampil' + kuras antrean).
+          // Dulu Esc hanya menutup modal sehingga dialog berikutnya antre selamanya sampai halaman dimuat ulang.
+          const cancel = document.getElementById('centerNoticeCancel');
+          const btn = cancel && cancel.style.display !== 'none' ? cancel : document.getElementById('centerNoticeConfirm');
+          if (btn) btn.click();
         }
       }
     });

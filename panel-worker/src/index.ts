@@ -508,8 +508,15 @@ export default {
 		// tanpa frontend-nya ikut proxy/serve balik file ini di domain sendiri.
 		if (url.pathname === "/public/news-sitemap.xml") {
 			try {
+				// Cache tepi: tanpa ini tiap hit (termasuk bot crawler) menjalankan query ke Turso.
+				const cache = (globalThis as unknown as { caches?: { default: Cache } }).caches?.default;
+				const ck = new Request(url.origin + url.pathname, { method: "GET" });
+				const hit = request.method === "GET" && cache ? await cache.match(ck) : undefined;
+				if (hit) return hit;
 				const xml = await publicNewsSitemapXml(env);
-				return new Response(xml, { headers: { "content-type": "application/xml; charset=utf-8", "cache-control": "public, max-age=1800", ...CORS_HEADERS } });
+				const res = new Response(xml, { headers: { "content-type": "application/xml; charset=utf-8", "cache-control": "public, max-age=1800", ...CORS_HEADERS } });
+				if (request.method === "GET" && cache) ctx.waitUntil(cache.put(ck, res.clone()));
+				return res;
 			} catch (e) {
 				return json({ success: false, message: e instanceof Error ? e.message : String(e) }, 500);
 			}
@@ -518,8 +525,15 @@ export default {
 		// Umpan RSS artikel situs sendiri -- sumber untuk layanan RSS-ke-Facebook Fanspage (tanpa token Meta di panel).
 		if (url.pathname === "/public/news-feed.xml") {
 			try {
+				// Cache tepi: tanpa ini tiap hit (termasuk bot crawler) menjalankan query ke Turso.
+				const cache = (globalThis as unknown as { caches?: { default: Cache } }).caches?.default;
+				const ck = new Request(url.origin + url.pathname, { method: "GET" });
+				const hit = request.method === "GET" && cache ? await cache.match(ck) : undefined;
+				if (hit) return hit;
 				const xml = await publicNewsRssXml(env);
-				return new Response(xml, { headers: { "content-type": "application/rss+xml; charset=utf-8", "cache-control": "public, max-age=300", ...CORS_HEADERS } });
+				const res = new Response(xml, { headers: { "content-type": "application/rss+xml; charset=utf-8", "cache-control": "public, max-age=300", ...CORS_HEADERS } });
+				if (request.method === "GET" && cache) ctx.waitUntil(cache.put(ck, res.clone()));
+				return res;
 			} catch (e) {
 				return json({ success: false, message: e instanceof Error ? e.message : String(e) }, 500);
 			}
