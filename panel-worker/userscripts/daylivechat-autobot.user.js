@@ -68,9 +68,8 @@
 
 	// Toleransi sebelum membalas member yang BARU chat 1x (belum dianggap spam).
 	const GRACE_MS = 30_000;
-	// Jarak MINIMAL antar balasan otomatis selama member masih spam (>=2 pesan).
-	const SPAM_INTERVAL_MS = 15_000;
-	// Jeda tanpa pesan baru sebelum burst dianggap selesai (balik ke tier "1x").
+	// SATU balasan per burst: selama member masih spam (jeda antar pesan < BURST_RESET_MS) bot TIDAK membalas lagi.
+	// Jeda tanpa pesan baru sebelum burst dianggap selesai (balasan berikutnya baru boleh).
 	const BURST_RESET_MS = 90_000;
 
 	function getToken() {
@@ -277,7 +276,7 @@
 	// berturut-turut ke member yang sama.
 	const burst = new Map(); // chatId -> { count, lastMsgAt, lastReplyAt, lastTemplateId }
 	function getBurst(chatId) {
-		return burst.get(chatId) || { count: 0, lastMsgAt: 0, lastReplyAt: 0, lastTemplateId: null };
+		return burst.get(chatId) || { count: 0, lastMsgAt: 0, lastReplyAt: 0, lastTemplateId: null, replied: false };
 	}
 
 	async function tryReply(chatId) {
@@ -289,16 +288,9 @@
 		// burst-nya sudah keburu dibalas duluan lewat jalur spam 15-detik),
 		// jangan kirim balasan kedua yang tidak perlu ke chat yang sudah sepi.
 		if (!b.lastMsgAt || b.lastMsgAt <= b.lastReplyAt) return;
-		const now = Date.now();
-		if (b.count >= 2) {
-			const nextAllowed = b.lastReplyAt ? b.lastReplyAt + SPAM_INTERVAL_MS : now;
-			if (now < nextAllowed) {
-				setTimeout(() => tryReply(chatId), nextAllowed - now);
-				return;
-			}
-		} else if (b.count !== 1) {
-			return;
-		}
+		// Sudah dibalas di burst ini -> diam, seberapa pun member spam (cukup 1 balasan per burst).
+		if (b.replied) return;
+		if (b.count < 1) return;
 		const tpl = pickTemplate(b.lastTemplateId);
 		if (!tpl) {
 			log("Tidak ada template balasan aktif -- lewati sesi " + chatId);
@@ -311,6 +303,7 @@
 		}
 		b.lastReplyAt = Date.now();
 		b.lastTemplateId = tpl.id;
+		b.replied = true;
 		burst.set(chatId, b);
 		log("Auto-balas terkirim ke sesi " + chatId + ".");
 		panelApi("livechatBotReport", {
@@ -334,7 +327,10 @@
 
 		const now = Date.now();
 		const b = getBurst(chatId);
-		if (b.lastMsgAt && now - b.lastMsgAt > BURST_RESET_MS) b.count = 0;
+		if (b.lastMsgAt && now - b.lastMsgAt > BURST_RESET_MS) {
+			b.count = 0;
+			b.replied = false; // burst baru -> boleh dibalas 1x lagi
+		}
 		b.count += 1;
 		b.lastMsgAt = now;
 		burst.set(chatId, b);
