@@ -77,6 +77,7 @@ export async function adminTestIntegrations(env: Env, token: string) {
 		ghWorkflowCheck(tok, "Laporan Harian (Tarik Data)", ghRepo(env), "scrape.yml"),
 		ghWorkflowCheck(tok, "Bot News turbo", newsTurboRepo(env), "news-turbo.yml"),
 		ghWorkflowCheck(tok, "Invest turbo", investTurboRepo(env), "invest-turbo.yml"),
+		ghWorkflowCheck(tok, "Auto Check Toto Macau", investTurboRepo(env), "toto-macau.yml"),
 	]);
 	return { success: true, allOk: checks.every((c) => c.ok), checks };
 }

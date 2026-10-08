@@ -27,13 +27,14 @@ import {
 	adminSetAutoPost,
 	pruneActivityLogCron,
 } from "./api/admin";
-import { totoMacauTick } from "./lib/toto-macau";
+import { totoMacauRun } from "./lib/toto-macau";
 import {
 	autoInputClearJob,
 	autoInputDeleteSession,
 	autoInputGetState,
 	autoInputRun,
 	autoInputRetryTick,
+	dispatchTotoMacau,
 	autoInputAlerts,
 	autoInputTotoLog,
 	autoInputTotoRun,
@@ -601,6 +602,18 @@ export default {
 						out.invest = await investGetState(env, qUser);
 					}
 				}
+				// Auto Check Toto Macau/5D: SATU website per panggilan (<= 32 panggilan jaringan), dipanggil BERULANG dari
+				// GitHub Actions (toto-macau.yml). Parameter: user (batasi ke satu akun), force=1 (abaikan jeda), exclude=SITE1,SITE2 (sudah diperiksa).
+				if (job === "totomacau") {
+					const qUser = (url.searchParams.get("user") || "").trim();
+					const exclude = (url.searchParams.get("exclude") || "").split(",").map((x) => x.trim()).filter(Boolean);
+					out.toto = await totoMacauRun(env, { only: qUser ? [qUser] : undefined, exclude, force: url.searchParams.get("force") === "1", maxSites: 1 });
+				}
+				// Pemicu workflow toto-macau.yml (untuk cron-job.org, sama seperti job=githubnews).
+				if (job === "githubtoto") {
+					await dispatchTotoMacau(env);
+					out.githubtoto = "dispatched";
+				}
 				if (job === "news" || job === "all") {
 					// mode/count OPSIONAL (dari query string) -- dipakai kalau cron
 					// EKSTERNAL manggil job=news khusus mode=blogger atau mode=site
@@ -736,12 +749,7 @@ export default {
 				console.error("auto-input retry error", e);
 				return false;
 			});
-			// Auto check Toto Macau/5D (baca admin -> catat / posting Panel-Z). Punya batas bacaan sendiri; bila ada panggilan jaringan, pump Invest ikut menunggu.
-			const toto = retried ? false : await totoMacauTick(env).catch((e) => {
-				console.error("toto macau tick error", e);
-				return false;
-			});
-			if (!retried && !toto) await investPump(env).catch((e) => console.error("invest pump error", e));
+			if (!retried) await investPump(env).catch((e) => console.error("invest pump error", e));
 		}
 	},
 } satisfies ExportedHandler<Env>;

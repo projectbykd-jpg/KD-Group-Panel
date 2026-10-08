@@ -1,0 +1,79 @@
+name: TOTO MACAU auto check (bypass limit Cloudflare)
+
+# Auto Check Toto Macau & Toto Macao 5D: baca nomor di admin AG/AGWL, cocokkan dengan Panel-Z
+# per (pasaran, TANGGAL), isi baris yang masih kosong (mode 2). Prosesnya TETAP di Worker
+# (/__cron?job=totomacau) -- workflow ini hanya MENGULANG panggilan itu, 1 website per panggilan,
+# jadi tiap panggilan jauh di bawah batas 50 subrequest Cloudflare dan tidak ada yang dipaksa.
+#
+# Pemicu: (1) tombol "CEK & ISI SEKARANG" di menu Auto Prediksi (input user + force),
+# (2) jadwal di bawah (jam draw + 10..55 menit, dan tiap jam sebagai penyapu), (3) cron-job.org
+# lewat /__cron?job=githubtoto (opsional). Jeda per website diatur Worker sendiri (3 menit setelah
+# jam draw, selain itu 30 menit), jadi dobel pemicu aman. Klaim baris atomik di database mencegah kirim ganda.
+on:
+  schedule:
+    # jam draw WIB 00,13,15,16,19,21,22,23 = UTC 17,06,08,09,12,14,15,16
+    - cron: "10,20,30,40,50 6,8,9,12,14,15,16,17 * * *"
+    - cron: "40 * * * *"
+  workflow_dispatch:
+    inputs:
+      user:
+        description: "Batasi ke satu username panel (kosongkan = semua yang berhak)"
+        required: false
+        type: string
+      force:
+        description: "1 = abaikan jeda antar putaran (tombol panel)"
+        required: false
+        type: string
+
+concurrency:
+  group: toto-macau
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Periksa & isi, satu website per panggilan
+        env:
+          CRON_KEY: ${{ secrets.CRON_KEY }}
+          PUBLIC_URL: "https://panel-worker.projectbykd.workers.dev"
+          TOTO_USER: ${{ github.event.inputs.user }}
+          TOTO_FORCE: ${{ github.event.inputs.force }}
+        run: |
+          set -eu
+          if [ -z "$CRON_KEY" ]; then
+            echo "::error::Repository secret CRON_KEY belum diisi (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+          exclude=""
+          same=0
+          for i in $(seq 1 40); do
+            resp=$(curl -sS --max-time 60 -G "$PUBLIC_URL/__cron" \
+              --data-urlencode "key=$CRON_KEY" \
+              --data-urlencode "job=totomacau" \
+              --data-urlencode "user=${TOTO_USER:-}" \
+              --data-urlencode "force=${TOTO_FORCE:-}" \
+              --data-urlencode "exclude=$exclude" || true)
+            ok=$(echo "$resp" | jq -r '.ok // "false"' 2>/dev/null || echo false)
+            if [ "$ok" != "true" ]; then
+              echo "::warning::Respons tidak valid: $(echo "$resp" | head -c 300)"
+              exit 0
+            fi
+            msg=$(echo "$resp" | jq -r '.toto.message')
+            sites=$(echo "$resp" | jq -r '.toto.sites | join(",")')
+            more=$(echo "$resp" | jq -r '.toto.more')
+            echo "[$i] $msg (website: ${sites:-—})"
+            if [ -z "$sites" ]; then
+              echo "=== SELESAI: tidak ada website lagi yang perlu diperiksa ==="
+              exit 0
+            fi
+            if [ "$more" = "true" ] && [ "$same" -lt 6 ]; then
+              same=$((same+1)) # website yang sama punya baris antre -> ulangi
+            else
+              same=0
+              exclude="${exclude:+$exclude,}$sites"
+            fi
+            sleep 1
+          done
+          echo "=== BERHENTI: 40 putaran tercapai ==="
