@@ -196,7 +196,13 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 		await saveSys(env, { sys_totomacau_mode: m });
 		resetSysCache();
 	};
-	const run = (o: Parameters<typeof totoMacauRun>[1] = {}) => totoMacauRun(env, { fetchFn, panel, nowMs: NOW, force: true, ...o });
+	/** Putaran paksa. Antar putaran dianggap sudah lewat 5 menit (jeda minimum 60 dtk antar pemeriksaan website tidak menghalangi tes berurutan); tes jeda memakai noGap. */
+	const run = async (o: Parameters<typeof totoMacauRun>[1] & { noGap?: boolean } = {}) => {
+		const { noGap, ...rest } = o;
+		await listTotoLog(env, ["X"]); // pastikan tabel ada
+		if (!noGap && rest.force !== false) turso.current!.raw.prepare(`UPDATE toto_macau_log SET updated_at = ? WHERE game = 'pass' AND detail <> 'MORE'`).run(tsPlusMinutes(-5));
+		return totoMacauRun(env, { fetchFn, panel, nowMs: NOW, force: true, ...rest });
+	};
 	const byMarketDate = async () => Object.fromEntries((await listTotoLog(env, ["HUGOTOGEL"])).map((r) => [`${r.market} ${r.rowAt.slice(0, 10)}`, r.status]));
 
 	beforeEach(() => {
@@ -600,6 +606,79 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 		for (let i = 0; i < 12 && (await run({ fetchFn: pagedFetch(draws) })).more; i++);
 		expect(find("TOTOMACAU-00", "2026-10-02").value).not.toBe(""); // akhirnya semua beres
 	});
+	it("banyak user, satu website: diperiksa & dikirim SEKALI untuk semua; hasilnya identik di tampilan tiap user", async () => {
+		await setMode(2);
+		addPanelZ("HUGOTOGEL");
+		addUser("A");
+		addUser("B");
+		addUser("C", { websites: ["HUGOTOGEL", "FOLATOTO"] });
+		for (const u of ["A", "B", "C"]) await enableWithSession(u);
+		const sum = await run();
+		expect(sum.websites).toBe(1); // satu website = satu pemeriksaan, bukan tiga
+		expect(adminHits.filter((u) => u.includes("sar=m17")).length).toBe(1);
+		expect(adminHits.filter((u) => u.includes("sar=m51")).length).toBe(1);
+		const sends = pushed.map((p) => p.id);
+		expect(new Set(sends).size).toBe(sends.length); // tidak ada baris yang dikirim dua kali
+		// tampilan user A, B, C untuk website yang sama persis sama
+		const view = async () => JSON.stringify((await listTotoLog(env, ["HUGOTOGEL"])).map((r) => [r.market, r.rowAt, r.status, r.number]));
+		expect(await view()).toBe(await view());
+	});
+	it("dua pemicu bersamaan (cron + tombol user lain): hanya satu yang memeriksa website itu, yang lain dilewati — tanpa kirim ganda", async () => {
+		await setMode(2);
+		addPanelZ("HUGOTOGEL");
+		addUser("A");
+		addUser("B");
+		await enableWithSession("A");
+		await enableWithSession("B");
+		const [r1, r2] = await Promise.all([run({ noGap: true }), run({ noGap: true, only: ["B"] })]);
+		expect(r1.websites + r2.websites).toBe(1);
+		expect(r1.skippedBusy + r2.skippedBusy).toBeGreaterThanOrEqual(0); // yang kalah kunci tidak memeriksa
+		const sends = pushed.map((p) => p.id);
+		expect(new Set(sends).size).toBe(sends.length);
+		expect(adminHits.filter((u) => u.includes("sar=m17")).length).toBe(1);
+	});
+	it("tombol user lain tepat setelah pemeriksaan: tidak diperiksa ulang (jeda minimum 60 dtk), pesan jelas", async () => {
+		await setMode(2);
+		addPanelZ("HUGOTOGEL");
+		addUser("A");
+		addUser("B");
+		await enableWithSession("A");
+		await enableWithSession("B");
+		await run();
+		const hits = adminHits.length;
+		const again = await run({ noGap: true, only: ["B"] });
+		expect(again.websites).toBe(0);
+		expect(adminHits.length).toBe(hits);
+		expect(again.message).toMatch(/baru saja diperiksa.*hasilnya sama untuk semua user/i);
+		// lewat 2 menit: boleh lagi
+		turso.current!.raw.prepare(`UPDATE toto_macau_log SET updated_at = ? WHERE game = 'pass'`).run(tsPlusMinutes(-2));
+		expect((await run({ noGap: true, only: ["B"] })).websites).toBe(1);
+	});
+	it("kunci website yang tidak dilepas (putaran mati) kedaluwarsa setelah 4 menit; yang masih segar menahan putaran lain", async () => {
+		await setMode(2);
+		addPanelZ("HUGOTOGEL");
+		addUser("A");
+		await enableWithSession("A");
+		await run();
+		const raw = turso.current!.raw;
+		raw.prepare(`UPDATE toto_macau_log SET status = 'RUN', updated_at = ? WHERE game = 'pass'`).run(tsPlusMinutes(-1));
+		expect((await run({ noGap: true })).websites).toBe(0); // masih dipegang proses lain
+		raw.prepare(`UPDATE toto_macau_log SET status = 'RUN', updated_at = ? WHERE game = 'pass'`).run(tsPlusMinutes(-6));
+		expect((await run({ noGap: true })).websites).toBe(1); // basi -> diambil alih
+		expect((raw.prepare(`SELECT status FROM toto_macau_log WHERE game = 'pass'`).get() as { status: string }).status).toBe("PASS"); // dilepas di akhir
+	});
+	it("masih ada yang antre (more): putaran berikutnya langsung lanjut tanpa menunggu jeda", async () => {
+		await addUser("tester");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("tester");
+		await setMode(2);
+		zRows = zAllDays(() => "");
+		const draws = manyDraws();
+		const first = await run({ fetchFn: pagedFetch(draws) });
+		expect(first.more).toBe(true);
+		const next = await run({ noGap: true, fetchFn: pagedFetch(draws) }); // tanpa menunggu 60 dtk
+		expect(next.websites).toBe(1);
+	});
 	it("mode 1: membandingkan saja -- tidak ada yang dikirim; status per (pasaran, tanggal)", async () => {
 		addUser("Op");
 		addPanelZ("HUGOTOGEL");
@@ -759,6 +838,7 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 		const hits = adminHits.length;
 		await totoMacauRun(env, { fetchFn, panel, nowMs: t + 60_000 });
 		expect(adminHits.length).toBe(hits);
+		turso.current!.raw.prepare(`UPDATE toto_macau_log SET updated_at = ? WHERE game = 'pass'`).run(tsPlusMinutes(-2)); // 2 menit lalu: < jeda 30 menit, > jeda minimum 60 dtk
 		await totoMacauRun(env, { fetchFn, panel, nowMs: t + 60_000, force: true });
 		expect(adminHits.length).toBeGreaterThan(hits);
 	});
@@ -813,7 +893,7 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 		addPanelZ("HUGOTOGEL");
 		await enableWithSession("A");
 		const dead = async (url: string) => (/login\.php/.test(url) ? new Response(`<form action="login.php"><input name="entered_login"></form>`, { status: 200 }) : new Response("", { status: 302, headers: { location: "login.php" } }));
-		for (let i = 0; i < 3; i++) await totoMacauRun(env, { fetchFn: dead, panel, nowMs: NOW, force: true });
+		for (let i = 0; i < 3; i++) await run({ fetchFn: dead }); // tiap putaran dianggap 5 menit setelah yang lalu
 		const al = await pendingTotoAlerts(env, ["HUGOTOGEL"]);
 		expect(al.length).toBeGreaterThanOrEqual(1);
 		expect(al[0].detail).toMatch(/Sesi/);

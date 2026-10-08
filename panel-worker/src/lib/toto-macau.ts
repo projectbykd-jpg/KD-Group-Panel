@@ -227,6 +227,8 @@ export interface TotoSummary {
 	more: boolean;
 	/** dari 'posted': baris yang sebelumnya berisi angka SALAH lalu dikoreksi ke angka admin */
 	corrected: number;
+	/** website yang dilewati karena sedang diperiksa proses lain */
+	skippedBusy: number;
 }
 
 /** Ada draw yang terbit 3..45 menit lalu? Saat itu putaran tiap 3 menit; selain itu tiap 30 menit. */
@@ -262,11 +264,11 @@ const evStmt = (env: Env, website: string, kind: string, level: EvLevel, msg: st
 		.prepare(`INSERT INTO toto_macau_event (website, ts, kind, level, msg) VALUES (?, ?, ?, ?, ?)`)
 		.bind(website, tsNow(), kind, level, msg.slice(0, 300));
 /** Tulis satu kejadian langsung (dipakai di titik yang tidak punya batch sendiri). */
-export async function logTotoEvent(env: Env, website: string, kind: string, level: EvLevel, msg: string): Promise<void> {
+export async function logTotoEvent(env: Env, website: string, kind: string, level: EvLevel, msg: string, extra: LogStmt[] = []): Promise<void> {
 	try {
 		await ensureTables(env);
 		const db = getTurso(env);
-		const stmts = [evStmt(env, website, kind, level, msg)];
+		const stmts = [evStmt(env, website, kind, level, msg), ...extra];
 		if (kind === "end") {
 			// hanya disimpan N hari (sys_auto_input_history_days, bawaan 7); pangkas tiap akhir putaran tanpa panggilan tambahan (ikut batch)
 			stmts.push(db.prepare(`DELETE FROM toto_macau_event WHERE ts < ?`).bind(retentionFrom(await getSys(env, "sys_auto_input_history_days"))));
@@ -646,16 +648,30 @@ async function reconcileWebsite(
 }
 type PanelZRow2 = ReturnType<typeof parsePanelZRows>[number];
 
-async function passMark(env: Env, website: string): Promise<void> {
+const LEASE_MIN = 4; // kunci website yang tidak dilepas (putaran mati) dianggap kedaluwarsa setelah ini
+const MIN_GAP_SEC_FORCE = 60; // tombol "Cek & isi sekarang" dari user mana pun tidak memeriksa ulang website yang baru saja diperiksa
+
+/**
+ * Kunci per WEBSITE (bukan per user): satu putaran saja yang memeriksa & mengisi sebuah website pada satu waktu, siapa pun pemicunya
+ * (cron, tombol user A, tombol user B, panggilan manual). Atomik lewat satu pernyataan SQL; true = kunci didapat.
+ */
+async function acquireLease(env: Env, website: string): Promise<boolean> {
 	const now = tsNow();
-	await getTurso(env)
+	const r = await getTurso(env)
 		.prepare(
-			`INSERT INTO toto_macau_log (website, game, period, slot_key, status, created_at, updated_at) VALUES (?, 'pass', 0, '', 'PASS', ?, ?)
-			 ON CONFLICT(website, game, period) DO UPDATE SET updated_at = excluded.updated_at`,
+			`INSERT INTO toto_macau_log (website, game, period, slot_key, status, detail, created_at, updated_at) VALUES (?, 'pass', 0, '', 'RUN', '', ?, ?)
+			 ON CONFLICT(website, game, period) DO UPDATE SET status = 'RUN', detail = '', updated_at = excluded.updated_at
+			 WHERE toto_macau_log.status <> 'RUN' OR toto_macau_log.updated_at < ?`,
 		)
-		.bind(website, now, now)
+		.bind(website, now, now, tsPlusMinutes(-LEASE_MIN))
 		.run();
+	return r.meta.changes === 1;
 }
+/** Lepas kunci website; more = masih ada yang antre, putaran berikutnya boleh langsung lanjut tanpa menunggu jeda. */
+const releaseLease = (env: Env, website: string, more: boolean): LogStmt =>
+	getTurso(env)
+		.prepare(`UPDATE toto_macau_log SET status = 'PASS', detail = ?, updated_at = ? WHERE website = ? AND game = 'pass' AND period = 0`)
+		.bind(more ? "MORE" : "", tsNow(), website);
 
 const HOT_MIN = 360; // baris yang menunggu (belum dibuat Panel-Z / belum terkirim) dipantau rapat selama 6 jam sejak pertama tercatat
 
@@ -706,7 +722,7 @@ export async function totoDispatchTick(env: Env, dispatch: () => Promise<void>, 
  * Satu putaran rekonsiliasi. `only` = batasi ke username tertentu (tombol "Cek & Isi Sekarang"); `force` = abaikan jeda antar putaran.
  */
 export async function totoMacauRun(env: Env, opts: { only?: string[]; exclude?: string[]; force?: boolean; maxSites?: number } & TotoDeps = {}): Promise<TotoSummary> {
-	const sum: TotoSummary = { websites: 0, posted: 0, already: 0, pending: 0, conflict: 0, missing: 0, failed: 0, net: false, message: "", sites: [], more: false, corrected: 0 };
+	const sum: TotoSummary = { websites: 0, posted: 0, already: 0, pending: 0, conflict: 0, missing: 0, failed: 0, net: false, message: "", sites: [], more: false, corrected: 0, skippedBusy: 0 };
 	const mode = await getSys(env, "sys_totomacau_mode");
 	if (mode <= 0) {
 		sum.message = "Auto Check Toto Macau dimatikan (Pengaturan Sistem).";
@@ -724,8 +740,9 @@ export async function totoMacauRun(env: Env, opts: { only?: string[]; exclude?: 
 	const accounts = await getSiteAccounts(env, [...byWebsite.keys()]);
 	// urutan: yang terakhir diperiksa paling lama didahulukan
 	const db = getTurso(env);
-	const marks = await db.prepare(`SELECT website, updated_at FROM toto_macau_log WHERE game = 'pass' AND period = 0`).all<{ website: string; updated_at: string }>();
-	const last = new Map((marks.results ?? []).map((m) => [String(m.website), String(m.updated_at)]));
+	const marks = await db.prepare(`SELECT website, updated_at, status, detail FROM toto_macau_log WHERE game = 'pass' AND period = 0`).all<{ website: string; updated_at: string; status: string; detail: string }>();
+	const markMap = new Map((marks.results ?? []).map((m) => [String(m.website), { at: String(m.updated_at), running: m.status === 'RUN', more: m.detail === 'MORE' }]));
+	const last = new Map([...markMap].map(([w, m]) => [w, m.at]));
 	const hot = await hotWebsites(env, mode);
 	const baseInterval = passIntervalMin(nowMs);
 	const due = [...byWebsite.keys()]
@@ -734,7 +751,14 @@ export async function totoMacauRun(env: Env, opts: { only?: string[]; exclude?: 
 			return !!acc && !!acc.panelz.url && !!acc.panelz.user;
 		})
 		.filter((w) => !opts.exclude?.some((x) => x.toUpperCase() === w.toUpperCase()))
-		.filter((w) => opts.force || !last.get(w) || last.get(w)! <= tsPlusMinutes(-(hot.has(w) ? 3 : baseInterval)))
+		.filter((w) => {
+			const m = markMap.get(w);
+			if (!m) return true;
+			if (m.running && m.at > tsPlusMinutes(-LEASE_MIN)) return false; // sedang diperiksa proses lain
+			if (m.more) return true; // masih ada yang antre dari putaran sebelumnya: lanjut
+			// jeda minimum: tombol (force) hanya menghilangkan jeda 3/30 menit, tidak membolehkan pemeriksaan ulang beruntun dari banyak user
+			return m.at <= tsPlusMinutes(opts.force ? -(MIN_GAP_SEC_FORCE / 60) : -(hot.has(w) ? 3 : baseInterval));
+		})
 		.sort((x, y) => (last.get(x) ?? "").localeCompare(last.get(y) ?? ""))
 		.slice(0, opts.maxSites ?? 4);
 	const correct = mode === 2 && (await getSys(env, "sys_totomacau_correct")) === 1;
@@ -747,8 +771,14 @@ export async function totoMacauRun(env: Env, opts: { only?: string[]; exclude?: 
 		sum.websites++;
 		sum.sites.push(website);
 		const before = { ...sum };
+		if (!(await acquireLease(env, website))) {
+			// proses lain (cron / tombol user lain) memegang website ini: hasilnya sama, tidak diperiksa dua kali
+			sum.websites--;
+			sum.sites.pop();
+			sum.skippedBusy++;
+			continue;
+		}
 		await logTotoEvent(env, website, "start", "INFO", `Mulai memeriksa ${website} (${opts.force ? "diminta manual" : "terjadwal"}, mode ${mode})`);
-		await passMark(env, website);
 		let crashed = "";
 		try {
 			await reconcileWebsite(env, website, byWebsite.get(website)!, accounts.get(website)!.panelz, mode, { f, panel, nowMs, correct, lookback, maxCorrect }, budget, sum);
@@ -762,11 +792,16 @@ export async function totoMacauRun(env: Env, opts: { only?: string[]; exclude?: 
 			"end",
 			crashed || d("failed") || d("conflict") ? "ERR" : d("posted") ? "OK" : "INFO",
 			crashed ? `Berhenti karena galat: ${crashed}` : `Selesai ${website}: ${d("posted")} dikirim (${sum.corrected - before.corrected} dikoreksi), ${d("already")} sudah ada, ${d("pending")} belum terisi, ${d("missing")} menunggu baris, ${d("conflict")} beda, ${d("failed")} gagal`,
+			[releaseLease(env, website, sum.more && !crashed)], // kunci dilepas di batch yang sama (tanpa panggilan tambahan)
 		);
 	}
 	sum.message = sum.websites
 		? `${sum.websites} website diperiksa: ${sum.posted} dikirim (${sum.corrected} dikoreksi), ${sum.already} sudah ada, ${sum.pending} belum terisi, ${sum.conflict} beda, ${sum.missing} baris tidak ada, ${sum.failed} gagal.`
-		: "Belum waktunya putaran berikutnya.";
+		: sum.skippedBusy
+			? "Website sedang diperiksa proses lain — hasilnya sama untuk semua user, tidak diperiksa dua kali."
+			: opts.force && last.size
+				? "Website baru saja diperiksa (kurang dari 1 menit lalu, oleh jadwal atau user lain) — hasilnya sama untuk semua user, tidak diperiksa ulang."
+				: "Belum waktunya putaran berikutnya.";
 	return sum;
 }
 
