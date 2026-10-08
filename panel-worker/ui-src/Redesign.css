@@ -1383,3 +1383,9 @@ body { position: relative; }
 .sys-field-col { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--ui-text-2); }
 .sys-field-col input { height: 38px; }
 @media (max-width: 640px) { .asst-key-grid { grid-template-columns: 1fr; } }
+
+/* Peringatan terakhir (mis. Auto Prediksi gagal setelah semua percobaan): mencolok, tanpa glow/blur */
+.center-notice-card.center-notice-alert { border: 2px solid #ef4444 !important; }
+.center-notice-card.center-notice-alert .center-notice-title { color: #fca5a5; }
+.center-notice-card.center-notice-alert .center-notice-icon { background: #ef4444 !important; color: #fff !important; }
+.center-notice-card.center-notice-alert .center-notice-message { white-space: pre-line; }

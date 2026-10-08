@@ -411,6 +411,8 @@ export async function runAutoInput(opts: {
 	plan: Plan;
 	dryRun?: boolean;
 	fetchFn?: Fetcher;
+	/** Percobaan ULANG: bila angka PERSIS ini sudah ada di baris teratas tabel untuk periode ini, lewati Kirim (tidak pernah input dobel) dan lanjut Hitung. */
+	resumePeriod?: string;
 	/** dipanggil SEBELUM langkah yang mengubah data -- supaya tahap tersimpan walau Worker mati. */
 	onStage?: (stage: "kirim" | "hitung", period: string) => Promise<void>;
 }): Promise<RunOutcome> {
@@ -463,15 +465,31 @@ export async function runAutoInput(opts: {
 		// 2. halaman Nomor Keluar + validasi
 		const angkaPath = `admin_angka13.php?psr=${code}`;
 		const angkaHtml = await adminReq(f, sess, angkaPath);
-		const page = parseAngkaPage(angkaHtml, plan);
-		period = String(page.period);
-		const used = plan.prizes.slice(0, page.prizeFields.length);
+		let page: AngkaPage | null = null;
+		let used = plan.prizes;
+		let skipKirim = false;
+		if (opts.resumePeriod && !opts.dryRun) {
+			// Percobaan ulang setelah gagal di tengah: kalau angka sudah masuk untuk periode itu, jangan Kirim lagi.
+			const top = readTopRow(angkaHtml);
+			const want = plan.prizes.slice(0, top?.numbers.length ?? 0);
+			if (top && String(top.period) === opts.resumePeriod && want.length > 0 && want.every((n, i) => top.numbers[i] === n)) {
+				skipKirim = true;
+				used = want;
+				period = String(top.period);
+			}
+		}
+		if (!skipKirim) page = parseAngkaPage(angkaHtml, plan);
+		const pagePeriod = skipKirim ? Number(period) : page!.period;
+		if (page) {
+			period = String(page.period);
+			used = plan.prizes.slice(0, page.prizeFields.length);
+		}
 		const fill: Record<string, string> = {};
-		page.prizeFields.forEach((n, i) => (fill[n] = used[i]));
+		page?.prizeFields.forEach((n, i) => (fill[n] = used[i]));
 
 		// Persis seperti request asli browser: field form + psr (hidden), TANPA nilai tombol.
 		const kirimBody = () => {
-			const b = buildPayload(page.form, fill);
+			const b = buildPayload(page!.form, fill);
 			if (!b.has("psr")) b.set("psr", code);
 			return b;
 		};
@@ -483,20 +501,22 @@ export async function runAutoInput(opts: {
 				stage: "cek",
 				period,
 				detail: `Uji kering OK: login sebagai (${who})${shownBrand ? " di " + shownBrand + ".COM" : ""}, ${plan.market} (${code}) periode ${period}, angka ${used.join("/")} — validasi lolos, TIDAK ada yang dikirim.`,
-				preview: { code, post: "admin_angka13.php", fields: Object.fromEntries(payload), prev: page.prev },
+				preview: { code, post: "admin_angka13.php", fields: Object.fromEntries(payload), prev: page!.prev },
 			};
 		}
 
 		// 3. Kirim -- dari sini admin DISENTUH.
-		await opts.onStage?.("kirim", period);
-		stage = "kirim";
-		const verifyEntered = async () => {
-			const top = readTopRow(await adminReq(f, sess, angkaPath));
-			return !!top && top.period === page.period && used.every((n, i) => top.numbers[i] === n);
-		};
-		// Satu kali saja (tidak ada percobaan ulang): request asli browser POST ke admin_angka13.php tanpa query.
-		await adminReq(f, sess, "admin_angka13.php", { method: "POST", body: kirimBody(), referer: new URL(angkaPath, sess.baseUrl).toString() });
-		if (!(await verifyEntered())) throw new Stop("Form Nomor Keluar sudah dikirim tapi angka TIDAK muncul di tabel — cek manual.", "kirim");
+		if (!skipKirim) {
+			await opts.onStage?.("kirim", period);
+			stage = "kirim";
+			const verifyEntered = async () => {
+				const top = readTopRow(await adminReq(f, sess, angkaPath));
+				return !!top && top.period === pagePeriod && used.every((n, i) => top.numbers[i] === n);
+			};
+			// Satu kali saja (tidak ada percobaan ulang): request asli browser POST ke admin_angka13.php tanpa query.
+			await adminReq(f, sess, "admin_angka13.php", { method: "POST", body: kirimBody(), referer: new URL(angkaPath, sess.baseUrl).toString() });
+			if (!(await verifyEntered())) throw new Stop("Form Nomor Keluar sudah dikirim tapi angka TIDAK muncul di tabel — cek manual.", "kirim");
+		}
 
 		// 4. Hitung -- validasi ulang dari halamannya sendiri.
 		await opts.onStage?.("hitung", period);
@@ -507,7 +527,7 @@ export async function runAutoInput(opts: {
 		// Field tersembunyi form Hitung (per / nomor / sar pada request asli) harus cocok juga.
 		const hv = (n: string) => hp.form.inputs.find((i) => i.name === n)?.value;
 		const bad =
-			hp.period !== page.period ? `periode ${hp.period} ≠ ${page.period}`
+			hp.period !== pagePeriod ? `periode ${hp.period} ≠ ${pagePeriod}`
 			: squash(hp.market) !== squash(plan.market) ? `pasaran ${hp.market} ≠ ${plan.market}`
 			: hp.code !== code ? `kode ${hp.code} ≠ ${code}`
 			: !hp.numbers.length || hp.numbers.some((n, i) => i < used.length && n !== used[i]) ? `angka ${hp.numbers.join("/") || "-"} ≠ ${used.join("/")}`

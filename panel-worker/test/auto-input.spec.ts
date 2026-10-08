@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: import("node:sqlite").DatabaseSync } }));
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
-import { autoInputAfterSend, runQueuedJob, type AutoInputNotice } from "../src/api/auto-input";
-import { claimJob, parseCookieInput, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
+import { autoInputAfterSend, autoInputRetryTick, runQueuedJob, type AutoInputNotice } from "../src/api/auto-input";
+import { pendingFailureAlerts, ackFailureAlerts, claimJob, parseCookieInput, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
 import { frameSources, parseAngkaPage, readTopRow, parseHitungPage, runAutoInput, buildPayload, parseForms } from "../src/lib/auto-input-run";
 import { processText } from "../src/lib/parser";
 import { fakeD1, fakeEnv } from "./helpers/fake-env";
@@ -493,6 +493,106 @@ describe("autoInputAfterSend (DB)", () => {
 		expect([a.status, b.status].sort()).toEqual(["BERHASIL", "SUDAH"]);
 		expect(m.st.calcPosts).toBe(1);
 		expect(await claimJob(env, "Op", id)).toBeNull();
+	});
+	describe("percobaan ulang otomatis (jeda 2 menit, maks 2x)", () => {
+		const age = (min: number) =>
+			turso.current!.raw
+				.prepare(`UPDATE auto_input_job SET updated_at = ? WHERE status = 'FAILED'`)
+				.run(new Date(Date.now() + 7 * 3600_000 - min * 60_000).toISOString().slice(0, 19).replace("T", " "));
+		it("gagal di tahap cek -> belum dicoba sebelum 2 menit, lalu dicoba otomatis & berhasil tanpa klik user", async () => {
+			const o: SiteOpts = { expired: true };
+			const m = mockSite(o);
+			await setEnabled(env, "Op", true);
+			await withSession();
+			await go(m);
+			expect((await listJobs(env, "Op"))[0]).toMatchObject({ status: "FAILED", stage: "cek", attempts: 0 });
+			expect(await autoInputRetryTick(env, m.fetchFn)).toBe(false); // baru gagal: belum waktunya
+			o.expired = false;
+			age(3);
+			expect(await autoInputRetryTick(env, m.fetchFn)).toBe(true);
+			expect((await listJobs(env, "Op"))[0]).toMatchObject({ status: "DONE", attempts: 1 });
+			expect(m.st.calcPosts).toBe(1);
+		});
+		it("angka sudah masuk tapi Hitung gagal -> percobaan ulang TIDAK mengirim angka lagi, hanya Hitung", async () => {
+			const o: SiteOpts = { hitungShows: "0000" };
+			const m = mockSite(o);
+			await setEnabled(env, "Op", true);
+			await withSession();
+			await go(m);
+			expect((await listJobs(env, "Op"))[0]).toMatchObject({ status: "FAILED", stage: "hitung" });
+			const kirimBefore = m.st.posts.filter((p) => p.path === "admin_angka13.php").length;
+			expect(kirimBefore).toBe(1);
+			o.hitungShows = undefined;
+			age(3);
+			expect(await autoInputRetryTick(env, m.fetchFn)).toBe(true);
+			expect((await listJobs(env, "Op"))[0]).toMatchObject({ status: "DONE", attempts: 1 });
+			expect(m.st.posts.filter((p) => p.path === "admin_angka13.php")).toHaveLength(kirimBefore);
+			expect(m.st.calcPosts).toBe(1);
+		});
+		it("gagal terus -> berhenti setelah 2 percobaan ulang (total 3 kali)", async () => {
+			const m = mockSite({ expired: true });
+			await setEnabled(env, "Op", true);
+			await withSession();
+			await go(m);
+			for (let i = 0; i < 2; i++) {
+				age(3);
+				expect(await autoInputRetryTick(env, m.fetchFn)).toBe(true);
+			}
+			age(3);
+			expect(await autoInputRetryTick(env, m.fetchFn)).toBe(false);
+			const j = (await listJobs(env, "Op"))[0];
+			expect(j).toMatchObject({ status: "FAILED", attempts: 2 });
+			expect(j.detail).toMatch(/percobaan otomatis habis/);
+		});
+		it("peringatan terakhir: baru muncul setelah SEMUA percobaan habis, sekali saja (ack)", async () => {
+			const m = mockSite({ expired: true });
+			await setEnabled(env, "Op", true);
+			await withSession();
+			await go(m);
+			expect(await pendingFailureAlerts(env, "Op", 2)).toHaveLength(0); // masih akan dicoba ulang
+			age(3);
+			await autoInputRetryTick(env, m.fetchFn);
+			expect(await pendingFailureAlerts(env, "Op", 2)).toHaveLength(0);
+			age(3);
+			await autoInputRetryTick(env, m.fetchFn); // percobaan ulang ke-2 (terakhir) gagal
+			const al = await pendingFailureAlerts(env, "Op", 2);
+			expect(al).toHaveLength(1);
+			expect(al[0]).toMatchObject({ website: "HUGOTOGEL", market: "FLORIDAEVE", attempts: 2 });
+			expect(await pendingFailureAlerts(env, "Other", 2)).toHaveLength(0); // milik user lain tidak bocor
+			await ackFailureAlerts(env, "Op", [al[0].id]);
+			expect(await pendingFailureAlerts(env, "Op", 2)).toHaveLength(0);
+		});
+		it("job lama (>1 jam) tidak dicoba ulang otomatis", async () => {
+			const m = mockSite({ expired: true });
+			await setEnabled(env, "Op", true);
+			await withSession();
+			await go(m);
+			const old = new Date(Date.now() + 7 * 3600_000 - 3 * 3600_000).toISOString().slice(0, 19).replace("T", " ");
+			turso.current!.raw.prepare(`UPDATE auto_input_job SET created_at = ?, updated_at = ?`).run(old, old);
+			expect(await autoInputRetryTick(env, m.fetchFn)).toBe(false);
+		});
+		it("riwayat gagal LAMA tidak pernah dicoba ulang maupun memicu peringatan (hanya yang terbaru)", async () => {
+			const m = mockSite({ expired: true });
+			await setEnabled(env, "Op", true);
+			await withSession();
+			await go(m);
+			const old = new Date(Date.now() + 7 * 3600_000 - 2 * 86400_000).toISOString().slice(0, 19).replace("T", " ");
+			turso.current!.raw.prepare(`UPDATE auto_input_job SET created_at = ?, updated_at = ?, attempts = 2`).run(old, old);
+			expect(await autoInputRetryTick(env, m.fetchFn)).toBe(false);
+			expect(await pendingFailureAlerts(env, "Op", 2)).toHaveLength(0);
+			expect(await pendingFailureAlerts(env, "Op", 0)).toHaveLength(0);
+			turso.current!.raw.prepare(`UPDATE auto_input_job SET attempts = 0`).run();
+			expect(await autoInputRetryTick(env, m.fetchFn)).toBe(false);
+		});
+		it("fitur dimatikan user -> job gagal tidak dicoba ulang", async () => {
+			const m = mockSite({ expired: true });
+			await setEnabled(env, "Op", true);
+			await withSession();
+			await go(m);
+			await setEnabled(env, "Op", false);
+			age(3);
+			expect(await autoInputRetryTick(env, m.fetchFn)).toBe(false);
+		});
 	});
 	it("riwayat: semua job 7 hari terakhir tampil (bukan 30 baris), lebih lama dari itu tidak", async () => {
 		await listJobs(env, "Op"); // pastikan tabel ada

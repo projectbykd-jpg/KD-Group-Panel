@@ -4273,18 +4273,8 @@
             <button onclick="autoInputDeleteSession(${i})" class="glass-inner px-4 py-2 rounded-xl text-xs font-bold text-rose-400" ${w.hasSession ? '' : 'disabled style="opacity:.4"'}><i class="fa-solid fa-trash mr-1"></i>Hapus</button>
           </div>
         </div>`).join('') || '<div class="text-xs text-slate-400">Akun ini belum punya website.</div>';
-      const jobs = (st.jobs || []).map(j => {
-        const early = j.stage === '' || j.stage === 'cek';
-        const manual = j.status === 'FAILED' && !early;
-        const again = (j.status === 'FAILED' || j.status === 'SKIPPED') && early
-          ? `<button onclick="autoInputClearJob(${Number(j.id)})" class="retry-mini" title="Hapus catatan supaya result ini bisa dicoba lagi">COBA LAGI</button>` : '';
-        return `<tr class="border-t border-white/5 align-top">
-          <td class="p-2 text-[10px] text-slate-400 whitespace-nowrap">${esc(j.createdAt)}</td>
-          <td class="p-2 text-xs font-bold text-cyan-300">${esc(j.website)}</td>
-          <td class="p-2 text-xs">${esc(j.market)}<div class="font-mono text-amber-300">${esc((j.prizes || []).join(' / '))}</div></td>
-          <td class="p-2 text-[10px] font-extrabold ${stColor[j.status] || ''}">${stLabel[j.status] || esc(j.status)}${manual ? '<div class="text-rose-300">CEK MANUAL</div>' : ''}</td>
-          <td class="p-2 text-[11px] text-slate-300">${esc(j.detail)} ${again}</td></tr>`;
-      }).join('') || '<tr><td colspan="5" class="p-4 text-center text-xs text-slate-500">Belum ada job dalam ' + (Number(st.historyDays) || 7) + ' hari terakhir.</td></tr>';
+      aiJobsState = { jobs: st.jobs || [], days: Number(st.historyDays) || 7, retryMax: Number(st.retryMax) || 0, retryGap: Number(st.retryGapMin) || 2, stColor, stLabel };
+      const jobs = autoInputJobsRows();
       host.innerHTML = `
         <div class="glass-card rounded-3xl p-5 sm:p-6 flex flex-col gap-5">
           <div class="page-head tone-amber">
@@ -4306,12 +4296,80 @@
             Hanya website yang akunmu boleh akses yang muncul di bawah. Ambil <b>PHPSESSID</b> dari Chrome yang sedang login admin (F12 → Application → Cookies), tempel, <b>Simpan</b>, lalu klik <b>Uji</b> sebelum mengaktifkan. Sesi bisa habis kapan saja — kalau habis, hasilnya <b>gagal sebelum menyentuh admin</b> dan kamu input manual. Nilai PHPSESSID tidak pernah ditampilkan ulang.
           </div>
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">${rows}</div>
-          <div class="text-[11px] font-extrabold text-slate-300 tracking-wider">RIWAYAT ${Number(st.historyDays) || 7} HARI TERAKHIR <span class="text-slate-500 font-semibold">(${(st.jobs || []).length} job)</span></div>
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="text-[11px] font-extrabold text-slate-300 tracking-wider">RIWAYAT ${Number(st.historyDays) || 7} HARI TERAKHIR <span id="aiJobsCount" class="text-slate-500 font-semibold"></span></div>
+            <input id="aiJobsSearch" type="search" autocomplete="off" value="${esc(aiJobsQuery)}" oninput="autoInputSearch(this.value)" placeholder="Cari website, pasaran, angka, status (GAGAL/SELESAI), keterangan…" class="glass-inner border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none w-full sm:w-80">
+          </div>
           <div class="overflow-auto glass-inner rounded-2xl border border-white/5" style="max-height:70vh">
-            <table class="w-full text-left"><thead><tr class="text-[10px] text-slate-400 uppercase tracking-wider"><th class="p-2">Waktu</th><th class="p-2">Website</th><th class="p-2">Result</th><th class="p-2">Status</th><th class="p-2">Keterangan</th></tr></thead><tbody>${jobs}</tbody></table>
+            <table class="w-full text-left"><thead><tr class="text-[10px] text-slate-400 uppercase tracking-wider"><th class="p-2">Waktu</th><th class="p-2">Website</th><th class="p-2">Result</th><th class="p-2">Status</th><th class="p-2">Keterangan</th></tr></thead><tbody id="aiJobsBody">${jobs}</tbody></table>
           </div>
         </div>`;
+      autoInputSearch(aiJobsQuery); // isi hitungan 'x dari y job'
     }
+
+    let aiJobsState = { jobs: [], days: 7, retryMax: 0, retryGap: 2, stColor: {}, stLabel: {} };
+    let aiJobsQuery = '';
+    function autoInputJobsRows() {
+      const esc = escapeHtml;
+      const S = aiJobsState;
+      const q = aiJobsQuery.trim().toLowerCase();
+      const words = q ? q.split(/\s+/) : [];
+      const hay = j => [j.website, j.market, (j.prizes || []).join(' '), (j.prizes || []).join('/'), S.stLabel[j.status] || j.status, j.status, j.detail, j.createdAt, j.period].join(' ').toLowerCase();
+      const list = words.length ? S.jobs.filter(j => { const h = hay(j); return words.every(w => h.indexOf(w) >= 0); }) : S.jobs;
+      const cnt = document.getElementById('aiJobsCount');
+      if (cnt) cnt.textContent = words.length ? '(' + list.length + ' dari ' + S.jobs.length + ' job)' : '(' + S.jobs.length + ' job)';
+      return list.map(j => {
+        const early = j.stage === '' || j.stage === 'cek';
+        const att = Number(j.attempts) || 0;
+        const willRetry = j.status === 'FAILED' && S.retryMax > 0 && att < S.retryMax;
+        const manual = j.status === 'FAILED' && !early && !willRetry;
+        const again = (j.status === 'FAILED' || j.status === 'SKIPPED') && early && !willRetry
+          ? `<button onclick="autoInputClearJob(${Number(j.id)})" class="retry-mini" title="Hapus catatan supaya result ini bisa dicoba lagi">COBA LAGI</button>` : '';
+        const retryNote = willRetry ? `<div class="text-amber-300">Dicoba ulang otomatis ±${S.retryGap} menit (${att}/${S.retryMax} sudah dicoba)</div>` : (att > 0 && j.status === 'FAILED' ? `<div class="text-slate-400">Percobaan ulang otomatis habis (${att}/${S.retryMax})</div>` : (att > 0 && j.status === 'DONE' ? `<div class="text-emerald-300">Berhasil pada percobaan ulang ke-${att}</div>` : ''));
+        return `<tr class="border-t border-white/5 align-top">
+          <td class="p-2 text-[10px] text-slate-400 whitespace-nowrap">${esc(j.createdAt)}</td>
+          <td class="p-2 text-xs font-bold text-cyan-300">${esc(j.website)}</td>
+          <td class="p-2 text-xs">${esc(j.market)}<div class="font-mono text-amber-300">${esc((j.prizes || []).join(' / '))}</div></td>
+          <td class="p-2 text-[10px] font-extrabold ${S.stColor[j.status] || ''}">${S.stLabel[j.status] || esc(j.status)}${manual ? '<div class="text-rose-300">CEK MANUAL</div>' : ''}</td>
+          <td class="p-2 text-[11px] text-slate-300">${esc(j.detail)} ${again}${retryNote}</td></tr>`;
+      }).join('') || '<tr><td colspan="5" class="p-4 text-center text-xs text-slate-500">' + (words.length ? 'Tidak ada job yang cocok dengan pencarian.' : 'Belum ada job dalam ' + S.days + ' hari terakhir.') + '</td></tr>';
+    }
+    function autoInputSearch(v) {
+      aiJobsQuery = String(v || '');
+      const tb = document.getElementById('aiJobsBody');
+      if (tb) tb.innerHTML = autoInputJobsRows();
+    }
+
+    // Peringatan terakhir Auto Prediksi: job tetap GAGAL setelah semua percobaan ulang otomatis -> popup tengah layar di menu mana pun.
+    let aiAlertBusy = false;
+    function autoInputAlertTick() {
+      if (aiAlertBusy || document.hidden || !currentSessionToken || !currentUser || !currentProfile) return;
+      if (!menuAllowed('auto-input')) return;
+      const role = String(currentProfile.role || '').trim().toUpperCase();
+      if (role !== 'ADMIN' && role !== 'OPERATOR') return;
+      aiAlertBusy = true;
+      google.script.run
+        .withSuccessHandler(res => {
+          aiAlertBusy = false;
+          const list = (res && res.success && Array.isArray(res.alerts)) ? res.alerts : [];
+          if (!list.length) return;
+          google.script.run.withFailureHandler(() => {}).autoInputAckAlerts(currentSessionToken, list.map(a => Number(a.id)));
+          const lines = list.slice(0, 6).map(a => '• ' + a.website + ' · ' + a.market + ' ' + (a.prizes || []).join('/') + (a.stage && a.stage !== 'cek' ? ' (angka mungkin sudah masuk)' : ''));
+          const more = list.length > 6 ? '\n…dan ' + (list.length - 6) + ' lainnya' : '';
+          openCenterNotice({
+            type: 'warning',
+            alert: true,
+            title: 'PERINGATAN: Auto Prediksi GAGAL',
+            message: list.length + ' job tetap gagal setelah dicoba ulang otomatis. Segera cek di admin website:\n' + lines.join('\n') + more,
+            confirmText: 'BUKA AUTO PREDIKSI',
+            cancelText: 'TUTUP',
+            showCancel: true
+          }).then(go => { if (go) switchPage('auto-input'); });
+        })
+        .withFailureHandler(() => { aiAlertBusy = false; })
+        .autoInputAlerts(currentSessionToken);
+    }
+    setInterval(autoInputAlertTick, 20000);
 
     function autoInputToggle(on) {
       google.script.run
@@ -5476,6 +5534,8 @@
         danger: 'fa-trash-can'
       };
 
+      const noticeCard = modal.querySelector('.center-notice-card');
+      if (noticeCard) noticeCard.classList.toggle('center-notice-alert', !!config.alert);
       iconBox.className = `center-notice-icon ${type}`;
       icon.className = `fa-solid ${iconMap[type] || iconMap.info}`;
       title.textContent = config.title || 'Informasi';
