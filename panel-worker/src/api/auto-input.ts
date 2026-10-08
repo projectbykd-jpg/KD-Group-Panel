@@ -2,7 +2,7 @@
 // Logika inti: lib/auto-input.ts (rencana, sesi, antrean) & lib/auto-input-run.ts (eksekutor).
 import { getSys } from "../lib/settings";
 import { ghToken, investTurboRepo, loadIntegrations } from "../lib/integrations";
-import { ackTotoAlerts, listTotoEvents, listTotoLog, logTotoEvent, pendingTotoAlerts, TOTO_MAX_ATTEMPTS, totoMacauRun } from "../lib/toto-macau";
+import { ackTotoAlerts, listTotoEvents, pruneTotoMacau, listTotoLog, logTotoEvent, pendingTotoAlerts, TOTO_MAX_ATTEMPTS, totoMacauRun } from "../lib/toto-macau";
 import { requireSession } from "./auth";
 import { logActivity } from "../lib/activity";
 import { dateKeyNow } from "../lib/time";
@@ -11,6 +11,7 @@ import type { Processed } from "../lib/parser";
 import type { UserProfile } from "../lib/db";
 import {
 	claimJob,
+	pruneAutoInputJobs,
 	ackFailureAlerts,
 	claimRetry,
 	pendingFailureAlerts,
@@ -255,9 +256,16 @@ export async function autoInputTotoLog(env: Env, token: string) {
 		success: true,
 		mode: await getSys(env, "sys_totomacau_mode"),
 		maxAttempts: TOTO_MAX_ATTEMPTS,
-		rows: await listTotoLog(env, s.profile.websites, await getSys(env, "sys_totomacau_lookback_days")),
+		rows: await listTotoLog(env, s.profile.websites, await getSys(env, "sys_auto_input_history_days")),
 		...(await listTotoEvents(env, s.profile.websites, 60)),
 	};
+}
+
+/** Pemangkasan harian: job Auto Prediksi + catatan/log Toto Macau yang lebih lama dari sys_auto_input_history_days (bawaan 7 hari) dihapus. */
+export async function pruneAutoPrediksiHistory(env: Env): Promise<{ jobs: number; totoLog: number; totoEvents: number }> {
+	const jobs = await pruneAutoInputJobs(env);
+	const t = await pruneTotoMacau(env);
+	return { jobs, totoLog: t.log, totoEvents: t.events };
 }
 
 /** Pemicu workflow GitHub Actions toto-macau.yml (prosesnya di Actions, bebas batas subrequest Cloudflare). */

@@ -15,7 +15,7 @@
 // halaman harus benar-benar halaman game yang diminta (bukan redirect). Ada yang meleset -> tidak dikirim, dicatat, dan
 // (kalau percobaan habis / sesi mati) user diberi popup peringatan.
 import { getTurso } from "./turso";
-import { tsNow, tsPlusMinutes } from "./time";
+import { retentionFrom, tsNow, tsPlusMinutes } from "./time";
 import { getSys } from "./settings";
 import { getUserProfiles } from "./db";
 import { hasMenu } from "./menus";
@@ -167,11 +167,11 @@ const toLog = (r: Record<string, unknown>): TotoLogRow => ({
 	createdAt: String(r.created_at ?? ""),
 });
 
-export async function listTotoLog(env: Env, websites: string[], days = 3): Promise<TotoLogRow[]> {
+export async function listTotoLog(env: Env, websites: string[], days = 7): Promise<TotoLogRow[]> {
 	await ensureTables(env);
 	const ws = [...new Set(websites.map((w) => String(w).trim().toUpperCase()).filter(Boolean))];
 	if (!ws.length) return [];
-	const from = tsPlusMinutes(-days * 24 * 60);
+	const from = retentionFrom(days);
 	const res = await getTurso(env)
 		.prepare(`SELECT * FROM toto_macau_log WHERE website IN (${ws.map(() => "?").join(",")}) AND created_at >= ? AND period > 0 ORDER BY id DESC LIMIT 500`)
 		.bind(...ws, from)
@@ -256,7 +256,7 @@ export interface TotoEvent {
 	level: EvLevel;
 	msg: string;
 }
-const EV_KEEP = 400; // simpan 400 kejadian terakhir
+const EV_SAFETY_CAP = 20000; // pengaman ukuran tabel (penyimpanan utama = N hari, lihat pruneTotoMacau)
 const evStmt = (env: Env, website: string, kind: string, level: EvLevel, msg: string): LogStmt =>
 	getTurso(env)
 		.prepare(`INSERT INTO toto_macau_event (website, ts, kind, level, msg) VALUES (?, ?, ?, ?, ?)`)
@@ -267,7 +267,11 @@ export async function logTotoEvent(env: Env, website: string, kind: string, leve
 		await ensureTables(env);
 		const db = getTurso(env);
 		const stmts = [evStmt(env, website, kind, level, msg)];
-		if (kind === "end") stmts.push(db.prepare(`DELETE FROM toto_macau_event WHERE id <= (SELECT MAX(id) FROM toto_macau_event) - ?`).bind(EV_KEEP));
+		if (kind === "end") {
+			// hanya disimpan N hari (sys_auto_input_history_days, bawaan 7); pangkas tiap akhir putaran tanpa panggilan tambahan (ikut batch)
+			stmts.push(db.prepare(`DELETE FROM toto_macau_event WHERE ts < ?`).bind(retentionFrom(await getSys(env, "sys_auto_input_history_days"))));
+			stmts.push(db.prepare(`DELETE FROM toto_macau_event WHERE id <= (SELECT MAX(id) FROM toto_macau_event) - ?`).bind(EV_SAFETY_CAP));
+		}
 		await db.batch(stmts);
 	} catch {
 		/* log kegiatan tidak boleh menggagalkan proses */
@@ -278,8 +282,8 @@ export async function listTotoEvents(env: Env, websites: string[], limit = 60): 
 	const ws = [...new Set(websites.map((w) => String(w).trim().toUpperCase()).filter(Boolean))];
 	if (!ws.length) return { events: [], running: false, lastAt: "" };
 	const res = await getTurso(env)
-		.prepare(`SELECT * FROM toto_macau_event WHERE website IN (${ws.map(() => "?").join(",")}) OR website = '' ORDER BY id DESC LIMIT ?`)
-		.bind(...ws, limit)
+		.prepare(`SELECT * FROM toto_macau_event WHERE (website IN (${ws.map(() => "?").join(",")}) OR website = '') AND ts >= ? ORDER BY id DESC LIMIT ?`)
+		.bind(...ws, retentionFrom(await getSys(env, "sys_auto_input_history_days")), limit)
 		.all<Record<string, unknown>>();
 	const events = (res.results ?? []).map((r) => ({ id: Number(r.id), website: String(r.website ?? ""), ts: String(r.ts ?? ""), kind: String(r.kind ?? ""), level: String(r.level ?? "INFO") as EvLevel, msg: String(r.msg ?? "") }));
 	// "sedang berjalan" = kejadian terbaru milik sebuah website adalah 'start'/'info' (belum 'end') dan masih segar (<3 menit)
@@ -288,6 +292,18 @@ export async function listTotoEvents(env: Env, websites: string[], limit = 60): 
 	for (const e of events) if (e.website && !latestByWeb.has(e.website)) latestByWeb.set(e.website, e);
 	const running = [...latestByWeb.values()].some((e) => e.kind !== "end" && e.ts >= fresh);
 	return { events, running, lastAt: events[0]?.ts ?? "" };
+}
+
+/** Hapus catatan Toto Macau yang lebih lama dari N hari (log per draw berdasarkan waktu draw; catatan gagal-baca/penanda putaran berdasarkan pembaruan terakhir; kejadian berdasarkan waktu). */
+export async function pruneTotoMacau(env: Env, days?: number): Promise<{ log: number; events: number }> {
+	await ensureTables(env);
+	const from = retentionFrom(days ?? (await getSys(env, "sys_auto_input_history_days")));
+	const db = getTurso(env);
+	const [a, b] = await db.batch([
+		db.prepare(`DELETE FROM toto_macau_log WHERE (period > 0 AND row_at <> '' AND row_at < ?) OR (period <= 0 AND updated_at < ?)`).bind(from, from),
+		db.prepare(`DELETE FROM toto_macau_event WHERE ts < ?`).bind(from),
+	]);
+	return { log: a.meta.changes, events: b.meta.changes };
 }
 
 type Cand = { username: string; sess: AdminSession };

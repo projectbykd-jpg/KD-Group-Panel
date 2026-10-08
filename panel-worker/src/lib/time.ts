@@ -6,6 +6,11 @@ export function tsNow(): string {
 	return new Date(Date.now() + OFFSET_MS).toISOString().slice(0, 19).replace("T", " ");
 }
 
+/** Batas awal penyimpanan riwayat: 00:00 WIB, N hari lalu ("yyyy-MM-dd 00:00:00"). Data lebih lama dari ini dianggap kedaluwarsa. */
+export function retentionFrom(days: number): string {
+	return new Date(Date.now() + OFFSET_MS - days * 86400_000).toISOString().slice(0, 10) + " 00:00:00";
+}
+
 /** "yyyy-MM-dd" di GMT+7. */
 export function dateKeyNow(): string {
 	return new Date(Date.now() + OFFSET_MS).toISOString().slice(0, 10);

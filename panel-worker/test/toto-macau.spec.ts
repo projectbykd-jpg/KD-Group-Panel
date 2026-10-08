@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: import("node:sqlite").DatabaseSync } }));
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
-import { ackTotoAlerts, listTotoEvents, listTotoLog, logTotoEvent, parseTotoRows, passIntervalMin, pendingTotoAlerts, resetTotoTablesFlag, totoDispatchTick, totoMacauRun } from "../src/lib/toto-macau";
+import { ackTotoAlerts, listTotoEvents, listTotoLog, logTotoEvent, parseTotoRows, passIntervalMin, pendingTotoAlerts, pruneTotoMacau, resetTotoTablesFlag, totoDispatchTick, totoMacauRun } from "../src/lib/toto-macau";
 import { openPanelZ, panelZPageCount, parsePanelZRows, type PanelZHandle } from "../src/senders/panelz";
 import { defaultAdminBase, resetAutoInputTablesFlag, saveSession, setEnabled } from "../src/lib/auto-input";
 import { resetSysCache, saveSys } from "../src/lib/settings";
@@ -463,6 +463,30 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 		resetSysCache();
 		for (let i = 0; i < 12; i++) if (!(await run({ fetchFn: pagedFetch(draws) })).more) break;
 		expect(pushed.length).toBeGreaterThan(10);
+	});
+	it("penyimpanan 7 hari: log & kejadian lebih lama dihapus (harian) dan tidak tampil; catatan baru tetap", async () => {
+		await listTotoLog(env, ["HUGOTOGEL"]); // pastikan tabel ada
+		const raw = turso.current!.raw;
+		const old = tsPlusMinutes(-9 * 24 * 60);
+		const recent = tsPlusMinutes(-2 * 24 * 60);
+		const insLog = raw.prepare(`INSERT INTO toto_macau_log (website, game, period, slot_key, market, number, row_at, status, created_at, updated_at) VALUES ('HUGOTOGEL','m17',?,'k','TOTOMACAU-13','1234',?,'SENT',?,?)`);
+		insLog.run(1, old, old, old); // draw 9 hari lalu
+		insLog.run(2, recent, recent, recent); // draw 2 hari lalu
+		raw.prepare(`INSERT INTO toto_macau_log (website, game, period, slot_key, status, created_at, updated_at) VALUES ('HUGOTOGEL','m17',-20260101,'x','FAILED',?,?)`).run(old, old); // catatan gagal-baca lama
+		raw.prepare(`INSERT INTO toto_macau_log (website, game, period, slot_key, status, created_at, updated_at) VALUES ('HUGOTOGEL','pass',0,'','PASS',?,?)`).run(recent, tsPlusMinutes(-1)); // penanda putaran aktif
+		const insEv = raw.prepare(`INSERT INTO toto_macau_event (website, ts, kind, level, msg) VALUES ('HUGOTOGEL', ?, 'info', 'INFO', ?)`);
+		insEv.run(old, "kejadian lama");
+		insEv.run(recent, "kejadian baru");
+		// belum dipangkas: yang lama sudah tidak ditampilkan
+		expect((await listTotoLog(env, ["HUGOTOGEL"])).map((r) => r.period)).toEqual([2]);
+		expect((await listTotoEvents(env, ["HUGOTOGEL"])).events.map((e) => e.msg)).toEqual(["kejadian baru"]);
+		const r = await pruneTotoMacau(env);
+		expect(r).toEqual({ log: 2, events: 1 });
+		expect((raw.prepare(`SELECT period FROM toto_macau_log ORDER BY period`).all() as { period: number }[]).map((x) => x.period)).toEqual([0, 2]);
+		// pangkas ikut berjalan di akhir tiap putaran (kejadian lama lain ikut terhapus)
+		insEv.run(old, "kejadian lama 2");
+		await logTotoEvent(env, "HUGOTOGEL", "end", "INFO", "Selesai");
+		expect((raw.prepare(`SELECT msg FROM toto_macau_event ORDER BY id`).all() as { msg: string }[]).map((x) => x.msg)).toEqual(["kejadian baru", "Selesai"]);
 	});
 	it("mode 1: membandingkan saja -- tidak ada yang dikirim; status per (pasaran, tanggal)", async () => {
 		addUser("Op");

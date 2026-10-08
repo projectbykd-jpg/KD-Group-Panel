@@ -35,6 +35,7 @@ import {
 	autoInputRun,
 	autoInputRetryTick,
 	dispatchTotoMacau,
+	pruneAutoPrediksiHistory,
 	autoInputAlerts,
 	autoInputTotoLog,
 	autoInputTotoRun,
@@ -164,6 +165,7 @@ async function dailyPrune(env: Env): Promise<number | "skip"> {
 		/* lanjut */
 	}
 	await pruneExpiredSessions(env).catch(() => {});
+	await pruneAutoPrediksiHistory(env).catch((e) => console.error("prune auto prediksi error", e)); // job & catatan Toto Macau: simpan N hari (bawaan 7)
 	return pruneActivityLogCron(env).catch(() => 0);
 }
 

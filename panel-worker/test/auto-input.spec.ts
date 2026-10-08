@@ -4,7 +4,7 @@ const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: im
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
 import { autoInputAfterSend, autoInputRetryTick, runQueuedJob, type AutoInputNotice } from "../src/api/auto-input";
-import { pendingFailureAlerts, ackFailureAlerts, claimJob, parseCookieInput, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
+import { pruneAutoInputJobs, pendingFailureAlerts, ackFailureAlerts, claimJob, parseCookieInput, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
 import { frameSources, parseAngkaPage, readTopRow, parseHitungPage, runAutoInput, buildPayload, parseForms } from "../src/lib/auto-input-run";
 import { processText } from "../src/lib/parser";
 import { fakeD1, fakeEnv } from "./helpers/fake-env";
@@ -605,6 +605,21 @@ describe("autoInputAfterSend (DB)", () => {
 		const jobs = await listJobs(env, "Op");
 		expect(jobs).toHaveLength(50);
 		expect(await listJobs(env, "Op", 30)).toHaveLength(51);
+	});
+	it("pemangkasan harian: job lebih lama dari 7 hari dihapus, yang masih RUNNING dan yang baru tetap", async () => {
+		await listJobs(env, "Op");
+		const wib = (msAgo: number) => new Date(Date.now() + 7 * 3600_000 - msAgo).toISOString().slice(0, 19).replace("T", " ");
+		const ins = turso.current!.raw.prepare(
+			`INSERT INTO auto_input_job (username, website, market, result_key, status, stage, created_at, updated_at) VALUES ('Op', 'HUGOTOGEL', 'HK', ?, ?, '', ?, ?)`,
+		);
+		ins.run("baru", "DONE", wib(86400_000), wib(86400_000));
+		ins.run("enam-hari", "FAILED", wib(6 * 86400_000), wib(6 * 86400_000));
+		ins.run("lama-selesai", "DONE", wib(9 * 86400_000), wib(9 * 86400_000));
+		ins.run("lama-gagal", "FAILED", wib(10 * 86400_000), wib(10 * 86400_000));
+		ins.run("lama-jalan", "RUNNING", wib(9 * 86400_000), wib(9 * 86400_000));
+		expect(await pruneAutoInputJobs(env)).toBe(2);
+		const left = (turso.current!.raw.prepare(`SELECT result_key FROM auto_input_job ORDER BY result_key`).all() as { result_key: string }[]).map((r) => r.result_key);
+		expect(left).toEqual(["baru", "enam-hari", "lama-jalan"]);
 	});
 	it("user lain tidak bisa menjalankan job milik orang lain", async () => {
 		const m = mockSite();
