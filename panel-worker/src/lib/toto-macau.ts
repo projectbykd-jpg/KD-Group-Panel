@@ -27,6 +27,8 @@ import { logActivity } from "./activity";
 
 export interface TotoGame {
 	game: "m17" | "m51";
+	/** nama game di tautan pagination admin (&game=...) */
+	name: string;
 	path: string;
 	title: RegExp;
 	digits: number;
@@ -36,6 +38,7 @@ export interface TotoGame {
 export const TOTO_GAMES: TotoGame[] = [
 	{
 		game: "m17",
+		name: "Toto Macau",
 		path: "admin_angka.php?sar=m17&game=Toto%20Macau",
 		title: /Daftar\s+Nomor\s+Toto\s+Macau\b/i,
 		digits: 4,
@@ -43,6 +46,7 @@ export const TOTO_GAMES: TotoGame[] = [
 	},
 	{
 		game: "m51",
+		name: "Toto Macao 5D",
 		path: "admin_angka.php?sar=m51&game=Toto%20Macao%205D",
 		title: /Daftar\s+Nomor\s+Toto\s+Macao\s+5D\b/i,
 		digits: 5,
@@ -53,7 +57,9 @@ export const TOTO_GAMES: TotoGame[] = [
 export const TOTO_FRESH_MIN = 120; // hanya baris yang terbit <= 2 jam lalu
 export const TOTO_MAX_ATTEMPTS = 3; // percobaan kirim ke Panel-Z per draw
 const SUBREQ_BUDGET = 30; // batas panggilan jaringan per putaran (batas 50 subrequest per invocation)
-const LOOKBACK_DAYS = 3; // baris admin yang diperiksa: 3 hari terakhir (halaman 1 admin = 20 baris)
+const ADMIN_PAGE_SIZE = 20; // admin_angka.php menampilkan 20 baris per halaman (tombol [ >> ] = start=20&end=40 ...)
+const ADMIN_MAX_PAGES = 5;
+const PANELZ_PAGES_CAP = 12;
 
 export interface TotoRow {
 	no: number;
@@ -167,7 +173,7 @@ export async function listTotoLog(env: Env, websites: string[], days = 3): Promi
 	if (!ws.length) return [];
 	const from = tsPlusMinutes(-days * 24 * 60);
 	const res = await getTurso(env)
-		.prepare(`SELECT * FROM toto_macau_log WHERE website IN (${ws.map(() => "?").join(",")}) AND created_at >= ? AND period > 0 ORDER BY id DESC LIMIT 200`)
+		.prepare(`SELECT * FROM toto_macau_log WHERE website IN (${ws.map(() => "?").join(",")}) AND created_at >= ? AND period > 0 ORDER BY id DESC LIMIT 500`)
 		.bind(...ws, from)
 		.all<Record<string, unknown>>();
 	return (res.results ?? []).map(toLog);
@@ -199,7 +205,7 @@ export async function ackTotoAlerts(env: Env, ids: number[]): Promise<void> {
 // ---------------------------------------------------------------------------
 // Rekonsiliasi: admin AG/AGWL  <->  Panel-Z, per website, per (pasaran, TANGGAL)
 // ---------------------------------------------------------------------------
-export type PanelOpen = (cfg: PanelZCfg, opts?: { sinceDate?: string }) => Promise<PanelZHandle | string>;
+export type PanelOpen = (cfg: PanelZCfg, opts?: { sinceDate?: string; maxPages?: number }) => Promise<PanelZHandle | string>;
 export interface TotoDeps {
 	fetchFn?: Fetcher;
 	panel?: PanelOpen;
@@ -371,14 +377,14 @@ async function reconcileWebsite(
 	cands: Cand[],
 	pz: PanelZCfg,
 	mode: number,
-	deps: { f: Fetcher; panel: PanelOpen; nowMs: number; correct: boolean },
+	deps: { f: Fetcher; panel: PanelOpen; nowMs: number; correct: boolean; lookback: number; maxCorrect: number },
 	budget: { used: number },
 	sum: TotoSummary,
 ): Promise<void> {
 	const db = getTurso(env);
 	const buf: LogStmt[] = [];
 	const today = dayOf(deps.nowMs);
-	const since = dayOf(deps.nowMs, LOOKBACK_DAYS);
+	const since = dayOf(deps.nowMs, deps.lookback);
 	const adminRows: AdminRow[] = [];
 	let reader = cands[0].username;
 
@@ -416,7 +422,25 @@ async function reconcileWebsite(
 			sum.failed++;
 			continue;
 		}
-		for (const r of rows) {
+		// halaman admin berikutnya ([ >> ]) selama baris paling lama di halaman terakhir masih dalam rentang
+		const sessOk = cands.find((c) => c.username === reader)!.sess;
+		const all = new Map(rows.map((r) => [r.period, r]));
+		let pageRows = rows;
+		for (let pg = 1; pg < ADMIN_MAX_PAGES; pg++) {
+			const oldest = pageRows.reduce((m, r) => (m && m < r.date ? m : r.date), "");
+			if (!oldest || oldest < since || pageRows.length < ADMIN_PAGE_SIZE) break;
+			budget.used++;
+			try {
+				pageRows = parseTotoRows(await adminReq(deps.f, sessOk, `admin_angka.php?start=${pg * ADMIN_PAGE_SIZE}&end=${(pg + 1) * ADMIN_PAGE_SIZE}&sar=${game.game}&game=${encodeURIComponent(game.name)}`));
+			} catch (e) {
+				buf.push(evStmt(env, website, "info", "WARN", `Admin ${gameLabel(game)}: halaman ${pg + 1} gagal dibaca (${e instanceof Error ? e.message : String(e)}) — memakai halaman yang sudah terbaca`));
+				break;
+			}
+			if (!pageRows.length) break;
+			for (const r of pageRows) if (!all.has(r.period)) all.set(r.period, r);
+			buf.push(evStmt(env, website, "info", "INFO", `Admin ${gameLabel(game)}: halaman ${pg + 1} dibaca (${pageRows.length} baris, terlama ${pageRows.reduce((m, r) => (m && m < r.date ? m : r.date), "")})`));
+		}
+		for (const r of all.values()) {
 			if (r.hitung !== "yes" || r.date < since || r.date > today) continue; // belum dihitung admin / terlalu lama / tanggal aneh
 			const market = game.slots[r.hour];
 			const bad = !market ? `jam ${r.hour} bukan jam draw yang dikenal` : !new RegExp(`^\\d{${game.digits}}$`).test(r.number) ? `angka "${r.number}" bukan ${game.digits} digit` : "";
@@ -437,7 +461,7 @@ async function reconcileWebsite(
 
 	// Panel-Z: masuk sekali, baca daftar result.
 	sum.net = true;
-	const panel = await deps.panel(pz, { sinceDate: since });
+	const panel = await deps.panel(pz, { sinceDate: since, maxPages: PANELZ_PAGES_CAP });
 	budget.used += typeof panel === "string" ? 2 : (panel.fetches ?? 2);
 	if (typeof panel === "string") {
 		buf.push(evStmt(env, website, "info", "ERR", `Panel-Z tidak bisa dibuka: ${panel}`));
@@ -461,9 +485,17 @@ async function reconcileWebsite(
 	budget.used++;
 	const curRes = await db
 		.prepare(`SELECT game, period, status, attempts, updated_at FROM toto_macau_log WHERE website = ? AND period > 0 AND created_at >= ?`)
-		.bind(website, tsPlusMinutes(-(LOOKBACK_DAYS + 2) * 24 * 60))
+		.bind(website, tsPlusMinutes(-(deps.lookback + 2) * 24 * 60))
 		.all<{ game: string; period: number; status: string; attempts: number; updated_at: string }>();
 	const curMap = new Map((curRes.results ?? []).map((r) => [`${r.game}|${r.period}`, r]));
+	// Pengaman koreksi massal: bila terlalu banyak angka Panel-Z yang berbeda sekaligus, itu tanda pemetaan keliru (bukan salah ketik) -> jangan ditimpa
+	const diffCount = adminRows.filter((a) => {
+		const t = zRows.filter((z) => z.market === a.market && z.date === a.date);
+		return t.length === 1 && t[0].filled && t[0].value !== a.number;
+	}).length;
+	const bulkHold = deps.correct && diffCount > deps.maxCorrect;
+	if (bulkHold) buf.push(evStmt(env, website, "info", "ERR", `${diffCount} angka Panel-Z berbeda dari admin (batas koreksi massal ${deps.maxCorrect}) — kemungkinan pemetaan tanggal/pasaran keliru; TIDAK dikoreksi otomatis, cek manual`));
+	const correctNow = deps.correct && !bulkHold;
 	for (const a of adminRows) {
 		const base = { website, game: a.game.game, period: a.period, slotKey: `${a.date} ${String(a.hour).padStart(2, "0")}`, market: a.market, number: a.number, rowAt: `${a.date} ${a.time}`, username: reader };
 		const targets = zRows.filter((z) => z.market === a.market && z.date === a.date);
@@ -484,7 +516,7 @@ async function reconcileWebsite(
 			continue;
 		}
 		const wrong = z.filled && z.value !== a.number; // angka admin dianggap benar: angka Panel-Z yang berbeda = salah
-		if (wrong && !deps.correct) {
+		if (wrong && !correctNow) {
 			await upsertLog(env, { ...base, status: "CONFLICT", detail: `BEDA: Panel-Z berisi ${z.value}, admin ${a.number} — tidak ditimpa, cek manual` }, buf);
 			sum.conflict++;
 			buf.push(evStmt(env, website, "info", "ERR", `${a.market} ${a.date}: BEDA — Panel-Z ${z.value}, admin ${a.number} (tidak ditimpa)`));
@@ -584,7 +616,7 @@ const HOT_MIN = 360; // baris yang menunggu (belum dibuat Panel-Z / belum terkir
 async function hotWebsites(env: Env, mode: number): Promise<Set<string>> {
 	if (mode < 2) return new Set();
 	const res = await getTurso(env)
-		.prepare(`SELECT DISTINCT website FROM toto_macau_log WHERE period > 0 AND status IN ('MISSING','PENDING','SENDING','FAILED') AND created_at >= ?`)
+		.prepare(`SELECT DISTINCT website FROM toto_macau_log WHERE period > 0 AND status IN ('MISSING','PENDING','SENDING','FAILED') AND row_at >= ?`)
 		.bind(tsPlusMinutes(-HOT_MIN))
 		.all<{ website: string }>();
 	return new Set((res.results ?? []).map((r) => String(r.website)));
@@ -652,6 +684,8 @@ export async function totoMacauRun(env: Env, opts: { only?: string[]; exclude?: 
 		.sort((x, y) => (last.get(x) ?? "").localeCompare(last.get(y) ?? ""))
 		.slice(0, opts.maxSites ?? 4);
 	const correct = mode === 2 && (await getSys(env, "sys_totomacau_correct")) === 1;
+	const lookback = await getSys(env, "sys_totomacau_lookback_days");
+	const maxCorrect = await getSys(env, "sys_totomacau_max_correct");
 	const budget = { used: 0 };
 	for (const website of due) {
 		if (budget.used >= SUBREQ_BUDGET) break;
@@ -662,7 +696,7 @@ export async function totoMacauRun(env: Env, opts: { only?: string[]; exclude?: 
 		await passMark(env, website);
 		let crashed = "";
 		try {
-			await reconcileWebsite(env, website, byWebsite.get(website)!, accounts.get(website)!.panelz, mode, { f, panel, nowMs, correct }, budget, sum);
+			await reconcileWebsite(env, website, byWebsite.get(website)!, accounts.get(website)!.panelz, mode, { f, panel, nowMs, correct, lookback, maxCorrect }, budget, sum);
 		} catch (e) {
 			crashed = e instanceof Error ? e.message : String(e);
 		}
