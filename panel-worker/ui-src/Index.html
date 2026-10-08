@@ -538,7 +538,7 @@
             
             <div class="pretty-table-wrap">
               <div class="overflow-x-auto">
-                <table class="pretty-table">
+                <table class="pretty-table stack-sm">
                   <thead>
                     <tr>
                       <th>Nama Prediksi</th>
@@ -806,7 +806,7 @@
               <button onclick="loadActiveSessions()" class="glass-inner px-4 py-3 rounded-2xl text-[10px] font-bold shrink-0"><i class="fa-solid fa-rotate mr-2"></i>REFRESH SESI</button>
             </div>
             <div class="pretty-table-wrap overflow-x-auto">
-              <table class="pretty-table" style="min-width:720px">
+              <table class="pretty-table stack-sm" style="min-width:720px">
                 <thead><tr>
                   <th>Username</th><th>Role</th><th>Website</th>
                   <th class="text-center">Sesi</th><th>Login</th><th>Sesi Berakhir</th><th class="text-center">Auto Post</th>
@@ -825,7 +825,7 @@
             </div>
             <div class="flex flex-col sm:flex-row gap-3"><input id="userSearch" oninput="filterUserRows()" class="glass-inner rounded-2xl px-4 py-3 text-xs flex-1" placeholder="Cari username, nama, website, role..."><select id="userRoleFilter" onchange="filterUserRows()" class="glass-inner rounded-2xl px-4 py-3 text-xs"><option value="">Semua Role</option><option>ADMIN</option><option>OPERATOR</option><option>VIEWER</option><option>BOT</option></select><select id="userStatusFilter" onchange="filterUserRows()" class="glass-inner rounded-2xl px-4 py-3 text-xs"><option value="">Semua Status</option><option>AKTIF</option><option>NONAKTIF</option><option>TERKUNCI</option></select></div>
             <div id="userManageStatus" class="text-xs text-slate-400">Memuat daftar user...</div>
-            <div class="admin-users-table-wrap"><table class="admin-users-table"><thead><tr><th>Username</th><th>Nama</th><th>Website</th><th>Role</th><th>Status</th><th>Telegram</th><th>LinkTree</th><th>Panel-Z</th><th>Login Terakhir</th><th>Aksi</th></tr></thead><tbody id="userTableBody"></tbody></table></div>
+            <div class="admin-users-table-wrap"><table class="admin-users-table stack-sm"><thead><tr><th>Username</th><th>Nama</th><th>Website</th><th>Role</th><th>Status</th><th>Telegram</th><th>LinkTree</th><th>Panel-Z</th><th>Login Terakhir</th><th>Aksi</th></tr></thead><tbody id="userTableBody"></tbody></table></div>
           </div>
           </div>
 

@@ -1389,3 +1389,21 @@ body { position: relative; }
 .center-notice-card.center-notice-alert .center-notice-title { color: #fca5a5; }
 .center-notice-card.center-notice-alert .center-notice-icon { background: #ef4444 !important; color: #fff !important; }
 .center-notice-card.center-notice-alert .center-notice-message { white-space: pre-line; }
+
+/* HP: tabel ber-tombol aksi (Prediksi, Users) jadi kartu -- tombol tidak lagi tersembunyi di luar layar kanan. */
+@media (max-width: 640px) {
+  table.stack-sm { min-width: 0 !important; width: 100% !important; table-layout: auto !important; }
+  table.stack-sm thead { display: none; }
+  table.stack-sm, table.stack-sm tbody { display: block; width: 100%; }
+  table.stack-sm tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 12px; padding: 12px 14px; border-bottom: 1px solid var(--ui-border, rgba(255,255,255,.07)); }
+  table.stack-sm tbody td { display: block; width: auto !important; padding: 0 !important; border: 0 !important; text-align: left !important; min-width: 0; max-width: none !important; white-space: normal !important; overflow-wrap: anywhere; }
+  table.stack-sm tbody td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 2px; font-size: 9.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ui-text-3, #7f8da4); }
+  table.stack-sm tbody td.stack-full, table.stack-sm tbody td.table-empty-cell, table.stack-sm tbody td[colspan] { grid-column: 1 / -1; }
+  table.stack-sm tbody td.stack-actions > div { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-start; }
+  table.stack-sm tbody td.stack-actions .prediction-btn { flex: 1 1 0; min-height: 40px; justify-content: center; }
+  table.stack-sm tbody td.stack-actions .admin-icon-btn { width: 44px; height: 40px; }
+  .admin-users-table-wrap:has(table.stack-sm), .pretty-table-wrap:has(table.stack-sm), .pretty-table-wrap:has(table.stack-sm) .overflow-x-auto, .lap-jobs-table-wrap:has(table.stack-sm), .overflow-x-auto:has(> table.stack-sm), .overflow-auto:has(> table.stack-sm) { overflow-x: visible !important; }
+  table.stack-sm td.lap-job-msg { min-width: 0 !important; }
+  /* Kartu Aktivitas: baris "ISI / DATA" kosong tidak ditampilkan (kartu jauh lebih pendek). */
+  .activity-log-row > td:nth-child(6):has(> span.text-slate-600:only-child) { display: none !important; }
+}
