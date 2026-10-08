@@ -27,6 +27,7 @@ import {
 	adminSetAutoPost,
 	pruneActivityLogCron,
 } from "./api/admin";
+import { totoMacauTick } from "./lib/toto-macau";
 import {
 	autoInputClearJob,
 	autoInputDeleteSession,
@@ -34,6 +35,7 @@ import {
 	autoInputRun,
 	autoInputRetryTick,
 	autoInputAlerts,
+	autoInputTotoLog,
 	autoInputAckAlerts,
 	autoInputSaveSession,
 	autoInputSetEnabled,
@@ -217,6 +219,7 @@ const ROUTES: Record<string, Handler> = {
 	autoInputClearJob: (env, b) => autoInputClearJob(env, s(b.token), rowId(b.jobId)),
 	autoInputRun: (env, b) => autoInputRun(env, s(b.token), rowId(b.jobId)),
 	autoInputAlerts: (env, b) => autoInputAlerts(env, s(b.token)),
+	autoInputTotoLog: (env, b) => autoInputTotoLog(env, s(b.token)),
 	autoInputAckAlerts: (env, b) => autoInputAckAlerts(env, s(b.token), Array.isArray(b.ids) ? (b.ids as unknown[]).map(Number) : []),
 	autoInputTest: (env, b) => autoInputTest(env, s(b.token), s(b.website), s(b.market)),
 
@@ -731,7 +734,12 @@ export default {
 				console.error("auto-input retry error", e);
 				return false;
 			});
-			if (!retried) await investPump(env).catch((e) => console.error("invest pump error", e));
+			// Auto check Toto Macau/5D (baca admin -> catat / posting Panel-Z). Punya batas bacaan sendiri; bila ada panggilan jaringan, pump Invest ikut menunggu.
+			const toto = retried ? false : await totoMacauTick(env).catch((e) => {
+				console.error("toto macau tick error", e);
+				return false;
+			});
+			if (!retried && !toto) await investPump(env).catch((e) => console.error("invest pump error", e));
 		}
 	},
 } satisfies ExportedHandler<Env>;

@@ -4296,6 +4296,7 @@
             Hanya website yang akunmu boleh akses yang muncul di bawah. Ambil <b>PHPSESSID</b> dari Chrome yang sedang login admin (F12 → Application → Cookies), tempel, <b>Simpan</b>, lalu klik <b>Uji</b> sebelum mengaktifkan. Sesi bisa habis kapan saja — kalau habis, hasilnya <b>gagal sebelum menyentuh admin</b> dan kamu input manual. Nilai PHPSESSID tidak pernah ditampilkan ulang.
           </div>
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">${rows}</div>
+          <div id="aiTotoBox" class="glass-inner rounded-2xl border border-white/5 p-3 text-xs text-slate-400">Memuat Auto Check Toto Macau…</div>
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="text-[11px] font-extrabold text-slate-300 tracking-wider">RIWAYAT ${Number(st.historyDays) || 7} HARI TERAKHIR <span id="aiJobsCount" class="text-slate-500 font-semibold"></span></div>
             <input id="aiJobsSearch" type="search" autocomplete="off" value="${esc(aiJobsQuery)}" oninput="autoInputSearch(this.value)" placeholder="Cari website, pasaran, angka, status (GAGAL/SELESAI), keterangan…" class="glass-inner border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none w-full sm:w-80">
@@ -4305,6 +4306,7 @@
           </div>
         </div>`;
       autoInputSearch(aiJobsQuery); // isi hitungan 'x dari y job'
+      autoInputTotoLoad();
     }
 
     let aiJobsState = { jobs: [], days: 7, retryMax: 0, retryGap: 2, stColor: {}, stLabel: {} };
@@ -4341,6 +4343,39 @@
     }
 
     // Peringatan terakhir Auto Prediksi: job tetap GAGAL setelah semua percobaan ulang otomatis -> popup tengah layar di menu mana pun.
+    // Auto Check Toto Macau / Toto Macao 5D: baca angka di admin lalu (mode 2) posting ke Panel-Z. Tampilan = catatan per draw.
+    let aiTotoAt = 0;
+    function autoInputTotoLoad(force) {
+      if (!force && Date.now() - aiTotoAt < 30000) { autoInputTotoPaint(); return; }
+      aiTotoAt = Date.now();
+      google.script.run
+        .withSuccessHandler(r => { aiTotoData = (r && r.success) ? r : null; autoInputTotoPaint(); })
+        .withFailureHandler(() => { aiTotoData = null; autoInputTotoPaint(); })
+        .autoInputTotoLog(currentSessionToken);
+    }
+    let aiTotoData = null;
+    function autoInputTotoPaint() {
+      const box = document.getElementById('aiTotoBox');
+      if (!box) return;
+      const esc = escapeHtml;
+      const d = aiTotoData;
+      if (!d) { box.textContent = 'Auto Check Toto Macau belum bisa dimuat.'; return; }
+      const modeTxt = d.mode === 2 ? '<span class="text-emerald-400 font-extrabold">MODE 2 · CATAT + POSTING KE PANEL-Z</span>' : d.mode === 1 ? '<span class="text-amber-300 font-extrabold">MODE 1 · HANYA BACA &amp; CATAT (belum posting)</span>' : '<span class="text-slate-500 font-extrabold">MATI</span>';
+      const stCls = { SENT: 'text-emerald-400', RECORDED: 'text-sky-300', FAILED: 'text-rose-400', SKIPPED: 'text-slate-400', SENDING: 'text-amber-300' };
+      const stTxt = { SENT: 'TERKIRIM', RECORDED: 'TERCATAT', FAILED: 'GAGAL', SKIPPED: 'DILEWATI', SENDING: 'MENGIRIM' };
+      const rows = (d.rows || []).slice(0, 40).map(r => `<tr class="border-t border-white/5 align-top">
+          <td class="p-2 text-[10px] text-slate-400 whitespace-nowrap" data-label="Tanggal & jam draw">${esc(r.rowAt)}</td>
+          <td class="p-2 text-xs font-bold text-cyan-300" data-label="Website">${esc(r.website)}</td>
+          <td class="p-2 text-xs" data-label="Pasaran tujuan">${esc(r.market || '-')}<div class="text-[10px] text-slate-500">periode ${esc(r.period)}</div></td>
+          <td class="p-2 text-xs font-mono font-extrabold text-amber-300" data-label="Angka">${esc(r.number)}</td>
+          <td class="p-2 text-[10px] font-extrabold ${stCls[r.status] || ''}" data-label="Status">${stTxt[r.status] || esc(r.status)}</td>
+          <td class="p-2 text-[11px] text-slate-300 stack-full" data-label="Keterangan">${esc(r.detail)}${r.attempts ? ' (' + Number(r.attempts) + '/' + Number(d.maxAttempts) + ' percobaan)' : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="p-3 text-center text-slate-500">Belum ada draw tercatat (3 hari terakhir).</td></tr>';
+      box.innerHTML = `<div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <div class="text-[11px] font-extrabold text-slate-300 tracking-wider">AUTO CHECK TOTO MACAU &amp; TOTO MACAO 5D</div><div class="text-[10px]">${modeTxt}</div></div>
+        <div class="text-[11px] text-slate-400 leading-relaxed mb-2">Membaca daftar nomor di admin AG/AGWL memakai PHPSESSID tersimpan akun yang punya izin Panel-Z &amp; menu Result. Hanya angka berstatus <b>Hitung: Yes</b> (tanggal, jam &amp; angka dari admin) yang diproses, satu kali per draw per website. Mode diatur admin di Pengaturan Sistem.</div>
+        <div class="overflow-auto rounded-xl border border-white/5" style="max-height:40vh"><table class="w-full text-left stack-sm"><thead><tr class="text-[10px] text-slate-400 uppercase tracking-wider"><th class="p-2">Tanggal &amp; jam draw</th><th class="p-2">Website</th><th class="p-2">Pasaran tujuan</th><th class="p-2">Angka</th><th class="p-2">Status</th><th class="p-2">Keterangan</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    }
+
     let aiAlertBusy = false;
     function autoInputAlertTick() {
       if (aiAlertBusy || document.hidden || !currentSessionToken || !currentUser || !currentProfile) return;

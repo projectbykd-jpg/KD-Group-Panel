@@ -52,6 +52,7 @@ const ARG_MAP = {
 	autoInputTest: ["token", "website", "market"],
 	autoInputRun: ["token", "jobId"],
 	autoInputAlerts: ["token"],
+	autoInputTotoLog: ["token"],
 	autoInputAckAlerts: ["token", "ids"],
 	getPredictionStatusData: ["token"],
 	generateClosingPredictionCopy: ["token", "slot"],
