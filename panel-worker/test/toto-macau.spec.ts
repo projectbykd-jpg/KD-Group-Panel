@@ -387,6 +387,7 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 		// ada baris MENUNGGU (tercatat baru-baru ini) -> 3 menit
 		const now = tsPlusMinutes(0);
 		turso.current!.raw.prepare(`INSERT INTO toto_macau_log (website, game, period, slot_key, status, created_at, updated_at) VALUES ('HUGOTOGEL','m17',99,'k','MISSING',?,?)`).run(now, now);
+		turso.current!.raw.prepare(`UPDATE toto_macau_log SET row_at = ? WHERE period = 99`).run(tsPlusMinutes(-30)); // draw 30 menit lalu
 		expect(await totoDispatchTick(env, dispatch, t0 + 35 * 60_000)).toBe(true);
 		expect(calls.length).toBe(3);
 		await setMode(0);
@@ -396,6 +397,72 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 		expect(await totoDispatchTick(env, async () => { throw new Error("token kosong"); }, t0 + 400 * 60_000)).toBe(true);
 		const ev = await listTotoEvents(env, ["HUGOTOGEL"], 10);
 		expect(ev.events[0].msg).toMatch(/Gagal memicu GitHub Actions: token kosong/);
+	});
+	// 11 hari draw Toto Macau (6/hari), terbaru dulu, 20 baris per halaman admin ([ >> ] = start=20&end=40 ...)
+	function manyDraws() {
+		const rows: [string, string, string, string][] = [];
+		let per = 20000;
+		for (let day = 8; day >= -2; day--) {
+			const d = new Date(Date.UTC(2026, 9, day)); // 8 Oct turun ke 28 Sep
+			const dd = String(d.getUTCDate()).padStart(2, "0");
+			const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+			for (const h of [23, 22, 19, 16, 13, 0]) rows.push([`${dd}-${mm}-2026 ${String(h).padStart(2, "0")}:10:00`, String(per--), String(1000 + (per % 9000)), "Yes"]);
+		}
+		return rows;
+	}
+	const pagedFetch = (draws: [string, string, string, string][]) => async (url: string) => {
+		adminHits.push(url);
+		const st = Number(new URL(url).searchParams.get("start") ?? 0);
+		if (url.includes("sar=m17")) return new Response(adminPage("Toto Macau", draws.slice(st, st + 20)), { status: 200 });
+		return new Response(adminPage("Toto Macao 5D", m51.slice(st, st + 20)), { status: 200 });
+	};
+	const zAllDays = (value: (market: string, date: string) => string): ZRow[] => {
+		const out: ZRow[] = [];
+		let id = 5000;
+		for (let day = 9; day >= -2; day--) {
+			const d = new Date(Date.UTC(2026, 9, day));
+			const date = d.toISOString().slice(0, 10);
+			for (const mk of ["TOTOMACAU-00", "TOTOMACAU-13", "TOTOMACAU-16", "TOTOMACAU-19", "TOTOMACAU-22", "TOTOMACAU-23"]) out.push({ id: id++, market: mk, date, value: value(mk, date) });
+		}
+		return out;
+	};
+	it("admin dibaca mundur lewat tombol [ >> ] sampai 7 hari; berhenti begitu halaman melewati batas; baris lebih lama tidak tersentuh", async () => {
+		await addUser("tester");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("tester");
+		await setMode(2);
+		zRows = zAllDays(() => "");
+		const draws = manyDraws();
+		for (let i = 0; i < 12; i++) if (!(await run({ fetchFn: pagedFetch(draws) })).more) break;
+		const m17Hits = adminHits.filter((u) => u.includes("sar=m17")).map((u) => new URL(u).searchParams.get("start") ?? "0");
+		expect(m17Hits).toContain("20");
+		expect(m17Hits).toContain("40");
+		expect(m17Hits).not.toContain("60"); // halaman 3 sudah melewati batas 7 hari
+		const find = (mk: string, date: string) => zRows.find((r) => r.market === mk && r.date === date)!;
+		expect(find("TOTOMACAU-13", "2026-10-08").value).not.toBe(""); // halaman 1
+		expect(find("TOTOMACAU-16", "2026-10-04").value).not.toBe(""); // halaman 2
+		expect(find("TOTOMACAU-22", "2026-10-02").value).not.toBe(""); // halaman 3 (hari ke-7)
+		expect(find("TOTOMACAU-13", "2026-10-01").value).toBe(""); // di luar 7 hari
+		expect(find("TOTOMACAU-13", "2026-09-30").value).toBe("");
+	});
+	it("pengaman koreksi massal: terlalu banyak angka berbeda sekaligus = kemungkinan pemetaan keliru -> TIDAK dikoreksi, ditandai & diperingatkan", async () => {
+		await addUser("tester");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("tester");
+		await setMode(2);
+		zRows = zAllDays(() => "0000"); // semua terisi angka yang berbeda dari admin (mis. pemetaan tanggal bergeser)
+		const draws = manyDraws();
+		await run({ fetchFn: pagedFetch(draws) });
+		expect(pushed).toHaveLength(0);
+		expect(Object.values(await byMarketDate()).filter((x) => x === "CONFLICT").length).toBeGreaterThan(10);
+		const ev = (await listTotoEvents(env, ["HUGOTOGEL"], 100)).events.map((e) => e.msg);
+		expect(ev.some((m) => /batas koreksi massal 10.*TIDAK dikoreksi otomatis/.test(m))).toBe(true);
+		expect((await pendingTotoAlerts(env, ["HUGOTOGEL"])).length).toBeGreaterThan(0);
+		// pemilik menaikkan batas (memang banyak yang salah) -> dikoreksi
+		await saveSys(env, { sys_totomacau_max_correct: 100 });
+		resetSysCache();
+		for (let i = 0; i < 12; i++) if (!(await run({ fetchFn: pagedFetch(draws) })).more) break;
+		expect(pushed.length).toBeGreaterThan(10);
 	});
 	it("mode 1: membandingkan saja -- tidak ada yang dikirim; status per (pasaran, tanggal)", async () => {
 		addUser("Op");

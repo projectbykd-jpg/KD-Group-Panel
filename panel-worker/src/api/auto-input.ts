@@ -255,7 +255,7 @@ export async function autoInputTotoLog(env: Env, token: string) {
 		success: true,
 		mode: await getSys(env, "sys_totomacau_mode"),
 		maxAttempts: TOTO_MAX_ATTEMPTS,
-		rows: await listTotoLog(env, s.profile.websites, 3),
+		rows: await listTotoLog(env, s.profile.websites, await getSys(env, "sys_totomacau_lookback_days")),
 		...(await listTotoEvents(env, s.profile.websites, 60)),
 	};
 }
