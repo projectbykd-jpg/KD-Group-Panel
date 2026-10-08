@@ -147,6 +147,30 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 		];
 	});
 
+	it("hemat subrequest: satu putaran penuh (9 baris admin) memakai jauh di bawah 50 panggilan Turso + jaringan", async () => {
+		await addUser("tester");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("tester");
+		await setMode(2);
+		const real = turso.current!.d1 as { prepare: (s: string) => unknown; batch: (s: unknown[]) => Promise<unknown> };
+		let calls = 0;
+		const origPrepare = real.prepare.bind(real);
+		const origBatch = real.batch.bind(real);
+		real.prepare = (sql: string) => {
+			const st = origPrepare(sql) as Record<string, (...a: unknown[]) => unknown>;
+			for (const k of ["run", "all", "first"]) {
+				const fn = st[k].bind(st);
+				st[k] = (...a: unknown[]) => (calls++, fn(...a));
+			}
+			return st;
+		};
+		real.batch = (s: unknown[]) => (calls++, origBatch(s));
+		await run();
+		expect(pushed.length).toBeGreaterThan(0);
+		// jaringan panel/admin: 2 halaman admin + 2 login/daftar Panel-Z + 1 baca ulang + 1 push per baris
+		const net = adminHits.length + 3 + pushed.length;
+		expect(calls + net).toBeLessThan(45);
+	});
 	it("mode 1: membandingkan saja -- tidak ada yang dikirim; status per (pasaran, tanggal)", async () => {
 		addUser("Op");
 		addPanelZ("HUGOTOGEL");
