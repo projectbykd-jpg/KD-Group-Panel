@@ -4310,6 +4310,7 @@
     let aiJobsState = { jobs: [], days: 7, retryMax: 0, retryGap: 2, stColor: {}, stLabel: {} };
     let aiJobsQuery = '';
     function autoInputJobsRows() {
+      const esc = escapeHtml;
       const S = aiJobsState;
       const q = aiJobsQuery.trim().toLowerCase();
       const words = q ? q.split(/\s+/) : [];
