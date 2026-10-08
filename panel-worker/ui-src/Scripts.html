@@ -4357,11 +4357,12 @@
       return arr;
     }
     function aiSortSelect() {
-      return '<label class="flex items-center gap-1 text-[10px] text-slate-400 font-bold">Urutkan<select onchange="autoInputSort(this.value)" class="glass-inner border border-white/10 rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none">' + AI_SORTS.map(o => '<option value="' + o[0] + '"' + (o[0] === aiSortKey ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select></label>';
+      return '<label class="flex items-center gap-1 text-[10px] text-slate-400 font-bold">Urutkan<select onfocus="aiSortFocusAt=Date.now()" onchange="autoInputSort(this.value)" class="glass-inner border border-white/10 rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none">' + AI_SORTS.map(o => '<option value="' + o[0] + '"' + (o[0] === aiSortKey ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select></label>';
     }
     function autoInputSort(v) {
       if (!AI_SORTS.some(o => o[0] === v)) return;
       aiSortKey = v;
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
       try { localStorage.setItem('kd_ai_sort', v); } catch (e) { /* abaikan */ }
       document.querySelectorAll('.ai-sort-host select').forEach(sel => { sel.value = v; });
       const tb = document.getElementById('aiJobsBody');
@@ -4378,6 +4379,7 @@
     // Auto Check Toto Macau / Toto Macao 5D: baca angka di admin lalu (mode 2) posting ke Panel-Z. Tampilan = catatan per draw.
     let aiTotoAt = 0;
     let aiTotoTimer = null;
+    let aiSortFocusAt = 0;
     let aiTotoBurstUntil = 0;
     function autoInputTotoSchedule() {
       clearTimeout(aiTotoTimer);
@@ -4387,7 +4389,8 @@
       aiTotoTimer = setTimeout(() => {
         if (!document.getElementById('aiTotoBox')) return; // pindah menu -> berhenti
         const ae = document.activeElement;
-        if (document.hidden || (ae && box.contains(ae))) { autoInputTotoSchedule(); return; } // tab tersembunyi / pilihan Urutkan sedang dibuka: jangan menggambar ulang
+        // tab tersembunyi atau pilihan Urutkan BARU dibuka (<8 dtk): jangan menggambar ulang. Fokus yang tertinggal di pilihan itu tidak boleh menghentikan pembaruan selamanya.
+        if (document.hidden || (ae && ae.tagName === 'SELECT' && box.contains(ae) && Date.now() - aiSortFocusAt < 8000)) { autoInputTotoSchedule(); return; }
         autoInputTotoLoad(true);
       }, fast ? 5000 : 30000);
     }
@@ -4435,8 +4438,12 @@
       const keepScroll = ['aiTotoLogScroll', 'aiTotoTblScroll'].map(id => { const el = document.getElementById(id); return [id, el ? el.scrollTop : 0]; });
       const evCol = { OK: 'text-emerald-300', WARN: 'text-amber-300', ERR: 'text-rose-400', INFO: 'text-slate-300' };
       const evRows = (d.events || []).slice(0, 40).map(e => `<div class="flex gap-2 py-0.5 border-t border-white/5 first:border-0"><span class="text-slate-500 whitespace-nowrap">${esc(String(e.ts || '').slice(5, 19))}</span><span class="${evCol[e.level] || 'text-slate-300'}">${e.website ? '<b class="text-cyan-300">' + esc(e.website) + '</b> · ' : ''}${esc(e.msg)}</span></div>`).join('') || '<div class="text-slate-500">Belum ada kegiatan tercatat. Tekan CEK &amp; ISI SEKARANG atau tunggu jadwal otomatis.</div>';
+      const trgAge = d.dispatchAt ? Math.round((Date.now() - Date.parse(String(d.dispatchAt).replace(' ', 'T') + '+07:00')) / 60000) : null;
+      const trgBad = d.mode > 0 && (trgAge === null || trgAge > 45);
+      const trgTxt = trgAge === null ? 'Pemicu cron: belum pernah memicu' : 'Pemicu cron terakhir ' + esc(String(d.dispatchAt).slice(5, 19)) + ' (' + (trgAge < 1 ? '<1' : trgAge) + ' menit lalu)';
+      const trgBadge = '<div class="text-[10px] mb-1 ' + (trgBad ? 'text-rose-400 font-extrabold' : 'text-slate-500') + '">' + (trgBad ? '⚠ PEMICU OTOMATIS TIDAK BERJALAN — ' : '') + trgTxt + (trgBad ? '. Cek token GitHub di Admin › Integrasi (TES KONEKSI) atau tekan CEK &amp; ISI SEKARANG.' : '') + '</div>';
       const runBadge = d.running ? '<span class="text-emerald-300 font-extrabold"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i>SEDANG BERJALAN</span>' : '<span class="text-slate-400 font-bold">Siaga' + (d.lastAt ? ' · terakhir aktif ' + esc(String(d.lastAt).slice(5, 19)) : '') + '</span>';
-      const logBox = `<div class="mb-2 rounded-xl border border-white/5 bg-black/20 p-2"><div class="flex items-center justify-between gap-2 mb-1 text-[10px]"><span class="font-extrabold text-slate-300 tracking-wider">LOG KEGIATAN</span>${runBadge}</div><div class="overflow-auto font-mono text-[10px] leading-snug" id="aiTotoLogScroll" style="max-height:26vh">${evRows}</div></div>`;
+      const logBox = `<div class="mb-2 rounded-xl border border-white/5 bg-black/20 p-2"><div class="flex items-center justify-between gap-2 mb-1 text-[10px]"><span class="font-extrabold text-slate-300 tracking-wider">LOG KEGIATAN</span>${runBadge}</div>${trgBadge}<div class="overflow-auto font-mono text-[10px] leading-snug" id="aiTotoLogScroll" style="max-height:26vh">${evRows}</div></div>`;
       box.innerHTML = `<div class="flex flex-wrap items-center justify-between gap-2 mb-2">
           <div class="text-[11px] font-extrabold text-slate-300 tracking-wider">AUTO CHECK TOTO MACAU &amp; TOTO MACAO 5D</div><div class="flex flex-wrap items-center gap-2"><span class="ai-sort-host">${aiSortSelect()}</span><span class="text-[10px]">${modeTxt}</span><button onclick="autoInputTotoRunNow(this)" class="bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-extrabold px-3 py-1.5 rounded-lg text-[10px]"><i class="fa-solid fa-bolt mr-1"></i>CEK &amp; ISI SEKARANG</button></div></div>
         ${logBox}

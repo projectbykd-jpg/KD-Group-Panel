@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: import("node:sqlite").DatabaseSync } }));
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
-import { ackTotoAlerts, listTotoEvents, listTotoLog, logTotoEvent, parseTotoRows, passIntervalMin, pendingTotoAlerts, pruneTotoMacau, resetTotoTablesFlag, totoDispatchTick, totoMacauRun } from "../src/lib/toto-macau";
+import { ackTotoAlerts, listTotoEvents, listTotoLog, logTotoEvent, parseTotoRows, passIntervalMin, pendingTotoAlerts, pruneTotoMacau, resetTotoTablesFlag, totoDispatchAt, totoDispatchTick, totoMacauRun } from "../src/lib/toto-macau";
 import { openPanelZ, panelZPageCount, parsePanelZRows, type PanelZHandle } from "../src/senders/panelz";
 import { defaultAdminBase, resetAutoInputTablesFlag, saveSession, setEnabled } from "../src/lib/auto-input";
 import { resetSysCache, saveSys } from "../src/lib/settings";
@@ -279,7 +279,8 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 			],
 		];
 		const urls = stubPanelZ(pages);
-		const sum = await totoMacauRun(env, { fetchFn, nowMs: NOW, force: true });
+		let sum = await totoMacauRun(env, { fetchFn, nowMs: NOW, force: true });
+		for (let i = 0; i < 6 && sum.more; i++) sum = await totoMacauRun(env, { fetchFn, nowMs: NOW, force: true }); // jatah per putaran terbatas -> dilanjutkan siklus berikutnya
 		expect(sum.failed).toBe(0);
 		const vals = Object.fromEntries(pages.flat().map((r) => [r.id, r.value]));
 		expect(vals[242908]).toBe("6360"); // -16 08 Oct (halaman 2)
@@ -379,7 +380,9 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 		const calls: number[] = [];
 		const dispatch = async () => void calls.push(1);
 		const t0 = Date.UTC(2026, 9, 8, 4, 0); // 11:00 WIB: di luar jendela draw -> jeda 30 menit
+		expect(await totoDispatchAt(env)).toBe(""); // belum pernah memicu
 		expect(await totoDispatchTick(env, dispatch, t0)).toBe(true);
+		expect(await totoDispatchAt(env)).toBe("2026-10-08 11:00:00"); // waktu WIB pemicu terakhir (untuk kartu)
 		expect(await totoDispatchTick(env, dispatch, t0 + 60_000)).toBe(false);
 		expect(await totoDispatchTick(env, dispatch, t0 + 10 * 60_000)).toBe(false); // 10 menit < 30
 		expect(await totoDispatchTick(env, dispatch, t0 + 31 * 60_000)).toBe(true);
@@ -487,6 +490,115 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 		insEv.run(old, "kejadian lama 2");
 		await logTotoEvent(env, "HUGOTOGEL", "end", "INFO", "Selesai");
 		expect((raw.prepare(`SELECT msg FROM toto_macau_event ORDER BY id`).all() as { msg: string }[]).map((x) => x.msg)).toEqual(["kejadian baru", "Selesai"]);
+	});
+	it("baris yang sama terbaca dua kali (halaman bergeser) dihitung SATU baris -- bukan 'baris ganda'", async () => {
+		await setMode(2);
+		addUser("Op");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("Op");
+		const dupPanel = async (): Promise<PanelZHandle> => ({
+			html: zHtml(zRows) + zHtml(zRows),
+			push: async (id, angka) => {
+				pushed.push({ id, angka });
+				zRows.find((r) => String(r.id) === id)!.value = angka;
+				return "Berhasil dikirim";
+			},
+			reload: async () => zHtml(zRows),
+		});
+		await run({ panel: dupPanel });
+		expect(zRows.find((r) => r.id === 71)!.value).toBe("7036");
+		expect(pushed.filter((p) => p.id === "71")).toHaveLength(1); // tidak dikirim dua kali
+		expect((await byMarketDate())["TOTOMACAU-00 2026-10-08"]).toBe("SENT");
+	});
+	it("baris ganda SUNGGUHAN (dua id, pasaran+tanggal sama): semuanya disamakan dengan angka admin (kosong diisi, salah dikoreksi)", async () => {
+		await setMode(2);
+		addUser("Op");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("Op");
+		zRows.push({ id: 72, market: "TOTOMACAU-00", date: "2026-10-08", value: "1111" }); // ganda & salah; id 71 ganda & kosong
+		const sum = await run();
+		expect(zRows.find((r) => r.id === 71)!.value).toBe("7036");
+		expect(zRows.find((r) => r.id === 72)!.value).toBe("7036");
+		expect(sum.corrected).toBe(1);
+		const row = (await listTotoLog(env, ["HUGOTOGEL"])).find((r) => r.market === "TOTOMACAU-00" && r.rowAt.startsWith("2026-10-08"))!;
+		expect(row.status).toBe("SENT");
+		expect(row.detail).toMatch(/DIKOREKSI: Panel-Z berisi 1111/);
+		// ganda yang satu sudah benar, satu kosong: yang kosong diisi
+		pushed.length = 0;
+		zRows.find((r) => r.id === 72)!.value = "xxxx";
+		zRows.find((r) => r.id === 71)!.value = "7036";
+		await run();
+		expect(pushed.map((p) => p.id)).toEqual(["72"]);
+	});
+	it("status MENGIRIM yang tersangkut (putaran mati di tengah jalan) >10 menit diklaim ulang; yang baru (<10 menit) tidak disentuh", async () => {
+		await setMode(2);
+		addUser("Op");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("Op");
+		await run();
+		const raw = turso.current!.raw;
+		// tersangkut 30 menit, baris Panel-Z kosong lagi
+		raw.prepare(`UPDATE toto_macau_log SET status = 'SENDING', updated_at = ? WHERE market = 'TOTOMACAU-00' AND row_at LIKE '2026-10-08%'`).run(tsPlusMinutes(-30));
+		zRows.find((r) => r.id === 71)!.value = "";
+		pushed.length = 0;
+		await run();
+		expect(zRows.find((r) => r.id === 71)!.value).toBe("7036");
+		expect((await byMarketDate())["TOTOMACAU-00 2026-10-08"]).toBe("SENT");
+		// baru 2 menit: putaran lain mungkin masih mengirim -> jangan ikut campur
+		raw.prepare(`UPDATE toto_macau_log SET status = 'SENDING', updated_at = ? WHERE market = 'TOTOMACAU-00' AND row_at LIKE '2026-10-08%'`).run(tsPlusMinutes(-2));
+		zRows.find((r) => r.id === 71)!.value = "";
+		pushed.length = 0;
+		await run();
+		expect(pushed).toHaveLength(0);
+		expect((await byMarketDate())["TOTOMACAU-00 2026-10-08"]).toBe("SENDING");
+	});
+	it("kirim ke Panel-Z melempar galat (jaringan putus): putaran tidak mati, baris jadi GAGAL (bukan MENGIRIM selamanya)", async () => {
+		await setMode(2);
+		addUser("Op");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("Op");
+		const boom = async (): Promise<PanelZHandle> => ({
+			html: zHtml(zRows),
+			push: async () => {
+				throw new Error("network lost");
+			},
+			reload: async () => zHtml(zRows),
+		});
+		await run({ panel: boom });
+		const st = await byMarketDate();
+		expect(st["TOTOMACAU-00 2026-10-08"]).toBe("FAILED");
+		expect(Object.values(st)).not.toContain("SENDING");
+		const row = (await listTotoLog(env, ["HUGOTOGEL"])).find((r) => r.market === "TOTOMACAU-00" && r.rowAt.startsWith("2026-10-08"))!;
+		expect(row.detail).toMatch(/Error: network lost/);
+	});
+	it("tanggal yang lebih lama dari yang masih disimpan Panel-Z = DILEWATI (bukan 'menunggu baris' selamanya)", async () => {
+		await setMode(2);
+		addUser("Op");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("Op");
+		const withOld = [["05-10-2026 13:10:00", "14100", "9911", "Yes"], ...m17] as [string, string, string, string][];
+		const f = async (url: string) => new Response(url.includes("sar=m17") ? adminPage("Toto Macau", withOld) : adminPage("Toto Macao 5D", m51), { status: 200 });
+		await run({ fetchFn: f });
+		const old = (await listTotoLog(env, ["HUGOTOGEL"])).find((r) => r.rowAt.startsWith("2026-10-05"))!;
+		expect(old.status).toBe("SKIPPED");
+		expect(old.detail).toMatch(/Panel-Z hanya menyimpan sampai 2026-10-0\d/);
+	});
+	it("jatah panggilan terbatas: backlog besar dikerjakan TERBARU dulu, dan Aktivitas hanya ditulis SATU kali per putaran (bukan per baris)", async () => {
+		await addUser("tester");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("tester");
+		await setMode(2);
+		zRows = zAllDays(() => "");
+		const draws = manyDraws();
+		const sum = await run({ fetchFn: pagedFetch(draws) });
+		expect(sum.more).toBe(true); // masih ada yang antre -> siklus berikutnya
+		const find = (mk: string, date: string) => zRows.find((r) => r.market === mk && r.date === date)!;
+		expect(find("TOTOMACAU-23", "2026-10-08").value).not.toBe(""); // terbaru sudah terisi
+		expect(find("TOTOMACAU-00", "2026-10-02").value).toBe(""); // paling lama menyusul
+		const n = (raw.prepare(`SELECT COUNT(*) AS n FROM activity_log WHERE action = 'TOTO MACAU AUTO'`).get() as { n: number }).n;
+		expect(n).toBe(1);
+		for (let i = 0; i < 12 && (await run({ fetchFn: pagedFetch(draws) })).more; i++);
+		expect(find("TOTOMACAU-00", "2026-10-02").value).not.toBe(""); // akhirnya semua beres
 	});
 	it("mode 1: membandingkan saja -- tidak ada yang dikirim; status per (pasaran, tanggal)", async () => {
 		addUser("Op");

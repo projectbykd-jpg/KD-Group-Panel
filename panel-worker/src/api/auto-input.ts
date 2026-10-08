@@ -2,7 +2,7 @@
 // Logika inti: lib/auto-input.ts (rencana, sesi, antrean) & lib/auto-input-run.ts (eksekutor).
 import { getSys } from "../lib/settings";
 import { ghToken, investTurboRepo, loadIntegrations } from "../lib/integrations";
-import { ackTotoAlerts, listTotoEvents, pruneTotoMacau, listTotoLog, logTotoEvent, pendingTotoAlerts, TOTO_MAX_ATTEMPTS, totoMacauRun } from "../lib/toto-macau";
+import { ackTotoAlerts, listTotoEvents, totoDispatchAt, pruneTotoMacau, listTotoLog, logTotoEvent, pendingTotoAlerts, TOTO_MAX_ATTEMPTS, totoMacauRun } from "../lib/toto-macau";
 import { requireSession } from "./auth";
 import { logActivity } from "../lib/activity";
 import { dateKeyNow } from "../lib/time";
@@ -258,6 +258,7 @@ export async function autoInputTotoLog(env: Env, token: string) {
 		maxAttempts: TOTO_MAX_ATTEMPTS,
 		rows: await listTotoLog(env, s.profile.websites, await getSys(env, "sys_auto_input_history_days")),
 		...(await listTotoEvents(env, s.profile.websites, 60)),
+		dispatchAt: await totoDispatchAt(env),
 	};
 }
 
