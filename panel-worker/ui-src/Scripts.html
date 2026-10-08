@@ -4299,7 +4299,8 @@
           <div id="aiTotoBox" class="glass-inner rounded-2xl border border-white/5 p-3 text-xs text-slate-400">Memuat Auto Check Toto Macau…</div>
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="text-[11px] font-extrabold text-slate-300 tracking-wider">RIWAYAT ${Number(st.historyDays) || 7} HARI TERAKHIR <span id="aiJobsCount" class="text-slate-500 font-semibold"></span></div>
-            <input id="aiJobsSearch" type="search" autocomplete="off" value="${esc(aiJobsQuery)}" oninput="autoInputSearch(this.value)" placeholder="Cari website, pasaran, angka, status (GAGAL/SELESAI), keterangan…" class="glass-inner border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none w-full sm:w-80">
+            <div class="flex flex-wrap items-center gap-2 w-full sm:w-auto"><span class="ai-sort-host">${aiSortSelect()}</span>
+            <input id="aiJobsSearch" type="search" autocomplete="off" value="${esc(aiJobsQuery)}" oninput="autoInputSearch(this.value)" placeholder="Cari website, pasaran, angka, status (GAGAL/SELESAI), keterangan…" class="glass-inner border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none flex-1 sm:w-80"></div>
           </div>
           <div class="overflow-auto glass-inner rounded-2xl border border-white/5" style="max-height:70vh">
             <table class="w-full text-left stack-sm"><thead><tr class="text-[10px] text-slate-400 uppercase tracking-wider"><th class="p-2">Waktu</th><th class="p-2">Website</th><th class="p-2">Result</th><th class="p-2">Status</th><th class="p-2">Keterangan</th></tr></thead><tbody id="aiJobsBody">${jobs}</tbody></table>
@@ -4317,7 +4318,9 @@
       const q = aiJobsQuery.trim().toLowerCase();
       const words = q ? q.split(/\s+/) : [];
       const hay = j => [j.website, j.market, (j.prizes || []).join(' '), (j.prizes || []).join('/'), S.stLabel[j.status] || j.status, j.status, j.detail, j.createdAt, j.period].join(' ').toLowerCase();
-      const list = words.length ? S.jobs.filter(j => { const h = hay(j); return words.every(w => h.indexOf(w) >= 0); }) : S.jobs;
+      const filtered = words.length ? S.jobs.filter(j => { const h = hay(j); return words.every(w => h.indexOf(w) >= 0); }) : S.jobs;
+      const jobAttn = j => (j.status === 'FAILED' ? 0 : j.status === 'SKIPPED' ? 1 : j.status === 'DONE' ? 3 : 2);
+      const list = aiSortList(filtered, { time: j => String(j.createdAt || ''), attn: jobAttn, site: j => String(j.website || ''), market: j => String(j.market || ''), status: j => String(S.stLabel[j.status] || j.status || '') });
       const cnt = document.getElementById('aiJobsCount');
       if (cnt) cnt.textContent = words.length ? '(' + list.length + ' dari ' + S.jobs.length + ' job)' : '(' + S.jobs.length + ' job)';
       return list.map(j => {
@@ -4335,6 +4338,35 @@
           <td class="p-2 text-[10px] font-extrabold ${S.stColor[j.status] || ''}" data-label="Status">${S.stLabel[j.status] || esc(j.status)}${manual ? '<div class="text-rose-300">CEK MANUAL</div>' : ''}</td>
           <td class="p-2 text-[11px] text-slate-300 stack-full" data-label="Keterangan">${esc(j.detail)} ${again}${retryNote}</td></tr>`;
       }).join('') || '<tr><td colspan="5" class="p-4 text-center text-xs text-slate-500">' + (words.length ? 'Tidak ada job yang cocok dengan pencarian.' : 'Belum ada job dalam ' + S.days + ' hari terakhir.') + '</td></tr>';
+    }
+    // Urutkan (dipakai tabel riwayat job & tabel Auto Check Toto Macau). Pilihan diingat di browser ini.
+    const AI_SORTS = [['new', 'Terbaru dulu'], ['old', 'Terlama dulu'], ['attn', 'Perlu dicek dulu (gagal/beda)'], ['site', 'Website A–Z'], ['market', 'Pasaran A–Z'], ['status', 'Status A–Z']];
+    let aiSortKey = 'new';
+    try { const sv = localStorage.getItem('kd_ai_sort'); if (AI_SORTS.some(o => o[0] === sv)) aiSortKey = sv; } catch (e) { /* abaikan */ }
+    function aiSortList(list, g) {
+      const k = aiSortKey;
+      const arr = list.slice();
+      const byTime = (a, b) => (g.time(b) > g.time(a) ? 1 : g.time(b) < g.time(a) ? -1 : 0); // terbaru dulu
+      const byStr = f => (a, b) => String(f(a)).localeCompare(String(f(b)), 'id') || byTime(a, b);
+      if (k === 'old') arr.sort((a, b) => -byTime(a, b));
+      else if (k === 'attn') arr.sort((a, b) => (g.attn(a) - g.attn(b)) || byTime(a, b));
+      else if (k === 'site') arr.sort(byStr(g.site));
+      else if (k === 'market') arr.sort(byStr(g.market));
+      else if (k === 'status') arr.sort(byStr(g.status));
+      else arr.sort(byTime);
+      return arr;
+    }
+    function aiSortSelect() {
+      return '<label class="flex items-center gap-1 text-[10px] text-slate-400 font-bold">Urutkan<select onchange="autoInputSort(this.value)" class="glass-inner border border-white/10 rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none">' + AI_SORTS.map(o => '<option value="' + o[0] + '"' + (o[0] === aiSortKey ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select></label>';
+    }
+    function autoInputSort(v) {
+      if (!AI_SORTS.some(o => o[0] === v)) return;
+      aiSortKey = v;
+      try { localStorage.setItem('kd_ai_sort', v); } catch (e) { /* abaikan */ }
+      document.querySelectorAll('.ai-sort-host select').forEach(sel => { sel.value = v; });
+      const tb = document.getElementById('aiJobsBody');
+      if (tb) tb.innerHTML = autoInputJobsRows();
+      autoInputTotoPaint();
     }
     function autoInputSearch(v) {
       aiJobsQuery = String(v || '');
@@ -4361,8 +4393,9 @@
         .withSuccessHandler(r => {
           if (btn) { btn.disabled = false; btn.style.opacity = ''; }
           if (apiFailed(r)) { toast(apiMessage(r)); return; }
-          showActionPopup('DONE', 'Cek & Isi Selesai', (r && r.message) || 'Selesai.', 'fa-check');
+          showActionPopup('DONE', r && r.viaGithub ? 'Cek & Isi Dipicu' : 'Cek & Isi Selesai', (r && r.message) || 'Selesai.', 'fa-check');
           autoInputTotoLoad(true);
+          if (r && r.viaGithub) { setTimeout(() => autoInputTotoLoad(true), 60000); setTimeout(() => autoInputTotoLoad(true), 120000); }
         })
         .withFailureHandler(err => { if (btn) { btn.disabled = false; btn.style.opacity = ''; } toast((err && err.message) || 'Gagal memeriksa'); })
         .autoInputTotoRun(currentSessionToken);
@@ -4376,7 +4409,9 @@
       const modeTxt = d.mode === 2 ? '<span class="text-emerald-400 font-extrabold">MODE 2 · CEK + ISI PANEL-Z YANG KOSONG</span>' : d.mode === 1 ? '<span class="text-amber-300 font-extrabold">MODE 1 · HANYA BACA &amp; CATAT (belum posting)</span>' : '<span class="text-slate-500 font-extrabold">MATI</span>';
       const stCls = { SENT: 'text-emerald-400', VERIFIED: 'text-emerald-300', RECORDED: 'text-sky-300', PENDING: 'text-amber-300', CONFLICT: 'text-rose-400', MISSING: 'text-slate-400', FAILED: 'text-rose-400', SKIPPED: 'text-slate-400', SENDING: 'text-amber-300' };
       const stTxt = { SENT: 'TERKIRIM', VERIFIED: 'SUDAH ADA', RECORDED: 'TERCATAT', PENDING: 'BELUM TERISI', CONFLICT: 'BEDA ANGKA', MISSING: 'BARIS TIDAK ADA', FAILED: 'GAGAL', SKIPPED: 'DILEWATI', SENDING: 'MENGIRIM' };
-      const rows = (d.rows || []).slice(0, 80).map(r => `<tr class="border-t border-white/5 align-top">
+      const totoAttn = r => ({ CONFLICT: 0, FAILED: 0, PENDING: 1, MISSING: 2, SENDING: 2, SKIPPED: 3 }[r.status] ?? 4);
+      const sortedRows = aiSortList(d.rows || [], { time: r => String(r.rowAt || ''), attn: totoAttn, site: r => String(r.website || ''), market: r => String(r.market || ''), status: r => String(stTxt[r.status] || r.status || '') });
+      const rows = sortedRows.slice(0, 80).map(r => `<tr class="border-t border-white/5 align-top">
           <td class="p-2 text-[10px] text-slate-400 whitespace-nowrap" data-label="Tanggal & jam draw">${esc(r.rowAt)}</td>
           <td class="p-2 text-xs font-bold text-cyan-300" data-label="Website">${esc(r.website)}</td>
           <td class="p-2 text-xs" data-label="Pasaran tujuan">${esc(r.market || '-')}<div class="text-[10px] text-slate-500">periode ${esc(r.period)}</div></td>
@@ -4384,7 +4419,7 @@
           <td class="p-2 text-[10px] font-extrabold ${stCls[r.status] || ''}" data-label="Status">${stTxt[r.status] || esc(r.status)}</td>
           <td class="p-2 text-[11px] text-slate-300 stack-full" data-label="Keterangan">${esc(r.detail)}${r.attempts ? ' (' + Number(r.attempts) + '/' + Number(d.maxAttempts) + ' percobaan)' : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="p-3 text-center text-slate-500">Belum ada draw tercatat (3 hari terakhir).</td></tr>';
       box.innerHTML = `<div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-          <div class="text-[11px] font-extrabold text-slate-300 tracking-wider">AUTO CHECK TOTO MACAU &amp; TOTO MACAO 5D</div><div class="flex items-center gap-2"><span class="text-[10px]">${modeTxt}</span><button onclick="autoInputTotoRunNow(this)" class="bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-extrabold px-3 py-1.5 rounded-lg text-[10px]"><i class="fa-solid fa-bolt mr-1"></i>CEK &amp; ISI SEKARANG</button></div></div>
+          <div class="text-[11px] font-extrabold text-slate-300 tracking-wider">AUTO CHECK TOTO MACAU &amp; TOTO MACAO 5D</div><div class="flex flex-wrap items-center gap-2"><span class="ai-sort-host">${aiSortSelect()}</span><span class="text-[10px]">${modeTxt}</span><button onclick="autoInputTotoRunNow(this)" class="bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-extrabold px-3 py-1.5 rounded-lg text-[10px]"><i class="fa-solid fa-bolt mr-1"></i>CEK &amp; ISI SEKARANG</button></div></div>
         <div class="text-[11px] text-slate-400 leading-relaxed mb-2">Membaca daftar nomor di admin AG/AGWL (3 hari terakhir, hanya yang <b>Hitung: Yes</b>) memakai PHPSESSID tersimpan akun yang punya izin Panel-Z &amp; menu Result, lalu mencocokkannya dengan baris <b>pasaran + tanggal</b> yang sama di Panel-Z: kosong (xxxx) = diisi, sudah sama = ditandai, beda angka = <b>tidak ditimpa</b> &amp; diperingatkan. Mode diatur admin di Pengaturan Sistem.</div>
         <div class="overflow-auto rounded-xl border border-white/5" style="max-height:40vh"><table class="w-full text-left stack-sm"><thead><tr class="text-[10px] text-slate-400 uppercase tracking-wider"><th class="p-2">Tanggal &amp; jam draw</th><th class="p-2">Website</th><th class="p-2">Pasaran tujuan</th><th class="p-2">Angka</th><th class="p-2">Status</th><th class="p-2">Keterangan</th></tr></thead><tbody>${rows}</tbody></table></div>`;
     }

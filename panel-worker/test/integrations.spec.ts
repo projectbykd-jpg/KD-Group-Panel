@@ -130,6 +130,7 @@ describe("tes koneksi GitHub", () => {
 		expect(calls.sort()).toEqual([
 			"https://api.github.com/repos/projectbykd-jpg/KD-Group-Panel/actions/workflows/invest-turbo.yml",
 			"https://api.github.com/repos/projectbykd-jpg/KD-Group-Panel/actions/workflows/news-turbo.yml",
+			"https://api.github.com/repos/projectbykd-jpg/KD-Group-Panel/actions/workflows/toto-macau.yml",
 			"https://api.github.com/repos/projectbykd-jpg/KD-scraper/actions/workflows/scrape.yml",
 		]);
 		expect(r.allOk).toBe(false);

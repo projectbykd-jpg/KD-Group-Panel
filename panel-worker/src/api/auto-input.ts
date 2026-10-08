@@ -1,6 +1,7 @@
 // Endpoint menu "Auto Prediksi" + kaitan ke alur KIRIM SEMUA SISTEM (send.ts).
 // Logika inti: lib/auto-input.ts (rencana, sesi, antrean) & lib/auto-input-run.ts (eksekutor).
 import { getSys } from "../lib/settings";
+import { ghToken, investTurboRepo, loadIntegrations } from "../lib/integrations";
 import { ackTotoAlerts, listTotoLog, pendingTotoAlerts, TOTO_MAX_ATTEMPTS, totoMacauRun } from "../lib/toto-macau";
 import { requireSession } from "./auth";
 import { logActivity } from "../lib/activity";
@@ -258,10 +259,32 @@ export async function autoInputTotoLog(env: Env, token: string) {
 	};
 }
 
-/** Tombol "Cek & Isi Sekarang": rekonsiliasi admin <-> Panel-Z untuk website milik akun ini, tanpa menunggu jadwal cron. */
+/** Pemicu workflow GitHub Actions toto-macau.yml (prosesnya di Actions, bebas batas subrequest Cloudflare). */
+export async function dispatchTotoMacau(env: Env, user?: string): Promise<void> {
+	await loadIntegrations(env);
+	if (!ghToken(env)) throw new Error("GitHub Actions belum dikonfigurasi (token GitHub). Isi di Admin > Integrasi.");
+	const resp = await fetch(`https://api.github.com/repos/${investTurboRepo(env)}/actions/workflows/toto-macau.yml/dispatches`, {
+		method: "POST",
+		headers: { Authorization: `Bearer ${ghToken(env)}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "kd-panel-worker", "Content-Type": "application/json" },
+		body: JSON.stringify({ ref: "main", inputs: user ? { user, force: "1" } : {} }),
+	});
+	if (resp.status !== 204) {
+		const hint = resp.status === 404 ? " -- workflow toto-macau.yml belum ada di repo, atau token tidak punya akses ke repo itu." : resp.status === 403 ? " -- token kurang izin (butuh 'Actions: Read and write')." : "";
+		throw new Error(`Gagal memicu GitHub Actions (HTTP ${resp.status})${hint}`);
+	}
+}
+
+/** Tombol "Cek & Isi Sekarang": picu GitHub Actions (tanpa batas subrequest Cloudflare). Tanpa token GitHub: jalankan 1 website langsung di Worker. */
 export async function autoInputTotoRun(env: Env, token: string) {
 	const s = await gate(env, token);
-	const sum = await totoMacauRun(env, { only: [s.username], force: true, maxSites: 5 });
-	await logActivity(env, s.username, "TOTO MACAU AUTO", "Cek & Isi Sekarang — " + sum.message, sum.failed || sum.conflict ? "GAGAL" : "BERHASIL", "").catch(() => {});
-	return { success: true, ...sum };
+	try {
+		await dispatchTotoMacau(env, s.username);
+		await logActivity(env, s.username, "TOTO MACAU AUTO", "Cek & Isi Sekarang — dipicu lewat GitHub Actions", "BERHASIL", "").catch(() => {});
+		return { success: true, viaGithub: true, message: "Dipicu di GitHub Actions. Hasilnya masuk ±1–2 menit — daftar di kartu akan diperbarui otomatis." };
+	} catch (e) {
+		const why = e instanceof Error ? e.message : String(e);
+		const sum = await totoMacauRun(env, { only: [s.username], force: true, maxSites: 1 });
+		await logActivity(env, s.username, "TOTO MACAU AUTO", "Cek & Isi Sekarang (langsung di Worker, 1 website) — " + sum.message, sum.failed || sum.conflict ? "GAGAL" : "BERHASIL", "").catch(() => {});
+		return { success: true, viaGithub: false, ...sum, message: `GitHub Actions tidak bisa dipicu (${why}). Dijalankan langsung untuk 1 website: ${sum.message}` };
+	}
 }

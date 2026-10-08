@@ -212,6 +212,10 @@ export interface TotoSummary {
 	failed: number;
 	net: boolean;
 	message: string;
+	/** website yang diperiksa pada panggilan ini (dipakai workflow GitHub untuk lanjut ke website berikutnya) */
+	sites: string[];
+	/** ada baris yang antre karena jatah panggilan habis -> panggil lagi untuk website yang sama */
+	more: boolean;
 }
 
 /** Ada draw yang terbit 3..45 menit lalu? Saat itu putaran tiap 3 menit; selain itu tiap 30 menit. */
@@ -435,6 +439,7 @@ async function reconcileWebsite(
 		if (budget.used >= SUBREQ_BUDGET) {
 			await upsertLog(env, { ...base, status: "PENDING", detail: "Antre — dikirim pada putaran berikutnya" }, buf);
 			sum.pending++;
+			sum.more = true;
 			continue;
 		}
 		// klaim atomik: hanya satu putaran yang berhasil mengubah ke SENDING (upsert + klaim dalam satu batch)
@@ -498,8 +503,8 @@ async function passMark(env: Env, website: string): Promise<void> {
 /**
  * Satu putaran rekonsiliasi. `only` = batasi ke username tertentu (tombol "Cek & Isi Sekarang"); `force` = abaikan jeda antar putaran.
  */
-export async function totoMacauRun(env: Env, opts: { only?: string[]; force?: boolean; maxSites?: number } & TotoDeps = {}): Promise<TotoSummary> {
-	const sum: TotoSummary = { websites: 0, posted: 0, already: 0, pending: 0, conflict: 0, missing: 0, failed: 0, net: false, message: "" };
+export async function totoMacauRun(env: Env, opts: { only?: string[]; exclude?: string[]; force?: boolean; maxSites?: number } & TotoDeps = {}): Promise<TotoSummary> {
+	const sum: TotoSummary = { websites: 0, posted: 0, already: 0, pending: 0, conflict: 0, missing: 0, failed: 0, net: false, message: "", sites: [], more: false };
 	const mode = await getSys(env, "sys_totomacau_mode");
 	if (mode <= 0) {
 		sum.message = "Auto Check Toto Macau dimatikan (Pengaturan Sistem).";
@@ -525,6 +530,7 @@ export async function totoMacauRun(env: Env, opts: { only?: string[]; force?: bo
 			const acc = accounts.get(w);
 			return !!acc && !!acc.panelz.url && !!acc.panelz.user;
 		})
+		.filter((w) => !opts.exclude?.some((x) => x.toUpperCase() === w.toUpperCase()))
 		.filter((w) => opts.force || !last.get(w) || last.get(w)! <= tsPlusMinutes(-interval))
 		.sort((x, y) => (last.get(x) ?? "").localeCompare(last.get(y) ?? ""))
 		.slice(0, opts.maxSites ?? 4);
@@ -532,6 +538,7 @@ export async function totoMacauRun(env: Env, opts: { only?: string[]; force?: bo
 	for (const website of due) {
 		if (budget.used >= SUBREQ_BUDGET) break;
 		sum.websites++;
+		sum.sites.push(website);
 		await passMark(env, website);
 		await reconcileWebsite(env, website, byWebsite.get(website)!, accounts.get(website)!.panelz, mode, { f, panel, nowMs }, budget, sum);
 	}
