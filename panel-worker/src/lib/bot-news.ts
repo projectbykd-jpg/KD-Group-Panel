@@ -52,6 +52,18 @@ const TRANSIENT_ERROR_RE =
 let newsCategoryColumnsEnsured = false;
 export async function ensureNewsCategoryColumns(env: Env): Promise<void> {
 	if (newsCategoryColumnsEnsured) return;
+	const db = getTurso(env);
+	// Satu pragma_table_info per tabel (dulu 7 ALTER yang hampir selalu gagal "duplicate column" -- 7 round-trip sia-sia tiap cold start).
+	const colsOf = async (t: string): Promise<Set<string>> => {
+		try {
+			const r = await db.prepare(`SELECT name FROM pragma_table_info('${t}')`).all<{ name: string }>();
+			return new Set((r.results ?? []).map((x) => String(x.name)));
+		} catch {
+			return new Set();
+		}
+	};
+	const srcCols = await colsOf("news_source");
+	const artCols = await colsOf("news_article");
 	for (const stmt of [
 		`ALTER TABLE news_source ADD COLUMN category TEXT NOT NULL DEFAULT 'umum'`,
 		`ALTER TABLE news_article ADD COLUMN category TEXT NOT NULL DEFAULT 'umum'`,
@@ -90,9 +102,17 @@ export async function ensureNewsCategoryColumns(env: Env): Promise<void> {
 		// sekali per cold-start, sama seperti ALTER TABLE di atas.
 		`CREATE INDEX IF NOT EXISTS ix_news_public ON news_article(site_posted_at, id)`,
 		`CREATE INDEX IF NOT EXISTS ix_news_public_cat ON news_article(category, site_posted_at, id)`,
+		// Index tambahan utk jalur Facebook Langsung (pilih artikel belum diposting) & "Terpopuler".
+		`CREATE INDEX IF NOT EXISTS ix_news_fb ON news_article(fb_direct_posted_at, id)`,
+		`CREATE INDEX IF NOT EXISTS ix_news_views ON news_article(views DESC, id DESC)`,
 	]) {
+		const alt = /^ALTER TABLE (\w+) ADD COLUMN (\w+)/.exec(stmt);
+		if (alt) {
+			const have = alt[1] === "news_source" ? srcCols : artCols;
+			if (have.size && have.has(alt[2])) continue; // kolom sudah ada
+		}
 		try {
-			await getTurso(env).prepare(stmt).run();
+			await db.prepare(stmt).run();
 		} catch {
 			/* kolom/index sudah ada -> abaikan */
 		}
@@ -961,8 +981,14 @@ export async function fbPostToPage(
 		body.set("message", caption);
 		body.set("link", primaryLink);
 	}
-	const r = await fetch(endpoint, { method: "POST", body });
-	const j = (await r.json()) as any;
+	let r: Response;
+	let j: any;
+	try {
+		r = await fetch(endpoint, { method: "POST", body, signal: AbortSignal.timeout(20000) });
+		j = await r.json();
+	} catch (e) {
+		throw new Error("Gagal menghubungi server Facebook: " + (e instanceof Error ? e.message : String(e)).slice(0, 200));
+	}
 	if (!r.ok || (!j.id && !j.post_id)) {
 		throw new Error("Facebook post gagal: " + JSON.stringify(j?.error || j).slice(0, 300));
 	}
@@ -1174,7 +1200,8 @@ export async function fbDirectRun(env: Env): Promise<{ posted: number; message: 
 	if (String(cfg.fb_direct_enabled || "0") !== "1") {
 		return { posted: 0, message: "Facebook Langsung dimatikan (fb_direct_enabled=0)." };
 	}
-	const cap = Number(cfg.fb_direct_daily_cap || "50");
+	const capN = Number(cfg.fb_direct_daily_cap || "50");
+	const cap = Number.isFinite(capN) ? capN : 50; // nilai non-angka dulu = NaN -> batas harian mati
 	if ((await fbDirectPostedToday(env)) >= cap) {
 		return { posted: 0, message: "Batas harian Facebook Langsung tercapai." };
 	}
@@ -1413,7 +1440,7 @@ export async function newsProcessOne(
 				publisher: { "@type": "Organization", name: "LokalStore88" },
 				mainEntityOfPage: `${newsSiteUrl()}/berita/artikel/?id=${id}`,
 			};
-			content += `\n<script type="application/ld+json">${JSON.stringify(ldJson)}</script>`;
+			content += `\n<script type="application/ld+json">${JSON.stringify(ldJson).replace(/</g, "\\u003c")}</script>`;
 		} catch (e) {
 			console.error("JSON-LD gagal dibangun (dilewati):", e instanceof Error ? e.message : e);
 		}
@@ -2177,7 +2204,7 @@ export async function publicNewsSitemapXml(env: Env): Promise<string> {
 		.map((r) => {
 			const loc = `${newsSiteUrl()}/berita/artikel/?id=${r.id}`;
 			const lastmod = String(r.site_posted_at || "").replace(" ", "T") + "+07:00";
-			return `<url><loc>${loc}</loc><lastmod>${lastmod}</lastmod></url>`;
+			return `<url><loc>${xmlEsc(loc)}</loc><lastmod>${xmlEsc(lastmod)}</lastmod></url>`;
 		})
 		.join("");
 	return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>`;

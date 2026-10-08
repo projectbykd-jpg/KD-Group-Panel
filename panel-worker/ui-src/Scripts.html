@@ -1312,11 +1312,14 @@
     // beserta "tanda tangan" ringkas, supaya refresh di belakang layar hanya
     // menggambar ulang tabel kalau datanya memang berubah.
     const lapInflight = Object.create(null);
+    // Hash ringan (djb2) atas isi penuh: dulu array hanya dibandingkan lewat panjang + baris pertama + terakhir,
+    // sehingga perubahan status di tengah daftar tidak pernah menggambar ulang tabel.
+    function lapHash(s) { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return h >>> 0; }
     function lapResultsSig(results) {
       return Object.keys(results || {}).sort().map(k => {
         const v = results[k];
-        if (!Array.isArray(v)) return k + ':' + JSON.stringify(v).length;
-        return k + ':' + v.length + ':' + (/Meta$/.test(k) ? JSON.stringify(v) : JSON.stringify(v[0] || null) + JSON.stringify(v[v.length - 1] || null));
+        const j = JSON.stringify(v == null ? null : v) || '';
+        return k + ':' + (Array.isArray(v) ? v.length : '') + ':' + j.length + ':' + lapHash(j);
       }).join('|');
     }
     function lapFetchResults(page, cb) {
@@ -2073,10 +2076,15 @@
     function startPgaPendingPolling() {
       stopPgaPendingPolling();
       pollPgaPendingStatus();
-      pgaPendingTimer = setInterval(pollPgaPendingStatus, 2000);
+      pgaPendingTimer = setInterval(pgaPendingTick, 2000);
     }
+    // Poller berkala: lewati bila tab tersembunyi atau permintaan sebelumnya belum selesai (dulu menumpuk bila server lambat).
+    let pgaPollBusy = false;
+    function pgaPendingTick() { if (document.hidden || pgaPollBusy) return; pollPgaPendingStatus(); }
     function pollPgaPendingStatus() {
+      pgaPollBusy = true;
       google.script.run.withSuccessHandler(res => {
+        pgaPollBusy = false;
         if (!res || !res.success) return;
         const rows = res.rows || [];
         const sig = (res.updatedAt || 0) + ':' + JSON.stringify(rows);
@@ -2085,7 +2093,7 @@
         pgaPendingRows = rows;
         pgaPendingUpdatedAt = res.updatedAt || 0;
         pgaPendingRepaint(unchanged);
-      }).withFailureHandler(() => {}).pgaPendingStatus(currentSessionToken);
+      }).withFailureHandler(() => { pgaPollBusy = false; }).pgaPendingStatus(currentSessionToken);
     }
     let pgaPendingSig = '';
     function pgaPendingRepaint(onlyLabel) {
@@ -2205,8 +2213,10 @@
       };
       loadWdListed();
       wdListedTimer && clearInterval(wdListedTimer);
-      wdListedTimer = setInterval(loadWdListed, 8000);
+      wdListedTimer = setInterval(wdListedTick, 8000);
     }
+    let wdListedBusy = false;
+    function wdListedTick() { if (document.hidden || wdListedBusy) return; loadWdListed(); }
     function wdListedStatusClass(status) {
       const s = String(status||'').toLowerCase();
       if (s.indexOf('success') >= 0 || s.indexOf('sukses') >= 0 || s.indexOf('paid') >= 0) return 'text-emerald-400 font-bold';
@@ -2219,14 +2229,16 @@
       }).withFailureHandler(() => {}).wdListedSync(currentSessionToken, rows);
     }
     function loadWdListed() {
+      wdListedBusy = true;
       google.script.run.withSuccessHandler(res => {
+        wdListedBusy = false;
         if (!res || !res.success) return;
         const sig = JSON.stringify(res.rows || []);
         if (sig === wdListedSig && wdListedRows.length) return; // sama -> jangan bangun ulang tabel
         wdListedSig = sig;
         wdListedRows = res.rows || [];
         if (lapTblState['wd_listed']) { lapTblState['wd_listed'].rows = wdListedRows; lapTblRepaint('wd_listed'); }
-      }).withFailureHandler(() => {}).wdListedGetList(currentSessionToken);
+      }).withFailureHandler(() => { wdListedBusy = false; }).wdListedGetList(currentSessionToken);
     }
     function wdListedCheckClick(id, btn) {
       if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
@@ -4272,7 +4284,7 @@
           <td class="p-2 text-xs">${esc(j.market)}<div class="font-mono text-amber-300">${esc((j.prizes || []).join(' / '))}</div></td>
           <td class="p-2 text-[10px] font-extrabold ${stColor[j.status] || ''}">${stLabel[j.status] || esc(j.status)}${manual ? '<div class="text-rose-300">CEK MANUAL</div>' : ''}</td>
           <td class="p-2 text-[11px] text-slate-300">${esc(j.detail)} ${again}</td></tr>`;
-      }).join('') || '<tr><td colspan="5" class="p-4 text-center text-xs text-slate-500">Belum ada.</td></tr>';
+      }).join('') || '<tr><td colspan="5" class="p-4 text-center text-xs text-slate-500">Belum ada job dalam ' + (Number(st.historyDays) || 7) + ' hari terakhir.</td></tr>';
       host.innerHTML = `
         <div class="glass-card rounded-3xl p-5 sm:p-6 flex flex-col gap-5">
           <div class="page-head tone-amber">
@@ -4294,7 +4306,8 @@
             Hanya website yang akunmu boleh akses yang muncul di bawah. Ambil <b>PHPSESSID</b> dari Chrome yang sedang login admin (F12 → Application → Cookies), tempel, <b>Simpan</b>, lalu klik <b>Uji</b> sebelum mengaktifkan. Sesi bisa habis kapan saja — kalau habis, hasilnya <b>gagal sebelum menyentuh admin</b> dan kamu input manual. Nilai PHPSESSID tidak pernah ditampilkan ulang.
           </div>
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">${rows}</div>
-          <div class="overflow-x-auto glass-inner rounded-2xl border border-white/5">
+          <div class="text-[11px] font-extrabold text-slate-300 tracking-wider">RIWAYAT ${Number(st.historyDays) || 7} HARI TERAKHIR <span class="text-slate-500 font-semibold">(${(st.jobs || []).length} job)</span></div>
+          <div class="overflow-auto glass-inner rounded-2xl border border-white/5" style="max-height:70vh">
             <table class="w-full text-left"><thead><tr class="text-[10px] text-slate-400 uppercase tracking-wider"><th class="p-2">Waktu</th><th class="p-2">Website</th><th class="p-2">Result</th><th class="p-2">Status</th><th class="p-2">Keterangan</th></tr></thead><tbody>${jobs}</tbody></table>
           </div>
         </div>`;
@@ -4803,7 +4816,11 @@
         }));
       } catch (e) {}
     }
-    ['inputText','marketSelect','angkaInput'].forEach(id=>document.getElementById(id).addEventListener('input',saveDraft));
+    // Debounce: dulu tiap ketukan menulis seluruh teks ke localStorage (berat untuk Result besar). Disiram juga saat tab ditutup.
+    let draftTimer = null;
+    function saveDraftSoon(){ clearTimeout(draftTimer); draftTimer = setTimeout(()=>{ draftTimer = null; saveDraft(); }, 300); }
+    ['inputText','marketSelect','angkaInput'].forEach(id=>document.getElementById(id).addEventListener('input',saveDraftSoon));
+    window.addEventListener('pagehide', ()=>{ if (draftTimer) { clearTimeout(draftTimer); draftTimer = null; saveDraft(); } });
     // Session Timeout DIHAPUS TOTAL untuk SEMUA akun (termasuk admin) — tidak ada
     // lagi logout otomatis karena tidak aktif. Fungsi ini dibiarkan ada (bukan
     // dihapus) supaya pemanggil lama (mis. applyAuthenticatedSession) tidak error;
@@ -5479,6 +5496,7 @@
         centerNoticeResolver = resolve;
 
         const finish = answer => {
+          clearTimeout(centerNoticeTimer);
           modal.classList.remove('open');
           document.body.classList.remove('modal-open');
           const resolver = centerNoticeResolver;
@@ -6590,6 +6608,11 @@ Tindakan ini tidak dapat dibatalkan.`,
       toast(next ? 'Mengaktifkan auto-post…' : 'Mematikan auto-post…');
       saveBotNewsConfig();
     }
+    let botCfgDirty = false;
+    ['botAttribution','botPerRun','botDailyCap','botSitePerRun','botAutoInterval','botParaMin','botParaMax','botImagesPer','botLabels','botPromoUrl','botPromoText','botStyle','botBlogId','botBloggerSiteUrl','botFbEnabled','botFbPageId','botFbPageUrl','botWaChannelUrl','botNewsBannerEnabled','botNewsBannerImage','botNewsBannerUrl','botNewsBannerText'].forEach(id=>{
+      const el = document.getElementById(id);
+      if (el) { el.addEventListener('input', ()=>{ botCfgDirty = true; }); el.addEventListener('change', ()=>{ botCfgDirty = true; }); }
+    });
     function applyBotNews(snap){
       if (!snap || !snap.success) return;
       pageFetchedAt.bot = Date.now();
@@ -6600,8 +6623,11 @@ Tindakan ini tidak dapat dibatalkan.`,
       botSiteHistoryCache = snap.siteHistory || [];
       renderBotSiteHistory();
       const set = (id,v)=>{ const el=document.getElementById(id); if(el){ if(el.type==='checkbox') el.checked=!!v; else el.value=(v==null?'':v); } };
-      set('botEnabled', c.enabled); set('botAttribution', c.attribution);
+      set('botEnabled', c.enabled);
       renderBotAutoBar(!!c.enabled);
+      // Jangan timpa isian Setting yang sedang diubah admin dan belum disimpan (dulu hilang diam-diam tiap data dimuat ulang).
+      if (!botCfgDirty) {
+      set('botAttribution', c.attribution);
       set('botPerRun', c.per_run); set('botDailyCap', c.daily_cap); set('botSitePerRun', c.site_per_run);
       set('botAutoInterval', c.auto_interval_minutes);
       set('botParaMin', c.para_min); set('botParaMax', c.para_max); set('botImagesPer', c.images_per_article);
@@ -6611,6 +6637,7 @@ Tindakan ini tidak dapat dibatalkan.`,
       set('botFbEnabled', c.fb_enabled); set('botFbPageId', c.fb_page_id); set('botFbPageUrl', c.fb_page_url);
       set('botWaChannelUrl', c.wa_channel_url);
       set('botNewsBannerEnabled', c.news_banner_enabled); set('botNewsBannerImage', c.news_banner_image); set('botNewsBannerUrl', c.news_banner_url); set('botNewsBannerText', c.news_banner_text);
+      }
       const hint = document.getElementById('botCredHint');
       if (hint) hint.textContent = (c.ai_providers_on ? c.ai_providers_on + ' AI provider aktif' : 'Belum ada AI provider aktif') + ' · ' + (c.has_blogger ? 'Blogger OK' : 'Blogger BELUM tersambung');
       const fbHint = document.getElementById('botFbHint');
@@ -6804,7 +6831,7 @@ Tindakan ini tidak dapat dibatalkan.`,
       const fbTok=g('botFbToken'); if(fbTok) data.fb_page_token=fbTok;
       const bcId=g('botBloggerClientId'); if(bcId) data.blogger_client_id=bcId;
       const bcSecret=g('botBloggerClientSecret'); if(bcSecret) data.blogger_client_secret=bcSecret;
-      google.script.run.withSuccessHandler(s=>{if(apiFailed(s)){toast('Gagal: '+apiMessage(s));return;}toast('Konfigurasi BOT tersimpan');['botFbToken','botBloggerClientSecret'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});applyBotNews(s);}).withFailureHandler(e=>toast('Gagal: '+((e&&e.message)||e))).botNewsSaveConfig(currentSessionToken,data);
+      google.script.run.withSuccessHandler(s=>{if(apiFailed(s)){toast('Gagal: '+apiMessage(s));return;}toast('Konfigurasi BOT tersimpan');['botFbToken','botBloggerClientSecret'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});botCfgDirty=false;applyBotNews(s);}).withFailureHandler(e=>toast('Gagal: '+((e&&e.message)||e))).botNewsSaveConfig(currentSessionToken,data);
     }
     function addBotSource(){
       const data={name:document.getElementById('botSrcName').value.trim(),kind:document.getElementById('botSrcKind').value,category:document.getElementById('botSrcCategory').value,url:document.getElementById('botSrcUrl').value.trim()};

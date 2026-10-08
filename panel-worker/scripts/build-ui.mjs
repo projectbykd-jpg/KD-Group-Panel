@@ -172,7 +172,14 @@ const shim = `<script>
             /sesi tidak valid|telah berakhir|akun tidak ditemukan|akun sedang|akun terkunci/i.test(String(data.message || ""))) {
           try { window.dispatchEvent(new CustomEvent("kd:session-expired", { detail: String(data.message) })); } catch (e) {}
         }
-        (onOk || function () {})(data);
+        try {
+          (onOk || function () {})(data);
+        } catch (renderErr) {
+          // Galat di fungsi tampilan (bukan jaringan): dulu ikut ditangkap .catch di bawah dan tampil sebagai
+          // "Tidak dapat menghubungi server" sehingga bug render tidak bisa dilacak. Sekarang jujur + tercatat di console.
+          try { console.error("[panel] galat saat memproses jawaban " + fn, renderErr); } catch (e) {}
+          (onErr || function () {})(new Error("Galat tampilan (" + fn + "): " + ((renderErr && renderErr.message) || renderErr)));
+        }
       })
       .catch(function (e) {
         if (timer) clearTimeout(timer);

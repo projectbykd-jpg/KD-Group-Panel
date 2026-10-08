@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: import("node:sqlite").DatabaseSync } }));
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
-import { publicNewsRssXml } from "../src/lib/bot-news";
+import { publicNewsRssXml, publicNewsSitemapXml, ensureNewsCategoryColumns } from "../src/lib/bot-news";
 import { resetIntegrationsCache, loadIntegrations } from "../src/lib/integrations";
 import { fakeEnv, fakeTurso } from "./helpers/fake-env";
 
@@ -60,5 +60,15 @@ describe("umpan RSS artikel situs sendiri (untuk RSS-ke-Facebook)", () => {
 		const xml = await publicNewsRssXml(env);
 		expect(xml).toContain("<channel>");
 		expect(xml).not.toContain("<item>");
+	});
+
+	it("sitemap: <loc> di-escape XML & migrasi kolom/index idempoten", async () => {
+		add(1, { title: "A", site: "2026-10-01 08:00:00" });
+		const env = fakeEnv().env;
+		await ensureNewsCategoryColumns(env);
+		await ensureNewsCategoryColumns(env);
+		const xml = await publicNewsSitemapXml(env);
+		expect(xml).toContain("<loc>");
+		expect(xml).not.toMatch(/<loc>[^<]*&(?!amp;|lt;|gt;|quot;)/);
 	});
 });

@@ -494,6 +494,18 @@ describe("autoInputAfterSend (DB)", () => {
 		expect(m.st.calcPosts).toBe(1);
 		expect(await claimJob(env, "Op", id)).toBeNull();
 	});
+	it("riwayat: semua job 7 hari terakhir tampil (bukan 30 baris), lebih lama dari itu tidak", async () => {
+		await listJobs(env, "Op"); // pastikan tabel ada
+		const wib = (msAgo: number) => new Date(Date.now() + 7 * 3600_000 - msAgo).toISOString().slice(0, 19).replace("T", " ");
+		const ins = turso.current!.raw.prepare(
+			`INSERT INTO auto_input_job (username, website, market, result_key, status, stage, created_at, updated_at) VALUES ('Op', 'HUGOTOGEL', 'HK', ?, 'DONE', 'selesai', ?, ?)`,
+		);
+		for (let i = 0; i < 50; i++) ins.run("k" + i, wib(6 * 86400_000), wib(6 * 86400_000)); // 6 hari lalu, 50 job
+		ins.run("lama", wib(9 * 86400_000), wib(9 * 86400_000)); // 9 hari lalu
+		const jobs = await listJobs(env, "Op");
+		expect(jobs).toHaveLength(50);
+		expect(await listJobs(env, "Op", 30)).toHaveLength(51);
+	});
 	it("user lain tidak bisa menjalankan job milik orang lain", async () => {
 		const m = mockSite();
 		await setEnabled(env, "Op", true);
