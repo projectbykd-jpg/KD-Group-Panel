@@ -4252,6 +4252,48 @@
       }, 6000);
     }
 
+    // --- Auto Prediksi: tampilan 3 tab (Sesi Website / Auto Check Toto Macau / Riwayat Job). Logika & API tidak berubah. ---
+    const AI_TABS = ['sesi', 'toto', 'riwayat'];
+    let aiTab = '';
+    try { const sv = localStorage.getItem('kd_ai_tab'); if (AI_TABS.includes(sv)) aiTab = sv; } catch (e) { /* abaikan */ }
+    let aiTotoFilter = 'all';
+    let aiJobsFilter = 'all';
+    let aiLogOpen = false;
+    function autoInputTab(t) {
+      if (!AI_TABS.includes(t)) return;
+      aiTab = t;
+      try { localStorage.setItem('kd_ai_tab', t); } catch (e) { /* abaikan */ }
+      AI_TABS.forEach(k => {
+        const pane = document.getElementById('aiPane-' + k);
+        if (pane) pane.hidden = k !== t;
+        const btn = document.getElementById('aiTabBtn-' + k);
+        if (btn) { btn.classList.toggle('active', k === t); btn.setAttribute('aria-selected', k === t ? 'true' : 'false'); }
+      });
+    }
+    const aiJobNeedsCheck = j => j.status === 'FAILED' && !(aiJobsState.retryMax > 0 && (Number(j.attempts) || 0) < aiJobsState.retryMax);
+    // Lencana pada tab: berapa yang perlu perhatian, tanpa harus membuka tab-nya.
+    function autoInputBadges() {
+      const set = (k, html, cls) => { const el = document.getElementById('aiTabBadge-' + k); if (el) { el.innerHTML = html; el.className = 'ai-badge' + (cls ? ' ' + cls : ''); el.hidden = !html; } };
+      const ws = (autoInputState && autoInputState.websites) || [];
+      const saved = ws.filter(w => w.hasSession).length;
+      set('sesi', ws.length ? saved + '/' + ws.length : '', saved === 0 && ws.length ? 'bad' : '');
+      const d = aiTotoData;
+      if (d) {
+        const bad = (d.rows || []).filter(r => r.status === 'CONFLICT' || r.status === 'FAILED').length;
+        const trgAge = d.dispatchAt ? Math.round((Date.now() - Date.parse(String(d.dispatchAt).replace(' ', 'T') + '+07:00')) / 60000) : null;
+        const trgBad = d.mode > 0 && (trgAge === null || trgAge > 45);
+        if (d.running) set('toto', '<i class="fa-solid fa-circle-notch fa-spin"></i>', 'ok');
+        else if (bad) set('toto', String(bad), 'bad');
+        else if (trgBad) set('toto', '!', 'bad');
+        else set('toto', '', '');
+      }
+      const need = (aiJobsState.jobs || []).filter(aiJobNeedsCheck).length;
+      set('riwayat', need ? String(need) : String((aiJobsState.jobs || []).length), need ? 'bad' : '');
+    }
+    function aiChips(items, cur, fn) {
+      return items.map(([k, label, n]) => `<button type="button" class="ai-chip${k === cur ? ' active' : ''}${k === 'bad' && n ? ' bad' : ''}" onclick="${fn}('${k}')">${label}<b>${n}</b></button>`).join('');
+    }
+
     function renderAutoInputPage() {
       const host = document.getElementById('auto-input-page');
       const st = autoInputState;
@@ -4259,55 +4301,96 @@
       const esc = escapeHtml;
       const stColor = { DONE: 'text-emerald-400', FAILED: 'text-rose-400', RUNNING: 'text-amber-300', QUEUED: 'text-sky-300', SKIPPED: 'text-slate-400' };
       const stLabel = { DONE: 'SELESAI', FAILED: 'GAGAL', RUNNING: 'BERJALAN', QUEUED: 'ANTRI', SKIPPED: 'DILEWATI' };
-      const rows = (st.websites || []).map((w, i) => `
-        <div class="glass-inner rounded-2xl p-3.5 flex flex-col gap-2 border border-white/5">
-          <div class="flex items-center justify-between gap-2">
-            <b class="text-sm text-cyan-300">${esc(w.website)}</b>
-            <span class="text-[10px] font-bold ${w.hasSession ? 'text-emerald-400' : 'text-slate-500'}">${w.hasSession ? 'TERSIMPAN ' + esc(w.hint) : 'BELUM ADA SESI'}</span>
+      const sites = st.websites || [];
+      const savedN = sites.filter(w => w.hasSession).length;
+      if (!aiTab) aiTab = savedN ? 'toto' : 'sesi';
+      const rows = sites.map((w, i) => `
+        <div class="ai-site${w.hasSession ? ' has' : ''}">
+          <div class="ai-site-head">
+            <b class="ai-site-name">${esc(w.website)}</b>
+            <span class="ai-pill ${w.hasSession ? 'ok' : ''}">${w.hasSession ? '<i class="fa-solid fa-check"></i> Tersimpan ••••' + esc(String(w.hint || '').replace(/^•+/, '')) : 'Belum ada sesi'}</span>
           </div>
-          <input id="aiUrl${i}" type="text" autocomplete="off" value="${esc(w.baseUrl)}" placeholder="URL admin, mis. https://ag.suksesbogil.com/ (domain *.suksesbogil.com)" class="glass-inner border border-white/10 rounded-xl p-2.5 text-xs font-mono text-white placeholder-slate-600 focus:outline-none">
-          <input id="aiSid${i}" type="password" autocomplete="off" placeholder="${w.hasSession ? 'Kosongkan = pakai yang tersimpan. Tempel baru untuk mengganti.' : 'Tempel PHPSESSID=xxxx atau seluruh isi Cookie dari Chrome'}" class="glass-inner border border-white/10 rounded-xl p-2.5 text-xs font-mono text-white placeholder-slate-600 focus:outline-none">
-          <div class="flex flex-wrap gap-2">
-            <button onclick="autoInputSaveSession(${i})" class="bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-extrabold px-4 py-2 rounded-xl text-xs"><i class="fa-solid fa-floppy-disk mr-1"></i>Simpan</button>
-            <button onclick="autoInputTest(${i})" class="glass-inner px-4 py-2 rounded-xl text-xs font-bold" ${w.hasSession ? '' : 'disabled style="opacity:.4"'}><i class="fa-solid fa-vial mr-1"></i>Uji (tanpa kirim)</button>
-            <button onclick="autoInputDeleteSession(${i})" class="glass-inner px-4 py-2 rounded-xl text-xs font-bold text-rose-400" ${w.hasSession ? '' : 'disabled style="opacity:.4"'}><i class="fa-solid fa-trash mr-1"></i>Hapus</button>
+          <label class="ai-field"><span>URL admin</span><input id="aiUrl${i}" type="text" autocomplete="off" value="${esc(w.baseUrl)}" placeholder="https://ag.suksesbogil.com/" class="glass-inner border border-white/10 rounded-lg p-2 text-xs font-mono text-white placeholder-slate-600 focus:outline-none"></label>
+          <label class="ai-field"><span>PHPSESSID</span><input id="aiSid${i}" type="password" autocomplete="off" placeholder="${w.hasSession ? 'Kosongkan = pakai yang tersimpan' : 'Tempel PHPSESSID=xxxx atau seluruh isi Cookie'}" class="glass-inner border border-white/10 rounded-lg p-2 text-xs font-mono text-white placeholder-slate-600 focus:outline-none"></label>
+          <div class="ai-site-actions">
+            <button onclick="autoInputSaveSession(${i})" class="ai-btn primary"><i class="fa-solid fa-floppy-disk"></i>Simpan</button>
+            <button onclick="autoInputTest(${i})" class="ai-btn" ${w.hasSession ? '' : 'disabled'}><i class="fa-solid fa-vial"></i>Uji (tanpa kirim)</button>
+            <button onclick="autoInputDeleteSession(${i})" class="ai-btn danger" ${w.hasSession ? '' : 'disabled'}><i class="fa-solid fa-trash"></i>Hapus</button>
           </div>
         </div>`).join('') || '<div class="text-xs text-slate-400">Akun ini belum punya website.</div>';
       aiJobsState = { jobs: st.jobs || [], days: Number(st.historyDays) || 7, retryMax: Number(st.retryMax) || 0, retryGap: Number(st.retryGapMin) || 2, stColor, stLabel };
       const jobs = autoInputJobsRows();
+      const tabBtn = (k, icon, label) => `<button type="button" role="tab" id="aiTabBtn-${k}" class="ai-tab${aiTab === k ? ' active' : ''}" aria-selected="${aiTab === k}" onclick="autoInputTab('${k}')"><i class="fa-solid ${icon}"></i><span>${label}</span><span id="aiTabBadge-${k}" class="ai-badge" hidden></span></button>`;
       host.innerHTML = `
-        <div class="glass-card rounded-3xl p-5 sm:p-6 flex flex-col gap-5">
+        <div class="glass-card rounded-3xl p-4 sm:p-6 flex flex-col gap-4">
           <div class="page-head tone-amber">
             <div class="page-head-icon"><i class="fa-solid fa-robot"></i></div>
             <div class="page-head-text">
               <div class="page-eyebrow">Utama</div>
               <h2 class="page-title">Auto Prediksi</h2>
-              <p class="page-sub">Sesudah <b>KIRIM SEMUA SISTEM</b>, angka result otomatis diinput ke menu <b>Nomor Keluar</b> admin website lalu di-<b>Hitung</b> — sesuai pasaran &amp; jumlah prize-nya.</p>
+              <p class="page-sub">Sesudah <b>KIRIM SEMUA SISTEM</b>, angka result otomatis diinput ke <b>Nomor Keluar</b> admin website lalu di-<b>Hitung</b>.</p>
             </div>
           </div>
-          <div class="glass-inner rounded-2xl p-4 flex items-center justify-between gap-3 border ${st.enabled ? 'border-emerald-500/30' : 'border-white/5'}">
-            <div>
-              <div class="text-sm font-extrabold ${st.enabled ? 'text-emerald-400' : 'text-slate-300'}">${st.enabled ? 'AKTIF' : 'NONAKTIF'}</div>
-              <div class="text-[11px] text-slate-400">${st.enabled ? 'Setiap KIRIM SEMUA SISTEM langsung menghitung di website yang sesinya tersimpan.' : 'Tidak ada yang diinput otomatis. Input manual seperti biasa.'}</div>
+          <div class="ai-strip${st.enabled ? ' on' : ''}">
+            <span class="ai-dot"></span>
+            <div class="ai-strip-text">
+              <b>${st.enabled ? 'AKTIF' : 'NONAKTIF'}</b>
+              <span>${st.enabled ? 'Setiap KIRIM SEMUA SISTEM langsung dihitung di website yang sesinya tersimpan.' : 'Tidak ada yang diinput otomatis — input manual seperti biasa.'}</span>
             </div>
-            <button onclick="autoInputToggle(${st.enabled ? 'false' : 'true'})" class="${st.enabled ? 'glass-inner text-rose-300' : 'bg-gradient-to-r from-emerald-400 to-cyan-500 text-slate-950'} font-extrabold px-5 py-2.5 rounded-xl text-xs">${st.enabled ? 'MATIKAN' : 'AKTIFKAN'}</button>
+            <button onclick="autoInputToggle(${st.enabled ? 'false' : 'true'})" class="ai-btn ${st.enabled ? 'danger' : 'primary'}">${st.enabled ? 'MATIKAN' : 'AKTIFKAN'}</button>
           </div>
-          <div class="text-[11px] text-slate-400 leading-relaxed">
-            Hanya website yang akunmu boleh akses yang muncul di bawah. Ambil <b>PHPSESSID</b> dari Chrome yang sedang login admin (F12 → Application → Cookies), tempel, <b>Simpan</b>, lalu klik <b>Uji</b> sebelum mengaktifkan. Sesi bisa habis kapan saja — kalau habis, hasilnya <b>gagal sebelum menyentuh admin</b> dan kamu input manual. Nilai PHPSESSID tidak pernah ditampilkan ulang.
+          <div class="ai-tabs" role="tablist" aria-label="Bagian Auto Prediksi">
+            ${tabBtn('sesi', 'fa-key', 'Sesi Website')}
+            ${tabBtn('toto', 'fa-circle-check', 'Toto Macau')}
+            ${tabBtn('riwayat', 'fa-clock-rotate-left', 'Riwayat Job')}
           </div>
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">${rows}</div>
-          <div id="aiTotoBox" class="glass-inner rounded-2xl border border-white/5 p-3 text-xs text-slate-400">Memuat Auto Check Toto Macau…</div>
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <div class="text-[11px] font-extrabold text-slate-300 tracking-wider">RIWAYAT ${Number(st.historyDays) || 7} HARI TERAKHIR <span id="aiJobsCount" class="text-slate-500 font-semibold"></span></div>
-            <div class="flex flex-wrap items-center gap-2 w-full sm:w-auto"><span class="ai-sort-host">${aiSortSelect()}</span>
-            <input id="aiJobsSearch" type="search" autocomplete="off" value="${esc(aiJobsQuery)}" oninput="autoInputSearch(this.value)" placeholder="Cari website, pasaran, angka, status (GAGAL/SELESAI), keterangan…" class="glass-inner border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none flex-1 sm:w-80"></div>
-          </div>
-          <div class="overflow-auto glass-inner rounded-2xl border border-white/5" style="max-height:70vh">
-            <table class="w-full text-left stack-sm"><thead><tr class="text-[10px] text-slate-400 uppercase tracking-wider"><th class="p-2">Waktu</th><th class="p-2">Website</th><th class="p-2">Result</th><th class="p-2">Status</th><th class="p-2">Keterangan</th></tr></thead><tbody id="aiJobsBody">${jobs}</tbody></table>
-          </div>
+
+          <section id="aiPane-sesi" class="ai-pane" ${aiTab === 'sesi' ? '' : 'hidden'}>
+            <details class="ai-fold" ${savedN ? '' : 'open'}>
+              <summary>Cara memasang sesi (3 langkah)</summary>
+              <ol class="ai-steps">
+                <li>Login ke admin website di Chrome, tekan <b>F12 › Application › Cookies</b>, salin nilai <b>PHPSESSID</b>.</li>
+                <li>Tempel di kolom PHPSESSID website yang sesuai, klik <b>Simpan</b>, lalu <b>Uji (tanpa kirim)</b>.</li>
+                <li>Pastikan saklar di atas <b>AKTIF</b>. Bila sesi habis, hasilnya gagal sebelum menyentuh admin — tempel yang baru. Nilai PHPSESSID tidak pernah ditampilkan ulang.</li>
+              </ol>
+            </details>
+            <div class="ai-site-grid">${rows}</div>
+          </section>
+
+          <section id="aiPane-toto" class="ai-pane" ${aiTab === 'toto' ? '' : 'hidden'}>
+            <div id="aiTotoBox" class="ai-box text-xs text-slate-400">Memuat Auto Check Toto Macau…</div>
+          </section>
+
+          <section id="aiPane-riwayat" class="ai-pane" ${aiTab === 'riwayat' ? '' : 'hidden'}>
+            <div class="ai-toolbar">
+              <div class="ai-chips" id="aiJobsChips">${aiJobsChipsHtml()}</div>
+              <div class="ai-toolbar-right">
+                <span class="ai-sort-host">${aiSortSelect()}</span>
+                <input id="aiJobsSearch" type="search" autocomplete="off" value="${esc(aiJobsQuery)}" oninput="autoInputSearch(this.value)" placeholder="Cari website, pasaran, angka, status…" class="ai-search glass-inner border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none">
+              </div>
+            </div>
+            <div class="ai-meta">Riwayat ${Number(st.historyDays) || 7} hari terakhir <span id="aiJobsCount"></span></div>
+            <div class="ai-tablewrap" style="max-height:70vh">
+              <table class="w-full text-left stack-sm"><thead><tr class="text-[10px] text-slate-400 uppercase tracking-wider"><th class="p-2">Waktu</th><th class="p-2">Website</th><th class="p-2">Result</th><th class="p-2">Status</th><th class="p-2">Keterangan</th></tr></thead><tbody id="aiJobsBody">${jobs}</tbody></table>
+            </div>
+          </section>
         </div>`;
       autoInputSearch(aiJobsQuery); // isi hitungan 'x dari y job'
+      autoInputBadges();
       autoInputTotoLoad();
+    }
+    function aiJobsChipsHtml() {
+      const jobs = aiJobsState.jobs || [];
+      const need = jobs.filter(aiJobNeedsCheck).length;
+      const done = jobs.filter(j => j.status === 'DONE').length;
+      return aiChips([['all', 'Semua', jobs.length], ['bad', 'Perlu dicek', need], ['done', 'Selesai', done]], aiJobsFilter, 'autoInputJobsFilter');
+    }
+    function autoInputJobsFilter(v) {
+      aiJobsFilter = v;
+      const c = document.getElementById('aiJobsChips');
+      if (c) c.innerHTML = aiJobsChipsHtml();
+      const tb = document.getElementById('aiJobsBody');
+      if (tb) tb.innerHTML = autoInputJobsRows();
     }
 
     let aiJobsState = { jobs: [], days: 7, retryMax: 0, retryGap: 2, stColor: {}, stLabel: {} };
@@ -4318,11 +4401,12 @@
       const q = aiJobsQuery.trim().toLowerCase();
       const words = q ? q.split(/\s+/) : [];
       const hay = j => [j.website, j.market, (j.prizes || []).join(' '), (j.prizes || []).join('/'), S.stLabel[j.status] || j.status, j.status, j.detail, j.createdAt, j.period].join(' ').toLowerCase();
-      const filtered = words.length ? S.jobs.filter(j => { const h = hay(j); return words.every(w => h.indexOf(w) >= 0); }) : S.jobs;
+      const byStatus = aiJobsFilter === 'bad' ? S.jobs.filter(aiJobNeedsCheck) : aiJobsFilter === 'done' ? S.jobs.filter(j => j.status === 'DONE') : S.jobs;
+      const filtered = words.length ? byStatus.filter(j => { const h = hay(j); return words.every(w => h.indexOf(w) >= 0); }) : byStatus;
       const jobAttn = j => (j.status === 'FAILED' ? 0 : j.status === 'SKIPPED' ? 1 : j.status === 'DONE' ? 3 : 2);
       const list = aiSortList(filtered, { time: j => String(j.createdAt || ''), attn: jobAttn, site: j => String(j.website || ''), market: j => String(j.market || ''), status: j => String(S.stLabel[j.status] || j.status || '') });
       const cnt = document.getElementById('aiJobsCount');
-      if (cnt) cnt.textContent = words.length ? '(' + list.length + ' dari ' + S.jobs.length + ' job)' : '(' + S.jobs.length + ' job)';
+      if (cnt) cnt.textContent = (words.length || aiJobsFilter !== 'all') ? '· ' + list.length + ' dari ' + S.jobs.length + ' job' : '· ' + S.jobs.length + ' job';
       return list.map(j => {
         const early = j.stage === '' || j.stage === 'cek';
         const att = Number(j.attempts) || 0;
@@ -4337,7 +4421,7 @@
           <td class="p-2 text-xs" data-label="Result">${esc(j.market)}<div class="font-mono text-amber-300">${esc((j.prizes || []).join(' / '))}</div></td>
           <td class="p-2 text-[10px] font-extrabold ${S.stColor[j.status] || ''}" data-label="Status">${S.stLabel[j.status] || esc(j.status)}${manual ? '<div class="text-rose-300">CEK MANUAL</div>' : ''}</td>
           <td class="p-2 text-[11px] text-slate-300 stack-full" data-label="Keterangan">${esc(j.detail)} ${again}${retryNote}</td></tr>`;
-      }).join('') || '<tr><td colspan="5" class="p-4 text-center text-xs text-slate-500">' + (words.length ? 'Tidak ada job yang cocok dengan pencarian.' : 'Belum ada job dalam ' + S.days + ' hari terakhir.') + '</td></tr>';
+      }).join('') || '<tr><td colspan="5" class="p-4 text-center text-xs text-slate-500">' + ((words.length || aiJobsFilter !== 'all') ? 'Tidak ada job yang cocok dengan pencarian/filter.' : 'Belum ada job dalam ' + S.days + ' hari terakhir.') + '</td></tr>';
     }
     // Urutkan (dipakai tabel riwayat job & tabel Auto Check Toto Macau). Pilihan diingat di browser ini.
     const AI_SORTS = [['new', 'Terbaru dulu'], ['old', 'Terlama dulu'], ['attn', 'Perlu dicek dulu (gagal/beda)'], ['site', 'Website A–Z'], ['market', 'Pasaran A–Z'], ['status', 'Status A–Z']];
@@ -4423,33 +4507,56 @@
       const esc = escapeHtml;
       const d = aiTotoData;
       if (!d) { box.textContent = 'Auto Check Toto Macau belum bisa dimuat.'; return; }
-      const modeTxt = d.mode === 2 ? '<span class="text-emerald-400 font-extrabold">MODE 2 · OTOMATIS ISI &amp; KOREKSI PANEL-Z</span>' : d.mode === 1 ? '<span class="text-amber-300 font-extrabold">MODE 1 · HANYA BACA &amp; CATAT (belum posting)</span>' : '<span class="text-slate-500 font-extrabold">MATI</span>';
-      const stCls = { SENT: 'text-emerald-400', VERIFIED: 'text-emerald-300', RECORDED: 'text-sky-300', PENDING: 'text-amber-300', CONFLICT: 'text-rose-400', MISSING: 'text-slate-400', FAILED: 'text-rose-400', SKIPPED: 'text-slate-400', SENDING: 'text-amber-300' };
+      const stCls = { SENT: 'text-emerald-400', VERIFIED: 'text-emerald-300', RECORDED: 'text-sky-300', PENDING: 'text-amber-300', CONFLICT: 'text-rose-400', MISSING: 'text-amber-300', FAILED: 'text-rose-400', SKIPPED: 'text-slate-400', SENDING: 'text-amber-300' };
       const stTxt = { SENT: 'TERKIRIM', VERIFIED: 'SUDAH ADA', RECORDED: 'TERCATAT', PENDING: 'BELUM TERISI', CONFLICT: 'BEDA ANGKA', MISSING: 'MENUNGGU BARIS', FAILED: 'GAGAL', SKIPPED: 'DILEWATI', SENDING: 'MENGIRIM' };
+      const grp = s => ({ SENT: 'ok', VERIFIED: 'ok', RECORDED: 'ok', PENDING: 'wait', MISSING: 'wait', SENDING: 'wait', CONFLICT: 'bad', FAILED: 'bad' }[s] || 'skip');
+      const allRows = d.rows || [];
+      const cnt = { all: allRows.length, ok: 0, wait: 0, bad: 0 };
+      allRows.forEach(r => { const g = grp(r.status); if (cnt[g] !== undefined) cnt[g]++; });
+      const shown = aiTotoFilter === 'all' ? allRows : allRows.filter(r => grp(r.status) === aiTotoFilter);
       const totoAttn = r => ({ CONFLICT: 0, FAILED: 0, PENDING: 1, MISSING: 2, SENDING: 2, SKIPPED: 3 }[r.status] ?? 4);
-      const sortedRows = aiSortList(d.rows || [], { time: r => String(r.rowAt || ''), attn: totoAttn, site: r => String(r.website || ''), market: r => String(r.market || ''), status: r => String(stTxt[r.status] || r.status || '') });
+      const sortedRows = aiSortList(shown, { time: r => String(r.rowAt || ''), attn: totoAttn, site: r => String(r.website || ''), market: r => String(r.market || ''), status: r => String(stTxt[r.status] || r.status || '') });
       const rows = sortedRows.slice(0, 250).map(r => `<tr class="border-t border-white/5 align-top">
           <td class="p-2 text-[10px] text-slate-400 whitespace-nowrap" data-label="Tanggal & jam draw">${esc(r.rowAt)}</td>
           <td class="p-2 text-xs font-bold text-cyan-300" data-label="Website">${esc(r.website)}</td>
-          <td class="p-2 text-xs" data-label="Pasaran tujuan">${esc(r.market || '-')}<div class="text-[10px] text-slate-500">periode ${esc(r.period)}</div></td>
+          <td class="p-2 text-xs whitespace-nowrap" data-label="Pasaran tujuan">${esc(r.market || '-')}<div class="text-[10px] text-slate-500">periode ${esc(r.period)}</div></td>
           <td class="p-2 text-xs font-mono font-extrabold text-amber-300" data-label="Angka">${esc(r.number)}</td>
-          <td class="p-2 text-[10px] font-extrabold ${stCls[r.status] || ''}" data-label="Status">${stTxt[r.status] || esc(r.status)}</td>
-          <td class="p-2 text-[11px] text-slate-300 stack-full" data-label="Keterangan">${esc(r.detail)}${r.attempts ? ' (' + Number(r.attempts) + '/' + Number(d.maxAttempts) + ' percobaan)' : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="p-3 text-center text-slate-500">Belum ada draw tercatat.</td></tr>';
+          <td class="p-2 text-[10px] font-extrabold whitespace-nowrap ${stCls[r.status] || ''}" data-label="Status">${stTxt[r.status] || esc(r.status)}</td>
+          <td class="p-2 text-[11px] text-slate-300 stack-full" data-label="Keterangan">${esc(r.detail)}${r.attempts ? ' <span class="text-slate-500">(' + Number(r.attempts) + '/' + Number(d.maxAttempts) + ' percobaan)</span>' : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="p-3 text-center text-slate-500">' + (aiTotoFilter === 'all' ? 'Belum ada draw tercatat.' : 'Tidak ada baris di filter ini.') + '</td></tr>';
       const keepScroll = ['aiTotoLogScroll', 'aiTotoTblScroll'].map(id => { const el = document.getElementById(id); return [id, el ? el.scrollTop : 0]; });
       const evCol = { OK: 'text-emerald-300', WARN: 'text-amber-300', ERR: 'text-rose-400', INFO: 'text-slate-300' };
-      const evRows = (d.events || []).slice(0, 40).map(e => `<div class="flex gap-2 py-0.5 border-t border-white/5 first:border-0"><span class="text-slate-500 whitespace-nowrap">${esc(String(e.ts || '').slice(5, 19))}</span><span class="${evCol[e.level] || 'text-slate-300'}">${e.website ? '<b class="text-cyan-300">' + esc(e.website) + '</b> · ' : ''}${esc(e.msg)}</span></div>`).join('') || '<div class="text-slate-500">Belum ada kegiatan tercatat. Tekan CEK &amp; ISI SEKARANG atau tunggu jadwal otomatis.</div>';
+      const evs = d.events || [];
+      const evLine = e => `<span class="text-slate-500 whitespace-nowrap">${esc(String(e.ts || '').slice(5, 19))}</span> <span class="${evCol[e.level] || 'text-slate-300'}">${e.website ? '<b class="text-cyan-300">' + esc(e.website) + '</b> · ' : ''}${esc(e.msg)}</span>`;
+      const evRows = evs.slice(0, 40).map(e => `<div class="ai-ev">${evLine(e)}</div>`).join('') || '<div class="text-slate-500">Belum ada kegiatan tercatat. Tekan CEK &amp; ISI SEKARANG atau tunggu jadwal otomatis.</div>';
       const trgAge = d.dispatchAt ? Math.round((Date.now() - Date.parse(String(d.dispatchAt).replace(' ', 'T') + '+07:00')) / 60000) : null;
       const trgBad = d.mode > 0 && (trgAge === null || trgAge > 45);
-      const trgTxt = trgAge === null ? 'Pemicu cron: belum pernah memicu' : 'Pemicu cron terakhir ' + esc(String(d.dispatchAt).slice(5, 19)) + ' (' + (trgAge < 1 ? '<1' : trgAge) + ' menit lalu)';
-      const trgBadge = '<div class="text-[10px] mb-1 ' + (trgBad ? 'text-rose-400 font-extrabold' : 'text-slate-500') + '">' + (trgBad ? '⚠ PEMICU OTOMATIS TIDAK BERJALAN — ' : '') + trgTxt + (trgBad ? '. Cek token GitHub di Admin › Integrasi (TES KONEKSI) atau tekan CEK &amp; ISI SEKARANG.' : '') + '</div>';
-      const runBadge = d.running ? '<span class="text-emerald-300 font-extrabold"><i class="fa-solid fa-circle-notch fa-spin mr-1"></i>SEDANG BERJALAN</span>' : '<span class="text-slate-400 font-bold">Siaga' + (d.lastAt ? ' · terakhir aktif ' + esc(String(d.lastAt).slice(5, 19)) : '') + '</span>';
-      const logBox = `<div class="mb-2 rounded-xl border border-white/5 bg-black/20 p-2"><div class="flex items-center justify-between gap-2 mb-1 text-[10px]"><span class="font-extrabold text-slate-300 tracking-wider">LOG KEGIATAN</span>${runBadge}</div>${trgBadge}<div class="overflow-auto font-mono text-[10px] leading-snug" id="aiTotoLogScroll" style="max-height:26vh">${evRows}</div></div>`;
-      box.innerHTML = `<div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-          <div class="text-[11px] font-extrabold text-slate-300 tracking-wider">AUTO CHECK TOTO MACAU &amp; TOTO MACAO 5D</div><div class="flex flex-wrap items-center gap-2"><span class="ai-sort-host">${aiSortSelect()}</span><span class="text-[10px]">${modeTxt}</span><button onclick="autoInputTotoRunNow(this)" class="bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-extrabold px-3 py-1.5 rounded-lg text-[10px]"><i class="fa-solid fa-bolt mr-1"></i>CEK &amp; ISI SEKARANG</button></div></div>
-        ${logBox}
-        <div class="text-[11px] text-slate-400 leading-relaxed mb-2">Membaca daftar nomor di admin AG/AGWL (mundur sampai 7 hari lewat tombol [ &gt;&gt; ], diatur di Pengaturan Sistem; hanya yang <b>Hitung: Yes</b>) memakai PHPSESSID tersimpan akun yang punya izin Panel-Z &amp; menu Result, lalu mencocokkannya dengan baris <b>pasaran + tanggal</b> yang sama di Panel-Z: kosong (xxxx) = <b>diisi otomatis</b>, sudah sama = ditandai, angka berbeda = <b>dikoreksi ke angka admin</b> (angka lama dicatat). Berjalan otomatis tanpa klik; tombol hanya untuk memaksa sekarang. Pengaturan di Admin › Pengaturan Sistem.</div>
-        <div class="overflow-auto rounded-xl border border-white/5" id="aiTotoTblScroll" style="max-height:40vh"><table class="w-full text-left stack-sm"><thead><tr class="text-[10px] text-slate-400 uppercase tracking-wider"><th class="p-2">Tanggal &amp; jam draw</th><th class="p-2">Website</th><th class="p-2">Pasaran tujuan</th><th class="p-2">Angka</th><th class="p-2">Status</th><th class="p-2">Keterangan</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      const trgTxt = trgAge === null ? 'Pemicu cron belum pernah memicu' : 'Pemicu cron terakhir ' + esc(String(d.dispatchAt).slice(5, 19)) + ' (' + (trgAge < 1 ? '<1' : trgAge) + ' menit lalu)';
+      const modePill = d.mode === 2 ? '<span class="ai-pill ok">Mode 2 · isi &amp; koreksi otomatis</span>' : d.mode === 1 ? '<span class="ai-pill warn">Mode 1 · hanya baca &amp; catat</span>' : '<span class="ai-pill">Mati</span>';
+      const runPill = d.running ? '<span class="ai-pill ok"><i class="fa-solid fa-circle-notch fa-spin"></i> Sedang berjalan</span>' : '<span class="ai-pill">Siaga' + (d.lastAt ? ' · terakhir ' + esc(String(d.lastAt).slice(5, 16)) : '') + '</span>';
+      const nowLine = evs.length ? evLine(evs[0]) : 'Belum ada kegiatan.';
+      box.innerHTML = `
+        <div class="ai-toolbar">
+          <div class="ai-toolbar-left">${modePill}${runPill}</div>
+          <div class="ai-toolbar-right"><span class="ai-sort-host">${aiSortSelect()}</span><button onclick="autoInputTotoRunNow(this)" class="ai-btn primary"><i class="fa-solid fa-bolt"></i>Cek &amp; isi sekarang</button></div>
+        </div>
+        ${trgBad ? '<div class="ai-alert"><i class="fa-solid fa-triangle-exclamation"></i><div><b>Pemicu otomatis tidak berjalan.</b> ' + trgTxt + '. Cek token GitHub di Admin › Integrasi (TES KONEKSI) atau tekan “Cek &amp; isi sekarang”.</div></div>' : ''}
+        <details class="ai-fold ai-log" ${aiLogOpen ? 'open' : ''} ontoggle="aiLogOpen=this.open">
+          <summary><span class="ai-log-title">Log kegiatan</span><span class="ai-log-now">${nowLine}</span></summary>
+          <div class="ai-log-meta">${trgTxt}</div>
+          <div class="ai-log-body" id="aiTotoLogScroll">${evRows}</div>
+        </details>
+        <div class="ai-chips">${aiChips([['all', 'Semua', cnt.all], ['ok', 'Beres', cnt.ok], ['wait', 'Menunggu', cnt.wait], ['bad', 'Bermasalah', cnt.bad]], aiTotoFilter, 'autoInputTotoFilter')}</div>
+        <div class="ai-tablewrap" id="aiTotoTblScroll" style="max-height:52vh"><table class="w-full text-left stack-sm"><thead><tr class="text-[10px] text-slate-400 uppercase tracking-wider"><th class="p-2">Tanggal &amp; jam draw</th><th class="p-2">Website</th><th class="p-2">Pasaran tujuan</th><th class="p-2">Angka</th><th class="p-2">Status</th><th class="p-2">Keterangan</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <details class="ai-fold">
+          <summary>Cara kerja Auto Check</summary>
+          <p class="ai-help">Membaca daftar nomor admin AG/AGWL (mundur sampai 7 hari lewat tombol [ &gt;&gt; ]; hanya <b>Hitung: Yes</b>) memakai PHPSESSID tersimpan, lalu mencocokkannya dengan baris <b>pasaran + tanggal</b> yang sama di Panel-Z: kosong (xxxx) = <b>diisi otomatis</b>, sudah sama = ditandai, angka berbeda = <b>dikoreksi ke angka admin</b> (angka lama dicatat). Berjalan otomatis tanpa klik; tombol hanya untuk memaksa sekarang. Pengaturan di Admin › Pengaturan Sistem.</p>
+        </details>`;
       keepScroll.forEach(([id, top]) => { const el = document.getElementById(id); if (el) el.scrollTop = top; });
+      autoInputBadges();
+    }
+    function autoInputTotoFilter(v) {
+      aiTotoFilter = v;
+      autoInputTotoPaint();
     }
 
     let aiAlertBusy = false;
