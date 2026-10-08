@@ -4247,7 +4247,7 @@
         if (document.hidden) return;
         // Jangan menimpa kolom yang sedang diketik.
         const ae = document.activeElement;
-        if (ae && /^(INPUT|SELECT)$/.test(ae.tagName) && document.getElementById('auto-input-page').contains(ae)) return;
+        if (ae && /^(INPUT|SELECT)$/.test(ae.tagName) && ae.type !== 'checkbox' && document.getElementById('auto-input-page').contains(ae)) return;
         loadAutoInputPage(true);
       }, 6000);
     }
@@ -4289,6 +4289,62 @@
       }
       const need = (aiJobsState.jobs || []).filter(aiJobNeedsCheck).length;
       set('riwayat', need ? String(need) : String((aiJobsState.jobs || []).length), need ? 'bad' : '');
+    }
+    // Checkbox pilih-banyak + "Hapus terpilih" (Riwayat Job & Toto Macau). Pilihan selalu bagian dari baris yang TAMPIL (filter/cari/urut tidak menyisakan pilihan tersembunyi).
+    const aiSel = { jobs: new Set(), toto: new Set() };
+    const aiVisible = { jobs: [], toto: [] };
+    function aiSyncSel(kind, ids) {
+      aiVisible[kind] = ids;
+      const vis = new Set(ids);
+      aiSel[kind] = new Set([...aiSel[kind]].filter(id => vis.has(id)));
+    }
+    function aiSelBarHtml(kind) {
+      const n = aiSel[kind].size;
+      const total = aiVisible[kind].length;
+      return `<button type="button" class="ai-btn" onclick="autoInputSelAll('${kind}', ${n < total ? 'true' : 'false'})" ${total ? '' : 'disabled'}><i class="fa-regular fa-square-check"></i>${n < total ? 'Pilih semua yang tampil (' + total + ')' : 'Batal pilih semua'}</button>`
+        + (n ? `<span class="ai-sel-count"><b>${n}</b> dipilih</span><button type="button" class="ai-btn danger" onclick="autoInputDeleteSelected('${kind}')"><i class="fa-solid fa-trash"></i>Hapus terpilih</button>` : '');
+    }
+    function autoInputSelUpdate(kind) {
+      const bar = document.getElementById('aiSelBar-' + kind);
+      if (bar) bar.innerHTML = aiSelBarHtml(kind);
+      const head = document.getElementById(kind === 'jobs' ? 'aiSelAllJobs' : 'aiSelAllToto');
+      if (head) { const n = aiSel[kind].size, t = aiVisible[kind].length; head.checked = t > 0 && n === t; head.indeterminate = n > 0 && n < t; }
+    }
+    function autoInputSel(kind, id, on) {
+      if (on) aiSel[kind].add(Number(id)); else aiSel[kind].delete(Number(id));
+      autoInputSelUpdate(kind);
+    }
+    function autoInputSelAll(kind, on) {
+      aiSel[kind] = on ? new Set(aiVisible[kind]) : new Set();
+      const box = document.getElementById(kind === 'jobs' ? 'aiJobsBody' : 'aiTotoTblScroll');
+      if (box) box.querySelectorAll('input.ai-chk').forEach(c => { c.checked = on; });
+      autoInputSelUpdate(kind);
+    }
+    function autoInputDeleteSelected(kind) {
+      const ids = [...aiSel[kind]];
+      if (!ids.length) return;
+      const jobs = kind === 'jobs';
+      openCenterNotice({
+        type: 'warning',
+        title: 'Hapus ' + ids.length + (jobs ? ' catatan Riwayat Job?' : ' baris Toto Macau?'),
+        message: jobs
+          ? 'Catatan disembunyikan dari daftar dan tidak dicoba ulang otomatis / tidak memunculkan peringatan lagi (dianggap sudah beres atau sudah kamu tangani manual). Input yang sudah masuk ke admin website TIDAK dibatalkan. Job yang masih berjalan dilewati.'
+          : 'Baris dianggap sudah ditangani manual: hilang dari daftar dan TIDAK diperiksa, diisi, atau dikoreksi otomatis lagi — berlaku untuk semua user di website itu. Angka di Panel-Z tidak diubah.',
+        confirmText: 'HAPUS',
+        cancelText: 'BATAL',
+        showCancel: true
+      }).then(ok => {
+        if (!ok) return;
+        const run = google.script.run
+          .withSuccessHandler(r => {
+            if (apiFailed(r)) { toast(apiMessage(r)); return; }
+            toast((r && r.message) || 'Dihapus.');
+            aiSel[kind] = new Set();
+            if (jobs) loadAutoInputPage(false); else autoInputTotoLoad(true);
+          })
+          .withFailureHandler(err => toast((err && err.message) || 'Gagal menghapus'));
+        if (jobs) run.autoInputHideJobs(currentSessionToken, ids); else run.autoInputDismissToto(currentSessionToken, ids);
+      });
     }
     function aiChips(items, cur, fn) {
       return items.map(([k, label, n]) => `<button type="button" class="ai-chip${k === cur ? ' active' : ''}${k === 'bad' && n ? ' bad' : ''}" onclick="${fn}('${k}')">${label}<b>${n}</b></button>`).join('');
@@ -4370,12 +4426,14 @@
               </div>
             </div>
             <div class="ai-meta">Riwayat ${Number(st.historyDays) || 7} hari terakhir <span id="aiJobsCount"></span></div>
+            <div class="ai-selbar" id="aiSelBar-jobs"></div>
             <div class="ai-tablewrap" style="max-height:70vh">
-              <table class="w-full text-left stack-sm"><thead><tr class="text-[10px] text-slate-400 uppercase tracking-wider"><th class="p-2">Waktu</th><th class="p-2">Website</th><th class="p-2">Result</th><th class="p-2">Status</th><th class="p-2">Keterangan</th></tr></thead><tbody id="aiJobsBody">${jobs}</tbody></table>
+              <table class="w-full text-left stack-sm"><thead><tr class="text-[10px] text-slate-400 uppercase tracking-wider"><th class="p-2 ai-sel"><input type="checkbox" class="ai-chk" id="aiSelAllJobs" onchange="autoInputSelAll('jobs', this.checked)" aria-label="Pilih semua"></th><th class="p-2">Waktu</th><th class="p-2">Website</th><th class="p-2">Result</th><th class="p-2">Status</th><th class="p-2">Keterangan</th></tr></thead><tbody id="aiJobsBody">${jobs}</tbody></table>
             </div>
           </section>
         </div>`;
       autoInputSearch(aiJobsQuery); // isi hitungan 'x dari y job'
+      autoInputSelUpdate('jobs');
       autoInputBadges();
       autoInputTotoLoad();
     }
@@ -4390,7 +4448,7 @@
       const c = document.getElementById('aiJobsChips');
       if (c) c.innerHTML = aiJobsChipsHtml();
       const tb = document.getElementById('aiJobsBody');
-      if (tb) tb.innerHTML = autoInputJobsRows();
+      if (tb) { tb.innerHTML = autoInputJobsRows(); autoInputSelUpdate('jobs'); }
     }
 
     let aiJobsState = { jobs: [], days: 7, retryMax: 0, retryGap: 2, stColor: {}, stLabel: {} };
@@ -4407,6 +4465,7 @@
       const list = aiSortList(filtered, { time: j => String(j.createdAt || ''), attn: jobAttn, site: j => String(j.website || ''), market: j => String(j.market || ''), status: j => String(S.stLabel[j.status] || j.status || '') });
       const cnt = document.getElementById('aiJobsCount');
       if (cnt) cnt.textContent = (words.length || aiJobsFilter !== 'all') ? '· ' + list.length + ' dari ' + S.jobs.length + ' job' : '· ' + S.jobs.length + ' job';
+      aiSyncSel('jobs', list.map(j => Number(j.id)));
       return list.map(j => {
         const early = j.stage === '' || j.stage === 'cek';
         const att = Number(j.attempts) || 0;
@@ -4416,12 +4475,13 @@
           ? `<button onclick="autoInputClearJob(${Number(j.id)})" class="retry-mini" title="Hapus catatan supaya result ini bisa dicoba lagi">COBA LAGI</button>` : '';
         const retryNote = willRetry ? `<div class="text-amber-300">Dicoba ulang otomatis ±${S.retryGap} menit (${att}/${S.retryMax} sudah dicoba)</div>` : (att > 0 && j.status === 'FAILED' ? `<div class="text-slate-400">Percobaan ulang otomatis habis (${att}/${S.retryMax})</div>` : (att > 0 && j.status === 'DONE' ? `<div class="text-emerald-300">Berhasil pada percobaan ulang ke-${att}</div>` : ''));
         return `<tr class="border-t border-white/5 align-top">
+          <td class="p-2 ai-sel"><input type="checkbox" class="ai-chk" ${aiSel.jobs.has(Number(j.id)) ? 'checked' : ''} onchange="autoInputSel('jobs', ${Number(j.id)}, this.checked)" aria-label="Pilih job ${esc(j.market)}"></td>
           <td class="p-2 text-[10px] text-slate-400 whitespace-nowrap" data-label="Waktu">${esc(j.createdAt)}</td>
           <td class="p-2 text-xs font-bold text-cyan-300" data-label="Website">${esc(j.website)}</td>
           <td class="p-2 text-xs" data-label="Result">${esc(j.market)}<div class="font-mono text-amber-300">${esc((j.prizes || []).join(' / '))}</div></td>
           <td class="p-2 text-[10px] font-extrabold ${S.stColor[j.status] || ''}" data-label="Status">${S.stLabel[j.status] || esc(j.status)}${manual ? '<div class="text-rose-300">CEK MANUAL</div>' : ''}</td>
           <td class="p-2 text-[11px] text-slate-300 stack-full" data-label="Keterangan">${esc(j.detail)} ${again}${retryNote}</td></tr>`;
-      }).join('') || '<tr><td colspan="5" class="p-4 text-center text-xs text-slate-500">' + ((words.length || aiJobsFilter !== 'all') ? 'Tidak ada job yang cocok dengan pencarian/filter.' : 'Belum ada job dalam ' + S.days + ' hari terakhir.') + '</td></tr>';
+      }).join('') || '<tr><td colspan="6" class="p-4 text-center text-xs text-slate-500">' + ((words.length || aiJobsFilter !== 'all') ? 'Tidak ada job yang cocok dengan pencarian/filter.' : 'Belum ada job dalam ' + S.days + ' hari terakhir.') + '</td></tr>';
     }
     // Urutkan (dipakai tabel riwayat job & tabel Auto Check Toto Macau). Pilihan diingat di browser ini.
     const AI_SORTS = [['new', 'Terbaru dulu'], ['old', 'Terlama dulu'], ['attn', 'Perlu dicek dulu (gagal/beda)'], ['site', 'Website A–Z'], ['market', 'Pasaran A–Z'], ['status', 'Status A–Z']];
@@ -4450,13 +4510,13 @@
       try { localStorage.setItem('kd_ai_sort', v); } catch (e) { /* abaikan */ }
       document.querySelectorAll('.ai-sort-host select').forEach(sel => { sel.value = v; });
       const tb = document.getElementById('aiJobsBody');
-      if (tb) tb.innerHTML = autoInputJobsRows();
+      if (tb) { tb.innerHTML = autoInputJobsRows(); autoInputSelUpdate('jobs'); }
       autoInputTotoPaint();
     }
     function autoInputSearch(v) {
       aiJobsQuery = String(v || '');
       const tb = document.getElementById('aiJobsBody');
-      if (tb) tb.innerHTML = autoInputJobsRows();
+      if (tb) { tb.innerHTML = autoInputJobsRows(); autoInputSelUpdate('jobs'); }
     }
 
     // Peringatan terakhir Auto Prediksi: job tetap GAGAL setelah semua percobaan ulang otomatis -> popup tengah layar di menu mana pun.
@@ -4515,14 +4575,17 @@
       allRows.forEach(r => { const g = grp(r.status); if (cnt[g] !== undefined) cnt[g]++; });
       const shown = aiTotoFilter === 'all' ? allRows : allRows.filter(r => grp(r.status) === aiTotoFilter);
       const totoAttn = r => ({ CONFLICT: 0, FAILED: 0, PENDING: 1, MISSING: 2, SENDING: 2, SKIPPED: 3 }[r.status] ?? 4);
-      const sortedRows = aiSortList(shown, { time: r => String(r.rowAt || ''), attn: totoAttn, site: r => String(r.website || ''), market: r => String(r.market || ''), status: r => String(stTxt[r.status] || r.status || '') });
-      const rows = sortedRows.slice(0, 250).map(r => `<tr class="border-t border-white/5 align-top">
+      const sortedRows0 = aiSortList(shown, { time: r => String(r.rowAt || ''), attn: totoAttn, site: r => String(r.website || ''), market: r => String(r.market || ''), status: r => String(stTxt[r.status] || r.status || '') });
+      const sortedRows = sortedRows0.slice(0, 250);
+      aiSyncSel('toto', sortedRows.map(r => Number(r.id)));
+      const rows = sortedRows.map(r => `<tr class="border-t border-white/5 align-top">
+          <td class="p-2 ai-sel"><input type="checkbox" class="ai-chk" ${aiSel.toto.has(Number(r.id)) ? 'checked' : ''} onchange="autoInputSel('toto', ${Number(r.id)}, this.checked)" aria-label="Pilih baris ${esc(r.market)}"></td>
           <td class="p-2 text-[10px] text-slate-400 whitespace-nowrap" data-label="Tanggal & jam draw">${esc(r.rowAt)}</td>
           <td class="p-2 text-xs font-bold text-cyan-300" data-label="Website">${esc(r.website)}</td>
           <td class="p-2 text-xs whitespace-nowrap" data-label="Pasaran tujuan">${esc(r.market || '-')}<div class="text-[10px] text-slate-500">periode ${esc(r.period)}</div></td>
           <td class="p-2 text-xs font-mono font-extrabold text-amber-300" data-label="Angka">${esc(r.number)}</td>
           <td class="p-2 text-[10px] font-extrabold whitespace-nowrap ${stCls[r.status] || ''}" data-label="Status">${stTxt[r.status] || esc(r.status)}</td>
-          <td class="p-2 text-[11px] text-slate-300 stack-full" data-label="Keterangan">${esc(r.detail)}${r.attempts ? ' <span class="text-slate-500">(' + Number(r.attempts) + '/' + Number(d.maxAttempts) + ' percobaan)</span>' : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="p-3 text-center text-slate-500">' + (aiTotoFilter === 'all' ? 'Belum ada draw tercatat.' : 'Tidak ada baris di filter ini.') + '</td></tr>';
+          <td class="p-2 text-[11px] text-slate-300 stack-full" data-label="Keterangan">${esc(r.detail)}${r.attempts ? ' <span class="text-slate-500">(' + Number(r.attempts) + '/' + Number(d.maxAttempts) + ' percobaan)</span>' : ''}</td></tr>`).join('') || '<tr><td colspan="7" class="p-3 text-center text-slate-500">' + (aiTotoFilter === 'all' ? 'Belum ada draw tercatat.' : 'Tidak ada baris di filter ini.') + '</td></tr>';
       const keepScroll = ['aiTotoLogScroll', 'aiTotoTblScroll'].map(id => { const el = document.getElementById(id); return [id, el ? el.scrollTop : 0]; });
       const evCol = { OK: 'text-emerald-300', WARN: 'text-amber-300', ERR: 'text-rose-400', INFO: 'text-slate-300' };
       const evs = d.events || [];
@@ -4546,12 +4609,14 @@
           <div class="ai-log-body" id="aiTotoLogScroll">${evRows}</div>
         </details>
         <div class="ai-chips">${aiChips([['all', 'Semua', cnt.all], ['ok', 'Beres', cnt.ok], ['wait', 'Menunggu', cnt.wait], ['bad', 'Bermasalah', cnt.bad]], aiTotoFilter, 'autoInputTotoFilter')}</div>
-        <div class="ai-tablewrap" id="aiTotoTblScroll" style="max-height:52vh"><table class="w-full text-left stack-sm"><thead><tr class="text-[10px] text-slate-400 uppercase tracking-wider"><th class="p-2">Tanggal &amp; jam draw</th><th class="p-2">Website</th><th class="p-2">Pasaran tujuan</th><th class="p-2">Angka</th><th class="p-2">Status</th><th class="p-2">Keterangan</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <div class="ai-selbar" id="aiSelBar-toto"></div>
+        <div class="ai-tablewrap" id="aiTotoTblScroll" style="max-height:52vh"><table class="w-full text-left stack-sm"><thead><tr class="text-[10px] text-slate-400 uppercase tracking-wider"><th class="p-2 ai-sel"><input type="checkbox" class="ai-chk" id="aiSelAllToto" onchange="autoInputSelAll('toto', this.checked)" aria-label="Pilih semua"></th><th class="p-2">Tanggal &amp; jam draw</th><th class="p-2">Website</th><th class="p-2">Pasaran tujuan</th><th class="p-2">Angka</th><th class="p-2">Status</th><th class="p-2">Keterangan</th></tr></thead><tbody>${rows}</tbody></table></div>
         <details class="ai-fold">
           <summary>Cara kerja Auto Check</summary>
           <p class="ai-help">Membaca daftar nomor admin AG/AGWL (mundur sampai 7 hari lewat tombol [ &gt;&gt; ]; hanya <b>Hitung: Yes</b>) memakai PHPSESSID tersimpan, lalu mencocokkannya dengan baris <b>pasaran + tanggal</b> yang sama di Panel-Z: kosong (xxxx) = <b>diisi otomatis</b>, sudah sama = ditandai, angka berbeda = <b>dikoreksi ke angka admin</b> (angka lama dicatat). Berjalan otomatis tanpa klik; tombol hanya untuk memaksa sekarang. Pengaturan di Admin › Pengaturan Sistem.</p>
         </details>`;
       keepScroll.forEach(([id, top]) => { const el = document.getElementById(id); if (el) el.scrollTop = top; });
+      autoInputSelUpdate('toto');
       autoInputBadges();
     }
     function autoInputTotoFilter(v) {

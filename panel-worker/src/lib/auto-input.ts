@@ -67,6 +67,8 @@ export async function ensureAutoInputTables(env: Env): Promise<void> {
 		`ALTER TABLE auto_input_job ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0`,
 		// alerted = 1 setelah popup peringatan 'gagal & perlu dicek' ditampilkan ke user (supaya tidak muncul berulang).
 		`ALTER TABLE auto_input_job ADD COLUMN alerted INTEGER NOT NULL DEFAULT 0`,
+		// hidden = 1: disembunyikan user (sudah beres / ditangani manual). Baris tetap ada sebagai pagar anti-input-ganda (UNIQUE website+result_key).
+		`ALTER TABLE auto_input_job ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`,
 		`CREATE INDEX IF NOT EXISTS ix_auto_input_job_retry ON auto_input_job(status, updated_at)`,
 	]) {
 		try {
@@ -480,10 +482,26 @@ export async function listJobs(env: Env, username: string, days?: number): Promi
 	const n = days ?? (await getSys(env, "sys_auto_input_history_days"));
 	const from = retentionFrom(n);
 	const res = await getTurso(env)
-		.prepare(`SELECT * FROM auto_input_job WHERE username = ? AND created_at >= ? ORDER BY id DESC LIMIT 2000`)
+		.prepare(`SELECT * FROM auto_input_job WHERE username = ? AND hidden = 0 AND created_at >= ? ORDER BY id DESC LIMIT 2000`)
 		.bind(username, from)
 		.all<Record<string, unknown>>();
 	return (res.results ?? []).map(rowToJob);
+}
+
+/**
+ * Sembunyikan job pilihan user (sudah beres / ditangani manual): hilang dari daftar, tidak dicoba ulang otomatis, tidak memunculkan peringatan.
+ * SENGAJA tidak menghapus barisnya: UNIQUE (website, result_key) tetap menjadi pagar anti-input-ganda ke admin; baris dipangkas otomatis setelah N hari.
+ * Hanya milik user sendiri; job yang masih berjalan/antre dilewati.
+ */
+export async function hideJobs(env: Env, username: string, ids: number[]): Promise<{ hidden: number; skipped: number }> {
+	await ensureAutoInputTables(env);
+	const list = [...new Set(ids.map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 300);
+	if (!list.length) return { hidden: 0, skipped: 0 };
+	const r = await getTurso(env)
+		.prepare(`UPDATE auto_input_job SET hidden = 1 WHERE username = ? AND hidden = 0 AND status NOT IN ('RUNNING', 'QUEUED') AND id IN (${list.map(() => "?").join(",")})`)
+		.bind(username, ...list)
+		.run();
+	return { hidden: r.meta.changes, skipped: list.length - r.meta.changes };
 }
 
 /** Hapus job yang lebih lama dari N hari (batas sama dengan riwayat yang ditampilkan). Job yang masih RUNNING tidak disentuh. */
@@ -525,7 +543,7 @@ export async function dueRetryJobs(env: Env, maxRetries: number, gapMin: number,
 	const res = await getTurso(env)
 		.prepare(
 			`SELECT j.* FROM auto_input_job j JOIN auto_input_config c ON c.username = j.username AND c.enabled = 1
-			 WHERE j.status = 'FAILED' AND j.attempts < ? AND j.updated_at <= ? AND j.created_at >= ? ORDER BY j.updated_at ASC, j.id ASC LIMIT ?`,
+			 WHERE j.status = 'FAILED' AND j.hidden = 0 AND j.attempts < ? AND j.updated_at <= ? AND j.created_at >= ? ORDER BY j.updated_at ASC, j.id ASC LIMIT ?`,
 		)
 		.bind(maxRetries, tsPlusMinutes(-gapMin), tsPlusMinutes(-RETRY_WINDOW_MIN), limit)
 		.all<Record<string, unknown>>();
@@ -558,7 +576,7 @@ export interface FailedAlert {
 export async function pendingFailureAlerts(env: Env, username: string, maxRetries: number): Promise<FailedAlert[]> {
 	await ensureAutoInputTables(env); // tanpa expireRunning: dipoll tiap 20 dtk, cukup cron/menu yang merapikan job basi
 	const res = await getTurso(env)
-		.prepare(`SELECT * FROM auto_input_job WHERE username = ? AND status = 'FAILED' AND attempts >= ? AND alerted = 0 AND updated_at >= ? AND created_at >= ? ORDER BY id ASC LIMIT 20`)
+		.prepare(`SELECT * FROM auto_input_job WHERE username = ? AND hidden = 0 AND status = 'FAILED' AND attempts >= ? AND alerted = 0 AND updated_at >= ? AND created_at >= ? ORDER BY id ASC LIMIT 20`)
 		.bind(username, Math.max(0, maxRetries), tsPlusMinutes(-6 * 60), tsPlusMinutes(-6 * 60))
 		.all<Record<string, unknown>>();
 	return (res.results ?? []).map(rowToJob).map((j) => ({ id: j.id, website: j.website, market: j.market, prizes: j.prizes, stage: j.stage, detail: j.detail, attempts: j.attempts }));

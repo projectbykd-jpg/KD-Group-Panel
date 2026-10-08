@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: import("node:sqlite").DatabaseSync } }));
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
-import { ackTotoAlerts, listTotoEvents, listTotoLog, logTotoEvent, parseTotoRows, passIntervalMin, pendingTotoAlerts, pruneTotoMacau, resetTotoTablesFlag, totoDispatchAt, totoDispatchTick, totoMacauRun } from "../src/lib/toto-macau";
+import { ackTotoAlerts, dismissTotoRows, listTotoEvents, listTotoLog, logTotoEvent, parseTotoRows, passIntervalMin, pendingTotoAlerts, pruneTotoMacau, resetTotoTablesFlag, totoDispatchAt, totoDispatchTick, totoMacauRun } from "../src/lib/toto-macau";
 import { openPanelZ, panelZPageCount, parsePanelZRows, type PanelZHandle } from "../src/senders/panelz";
 import { defaultAdminBase, resetAutoInputTablesFlag, saveSession, setEnabled } from "../src/lib/auto-input";
 import { resetSysCache, saveSys } from "../src/lib/settings";
@@ -678,6 +678,36 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 		expect(first.more).toBe(true);
 		const next = await run({ noGap: true, fetchFn: pagedFetch(draws) }); // tanpa menunggu 60 dtk
 		expect(next.websites).toBe(1);
+	});
+	it("hapus manual baris Toto Macau (checkbox): hanya website milik user; baris tidak dibuat ulang / dikirim / dikoreksi lagi oleh pemeriksaan otomatis; penanda dipangkas setelah 7 hari", async () => {
+		await setMode(2);
+		addUser("Op");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("Op");
+		await run();
+		const before = await listTotoLog(env, ["HUGOTOGEL"]);
+		const target = before.find((r) => r.market === "TOTOMACAU-13" && r.rowAt.startsWith("2026-10-08"))!;
+		const other = before.find((r) => r.market === "TOTOMACAU-00" && r.rowAt.startsWith("2026-10-08"))!;
+		// website lain tidak boleh: user hanya memegang FOLATOTO -> tidak ada yang terhapus
+		expect(await dismissTotoRows(env, ["FOLATOTO"], [target.id], "Op")).toEqual({ dismissed: 0 });
+		expect((await listTotoLog(env, ["HUGOTOGEL"])).some((r) => r.id === target.id)).toBe(true);
+		expect(await dismissTotoRows(env, ["HUGOTOGEL"], [target.id, -3, 999999], "Op")).toEqual({ dismissed: 1 });
+		expect((await listTotoLog(env, ["HUGOTOGEL"])).some((r) => r.id === target.id)).toBe(false);
+		// Panel-Z diubah orang lain jadi salah; baris yang sudah ditangani manual TIDAK dikoreksi lagi, baris lain tetap dikoreksi
+		pushed.length = 0;
+		zRows.find((r) => r.id === 100)!.value = "9999"; // TOTOMACAU-13 08 Oct (dihapus manual)
+		zRows.find((r) => r.id === 71)!.value = "1234"; // TOTOMACAU-00 08 Oct (tidak dihapus)
+		await run();
+		expect(zRows.find((r) => r.id === 100)!.value).toBe("9999");
+		expect(zRows.find((r) => r.id === 71)!.value).toBe("7036");
+		expect((await listTotoLog(env, ["HUGOTOGEL"])).some((r) => r.market === "TOTOMACAU-13" && r.rowAt.startsWith("2026-10-08"))).toBe(false); // tidak muncul lagi
+		expect((await listTotoLog(env, ["HUGOTOGEL"])).some((r) => r.id === other.id)).toBe(true);
+		const ev = (await listTotoEvents(env, ["HUGOTOGEL"], 100)).events.map((e) => e.msg);
+		expect(ev.some((m) => /TOTOMACAU-13 2026-10-08: dihapus manual oleh Op/.test(m))).toBe(true);
+		// penanda dipangkas setelah 7 hari
+		turso.current!.raw.prepare(`UPDATE toto_macau_dismissed SET at = ?`).run(tsPlusMinutes(-9 * 24 * 60));
+		await pruneTotoMacau(env);
+		expect((turso.current!.raw.prepare(`SELECT COUNT(*) AS n FROM toto_macau_dismissed`).get() as { n: number }).n).toBe(0);
 	});
 	it("mode 1: membandingkan saja -- tidak ada yang dikirim; status per (pasaran, tanggal)", async () => {
 		addUser("Op");

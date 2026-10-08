@@ -2,7 +2,7 @@
 // Logika inti: lib/auto-input.ts (rencana, sesi, antrean) & lib/auto-input-run.ts (eksekutor).
 import { getSys } from "../lib/settings";
 import { ghToken, investTurboRepo, loadIntegrations } from "../lib/integrations";
-import { ackTotoAlerts, listTotoEvents, totoDispatchAt, pruneTotoMacau, listTotoLog, logTotoEvent, pendingTotoAlerts, TOTO_MAX_ATTEMPTS, totoMacauRun } from "../lib/toto-macau";
+import { ackTotoAlerts, dismissTotoRows, listTotoEvents, totoDispatchAt, pruneTotoMacau, listTotoLog, logTotoEvent, pendingTotoAlerts, TOTO_MAX_ATTEMPTS, totoMacauRun } from "../lib/toto-macau";
 import { requireSession } from "./auth";
 import { logActivity } from "../lib/activity";
 import { dateKeyNow } from "../lib/time";
@@ -11,6 +11,7 @@ import type { Processed } from "../lib/parser";
 import type { UserProfile } from "../lib/db";
 import {
 	claimJob,
+	hideJobs,
 	pruneAutoInputJobs,
 	ackFailureAlerts,
 	claimRetry,
@@ -92,6 +93,25 @@ export async function autoInputDeleteSession(env: Env, token: string, website: s
 	await deleteSession(env, s.username, w);
 	await logActivity(env, s.username, "AUTO PREDIKSI SESI", `Hapus PHPSESSID ${w}`, "BERHASIL", "");
 	return { success: true };
+}
+
+const idList = (v: unknown): number[] => (Array.isArray(v) ? v : []).map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 300);
+
+/** Checkbox + "Hapus terpilih" di Riwayat Job: sembunyikan job milik sendiri (sudah beres / ditangani manual). */
+export async function autoInputHideJobs(env: Env, token: string, ids: unknown) {
+	const s = await gate(env, token);
+	const r = await hideJobs(env, s.username, idList(ids));
+	if (r.hidden) await logActivity(env, s.username, "AUTO PREDIKSI HAPUS RIWAYAT", `${r.hidden} job disembunyikan manual dari Riwayat Job`, "INFO", "").catch(() => {});
+	return { success: true, ...r, message: r.skipped ? `${r.hidden} dihapus; ${r.skipped} dilewati (masih berjalan/antre atau bukan milikmu).` : `${r.hidden} catatan dihapus dari daftar.` };
+}
+
+/** Checkbox + "Hapus terpilih" di Toto Macau: tandai ditangani manual (berlaku untuk semua user di website itu). */
+export async function autoInputDismissToto(env: Env, token: string, ids: unknown) {
+	const s = await gate(env, token);
+	const r = await dismissTotoRows(env, s.profile.websites, idList(ids), s.username);
+	if (r.dismissed) await logActivity(env, s.username, "TOTO MACAU HAPUS BARIS", `${r.dismissed} baris ditandai ditangani manual (tidak diperiksa otomatis lagi)`, "INFO", "").catch(() => {});
+	const n = idList(ids).length;
+	return { success: true, ...r, message: r.dismissed < n ? `${r.dismissed} baris dihapus; ${n - r.dismissed} dilewati (bukan website milikmu).` : `${r.dismissed} baris dihapus dan tidak diperiksa otomatis lagi.` };
 }
 
 export async function autoInputClearJob(env: Env, token: string, jobId: number) {
