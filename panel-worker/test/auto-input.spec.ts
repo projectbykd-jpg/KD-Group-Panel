@@ -571,6 +571,19 @@ describe("autoInputAfterSend (DB)", () => {
 			turso.current!.raw.prepare(`UPDATE auto_input_job SET created_at = ?, updated_at = ?`).run(old, old);
 			expect(await autoInputRetryTick(env, m.fetchFn)).toBe(false);
 		});
+		it("riwayat gagal LAMA tidak pernah dicoba ulang maupun memicu peringatan (hanya yang terbaru)", async () => {
+			const m = mockSite({ expired: true });
+			await setEnabled(env, "Op", true);
+			await withSession();
+			await go(m);
+			const old = new Date(Date.now() + 7 * 3600_000 - 2 * 86400_000).toISOString().slice(0, 19).replace("T", " ");
+			turso.current!.raw.prepare(`UPDATE auto_input_job SET created_at = ?, updated_at = ?, attempts = 2`).run(old, old);
+			expect(await autoInputRetryTick(env, m.fetchFn)).toBe(false);
+			expect(await pendingFailureAlerts(env, "Op", 2)).toHaveLength(0);
+			expect(await pendingFailureAlerts(env, "Op", 0)).toHaveLength(0);
+			turso.current!.raw.prepare(`UPDATE auto_input_job SET attempts = 0`).run();
+			expect(await autoInputRetryTick(env, m.fetchFn)).toBe(false);
+		});
 		it("fitur dimatikan user -> job gagal tidak dicoba ulang", async () => {
 			const m = mockSite({ expired: true });
 			await setEnabled(env, "Op", true);

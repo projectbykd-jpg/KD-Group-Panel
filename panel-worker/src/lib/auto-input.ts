@@ -541,13 +541,13 @@ export interface FailedAlert {
 	attempts: number;
 }
 
-/** Job GAGAL yang percobaan otomatisnya sudah HABIS (peringatan terakhir) dan belum pernah ditampilkan ke user. 24 jam terakhir. */
+/** Job GAGAL yang percobaan otomatisnya sudah HABIS (peringatan terakhir) dan belum pernah ditampilkan ke user. Hanya job BARU (gagal dalam 6 jam terakhir) -- riwayat gagal yang lama tidak pernah memicu peringatan. */
 export async function pendingFailureAlerts(env: Env, username: string, maxRetries: number): Promise<FailedAlert[]> {
 	await ensureAutoInputTables(env);
 	await expireRunning(env);
 	const res = await getTurso(env)
-		.prepare(`SELECT * FROM auto_input_job WHERE username = ? AND status = 'FAILED' AND attempts >= ? AND alerted = 0 AND updated_at >= ? ORDER BY id ASC LIMIT 20`)
-		.bind(username, Math.max(0, maxRetries), tsPlusMinutes(-24 * 60))
+		.prepare(`SELECT * FROM auto_input_job WHERE username = ? AND status = 'FAILED' AND attempts >= ? AND alerted = 0 AND updated_at >= ? AND created_at >= ? ORDER BY id ASC LIMIT 20`)
+		.bind(username, Math.max(0, maxRetries), tsPlusMinutes(-6 * 60), tsPlusMinutes(-6 * 60))
 		.all<Record<string, unknown>>();
 	return (res.results ?? []).map(rowToJob).map((j) => ({ id: j.id, website: j.website, market: j.market, prizes: j.prizes, stage: j.stage, detail: j.detail, attempts: j.attempts }));
 }
