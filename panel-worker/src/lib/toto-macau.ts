@@ -22,7 +22,7 @@ import { hasMenu } from "./menus";
 import { getSiteAccounts, type PanelZCfg } from "./site";
 import { getSessions, type AdminSession } from "./auto-input";
 import { adminReq, htmlText, type Fetcher } from "./auto-input-run";
-import { sendCustomPanelZ } from "../senders/panelz";
+import { openPanelZ, parsePanelZRows, type PanelZHandle } from "../senders/panelz";
 import { logActivity } from "./activity";
 
 export interface TotoGame {
@@ -52,7 +52,8 @@ export const TOTO_GAMES: TotoGame[] = [
 
 export const TOTO_FRESH_MIN = 120; // hanya baris yang terbit <= 2 jam lalu
 export const TOTO_MAX_ATTEMPTS = 3; // percobaan kirim ke Panel-Z per draw
-const READ_BUDGET = 8; // maks halaman admin dibaca per tick (batas 50 subrequest/invocation)
+const SUBREQ_BUDGET = 36; // batas panggilan jaringan per putaran (batas 50 subrequest per invocation)
+const LOOKBACK_DAYS = 3; // baris admin yang diperiksa: 3 hari terakhir (halaman 1 admin = 20 baris)
 
 export interface TotoRow {
 	no: number;
@@ -169,14 +170,14 @@ export async function listTotoLog(env: Env, websites: string[], days = 3): Promi
 	return (res.results ?? []).map(toLog);
 }
 
-/** Peringatan terakhir: draw GAGAL (percobaan habis) / sesi semua website habis, dalam 6 jam terakhir, belum pernah ditampilkan. */
+/** Peringatan terakhir: draw GAGAL (percobaan habis), sesi/Panel-Z tidak terbaca, atau angka Panel-Z BEDA dengan admin (6 jam terakhir, belum pernah ditampilkan). */
 export async function pendingTotoAlerts(env: Env, websites: string[]): Promise<TotoLogRow[]> {
 	await ensureTables(env);
 	const ws = [...new Set(websites.map((w) => String(w).trim().toUpperCase()).filter(Boolean))];
 	if (!ws.length) return [];
 	const res = await getTurso(env)
 		.prepare(
-			`SELECT * FROM toto_macau_log WHERE website IN (${ws.map(() => "?").join(",")}) AND status = 'FAILED' AND attempts >= ? AND alerted = 0 AND created_at >= ? ORDER BY id ASC LIMIT 20`,
+			`SELECT * FROM toto_macau_log WHERE website IN (${ws.map(() => "?").join(",")}) AND ((status = 'FAILED' AND attempts >= ?) OR status = 'CONFLICT') AND alerted = 0 AND updated_at >= ? ORDER BY id ASC LIMIT 20`,
 		)
 		.bind(...ws, TOTO_MAX_ATTEMPTS, tsPlusMinutes(-6 * 60))
 		.all<Record<string, unknown>>();
@@ -193,225 +194,320 @@ export async function ackTotoAlerts(env: Env, ids: number[]): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Tick
+// Rekonsiliasi: admin AG/AGWL  <->  Panel-Z, per website, per (pasaran, TANGGAL)
 // ---------------------------------------------------------------------------
+export type PanelOpen = (cfg: PanelZCfg) => Promise<PanelZHandle | string>;
 export interface TotoDeps {
 	fetchFn?: Fetcher;
-	send?: (market: string, number: string, cfg: PanelZCfg) => Promise<string>;
+	panel?: PanelOpen;
 	nowMs?: number;
 }
-
-/** Tanggal (WIB) slot jam `hour` yang sedang dicek: bila jam itu belum lewat hari ini berarti slot kemarin (mis. jam 23 dicek pukul 00:05). */
-export function slotDate(nowMs: number, hour: number): string {
-	const d = new Date(nowMs + 7 * 3600_000);
-	const minOfDay = d.getUTCHours() * 60 + d.getUTCMinutes();
-	return new Date(d.getTime() - (hour * 60 > minOfDay ? 24 * 3600_000 : 0)).toISOString().slice(0, 10);
+export interface TotoSummary {
+	websites: number;
+	posted: number;
+	already: number;
+	pending: number;
+	conflict: number;
+	missing: number;
+	failed: number;
+	net: boolean;
+	message: string;
 }
 
-/** Game yang sedang "jatuh tempo": ada jam draw yang terlewat 3..110 menit lalu (WIB). */
-export function dueGames(nowMs: number): { game: TotoGame; hour: number }[] {
+/** Ada draw yang terbit 3..45 menit lalu? Saat itu putaran tiap 3 menit; selain itu tiap 30 menit. */
+export function passIntervalMin(nowMs: number): number {
 	const d = new Date(nowMs + 7 * 3600_000);
 	const minOfDay = d.getUTCHours() * 60 + d.getUTCMinutes();
-	const out: { game: TotoGame; hour: number }[] = [];
 	for (const g of TOTO_GAMES) {
 		for (const hs of Object.keys(g.slots)) {
-			const h = Number(hs);
-			let diff = minOfDay - h * 60;
-			if (diff < 0) diff += 24 * 60; // jam 00 setelah tengah malam / draw kemarin
-			// 3..40 menit setelah jam draw: tiap menit (angka admin biasanya terbit ±10 menit setelah jam); sesudahnya tiap 5 menit sampai 110.
-			if (diff >= 3 && diff <= 110 && (diff <= 40 || d.getUTCMinutes() % 5 === 0)) out.push({ game: g, hour: h });
+			let diff = minOfDay - Number(hs) * 60;
+			if (diff < 0) diff += 24 * 60;
+			if (diff >= 3 && diff <= 45) return 3;
+		}
+	}
+	return 30;
+}
+
+type Cand = { username: string; sess: AdminSession };
+const dayOf = (nowMs: number, back = 0): string => new Date(nowMs + 7 * 3600_000 - back * 86400_000).toISOString().slice(0, 10);
+
+async function candidates(env: Env, only?: string[]): Promise<Map<string, Cand[]>> {
+	const db = getTurso(env);
+	const en = await db.prepare(`SELECT username FROM auto_input_config WHERE enabled = 1 ORDER BY username`).all<{ username: string }>();
+	let names = (en.results ?? []).map((r) => String(r.username));
+	if (only) names = names.filter((n) => only.some((o) => o.toLowerCase() === n.toLowerCase()));
+	const out = new Map<string, Cand[]>();
+	if (!names.length) return out;
+	const profiles = await getUserProfiles(env, names);
+	for (const u of names) {
+		const p = profiles.get(u.toLowerCase());
+		if (!p || p.status !== "AKTIF") continue;
+		if (p.role !== "ADMIN" && p.role !== "OPERATOR") continue;
+		// aturan yang sama dengan KIRIM KE PANEL-Z di menu Result
+		if (!p.permissions.panelz || !hasMenu(p, "result") || !hasMenu(p, "auto-input")) continue;
+		for (const s of await getSessions(env, p.username)) {
+			if (!s.phpsessid || !p.websites.includes(s.website)) continue;
+			(out.get(s.website) ?? out.set(s.website, []).get(s.website)!).push({ username: p.username, sess: s });
 		}
 	}
 	return out;
 }
 
-type Cand = { username: string; sess: AdminSession };
-
-/**
- * Satu putaran. Return true bila melakukan panggilan jaringan (supaya pemanggil melewatkan pump lain pada tick yang sama).
- */
-export async function totoMacauTick(env: Env, deps: TotoDeps = {}): Promise<boolean> {
-	const mode = await getSys(env, "sys_totomacau_mode");
-	if (mode <= 0) return false;
-	const nowMs = deps.nowMs ?? Date.now();
-	const due = dueGames(nowMs);
-	if (!due.length) return false;
-	await ensureTables(env);
-	const f: Fetcher = deps.fetchFn ?? ((u, i) => fetch(u, i));
-	const send = deps.send ?? sendCustomPanelZ;
-	const db = getTurso(env);
-
-	// Kandidat: user yang fiturnya aktif + izin Panel-Z + menu Result (aturan yang sama dengan KIRIM KE PANEL-Z di menu Result).
-	const en = await db.prepare(`SELECT username FROM auto_input_config WHERE enabled = 1 ORDER BY username`).all<{ username: string }>();
-	const names = (en.results ?? []).map((r) => String(r.username));
-	if (!names.length) return false;
-	const profiles = await getUserProfiles(env, names);
-	const byWebsite = new Map<string, Cand[]>();
-	for (const u of names) {
-		const p = profiles.get(u.toLowerCase());
-		if (!p || p.status !== "AKTIF") continue;
-		if (p.role !== "ADMIN" && p.role !== "OPERATOR") continue;
-		if (!p.permissions.panelz || !hasMenu(p, "result") || !hasMenu(p, "auto-input")) continue;
-		for (const s of await getSessions(env, p.username)) {
-			if (!s.phpsessid || !p.websites.includes(s.website)) continue;
-			(byWebsite.get(s.website) ?? byWebsite.set(s.website, []).get(s.website)!).push({ username: p.username, sess: s });
-		}
-	}
-	if (!byWebsite.size) return false;
-	const accounts = await getSiteAccounts(env, [...byWebsite.keys()]);
-
-	let reads = 0;
-	let net = false;
-	const nowTs = tsNow();
-	for (const [website, cands] of byWebsite) {
-		const acc = accounts.get(website);
-		if (!acc || !acc.panelz.url || !acc.panelz.user) continue; // tanpa Panel-Z tidak ada yang bisa diposting
-		for (const { game, hour } of due) {
-			if (reads >= READ_BUDGET) return net;
-			// Sudah ada catatan terkirim/tercatat untuk slot jam ini hari ini? (cek murah sebelum membuka halaman admin)
-			const dayKey = slotDate(nowMs, hour);
-			const slotKey = `${dayKey} ${String(hour).padStart(2, "0")}`;
-			const have = await db
-				.prepare(`SELECT status, attempts FROM toto_macau_log WHERE website = ? AND game = ? AND slot_key = ? AND period > 0`)
-				.bind(website, game.game, slotKey)
-				.first<{ status: string; attempts: number }>();
-			if (have) {
-				const done = have.status === "SENT" || have.status === "SKIPPED" || (have.status === "RECORDED" && mode === 1) || (have.status === "FAILED" && Number(have.attempts) >= TOTO_MAX_ATTEMPTS);
-				if (done) continue;
-			}
-
-			// Sesi/halaman sudah gagal berulang untuk slot ini -> jangan dihantam tiap menit; coba lagi tiap 10 menit.
-			const pseudoKey = -Number(slotKey.replace(/\D/g, "")) || -1;
-			const bad = await db
-				.prepare(`SELECT attempts, updated_at FROM toto_macau_log WHERE website = ? AND game = ? AND period = ?`)
-				.bind(website, game.game, pseudoKey)
-				.first<{ attempts: number; updated_at: string }>();
-			if (bad && Number(bad.attempts) >= TOTO_MAX_ATTEMPTS && String(bad.updated_at) > tsPlusMinutes(-10)) continue;
-
-			// Baca halaman admin dengan sesi user pertama yang masih hidup.
-			let html = "";
-			let reader = "";
-			let lastErr = "";
-			for (const c of cands) {
-				reads++;
-				net = true;
-				try {
-					html = await adminReq(f, c.sess, game.path);
-					reader = c.username;
-					break;
-				} catch (e) {
-					lastErr = e instanceof Error ? e.message : String(e);
-				}
-			}
-			if (!reader) {
-				await recordSessionFailure(env, website, game, slotKey, cands[0].username, `Sesi admin ${website} habis atau halaman tidak bisa dibuka — tempel PHPSESSID baru di menu Auto Prediksi (${lastErr})`);
-				continue;
-			}
-			if (!game.title.test(htmlText(html))) {
-				await recordSessionFailure(env, website, game, slotKey, reader, "Halaman yang terbuka bukan daftar nomor game ini (bentuk halaman berubah?).");
-				continue;
-			}
-			const rows = parseTotoRows(html).slice(0, 4);
-			if (!rows.length) {
-				await recordSessionFailure(env, website, game, slotKey, reader, "Tabel angka tidak terbaca (bentuk halaman berubah?).");
-				continue;
-			}
-			for (const row of rows.reverse()) {
-				if (row.hour !== hour) continue; // baris ini bukan slot yang sedang dicek (slot lain ditangani putarannya sendiri)
-				if (ageMin(row, nowMs) > TOTO_FRESH_MIN || ageMin(row, nowMs) < -5) continue;
-				await handleRow({ env, db, website, game, row, reader, acc: acc.panelz, mode, send, nowTs });
-			}
-		}
-	}
-	return net;
-}
-
-async function recordSessionFailure(env: Env, website: string, game: TotoGame, slotKey: string, username: string, why: string): Promise<void> {
-	// periode negatif = catatan "gagal baca" per slot (unik per slot, tidak bentrok dengan periode asli)
-	const pseudo = -Number(slotKey.replace(/\D/g, "")) || -1;
+async function upsertLog(
+	env: Env,
+	a: { website: string; game: string; period: number; slotKey: string; market: string; number: string; rowAt: string; status: string; detail: string; username: string },
+): Promise<void> {
 	const now = tsNow();
 	const db = getTurso(env);
-	const r = await db
+	await db
+		.prepare(
+			`INSERT INTO toto_macau_log (website, game, period, slot_key, market, number, row_at, status, attempts, username, detail, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+			 ON CONFLICT(website, game, period) DO UPDATE SET status = excluded.status, detail = excluded.detail, number = excluded.number, market = excluded.market, username = excluded.username, updated_at = excluded.updated_at`,
+		)
+		.bind(a.website, a.game, a.period, a.slotKey, a.market, a.number, a.rowAt, a.status, a.username, a.detail.slice(0, 300), now, now)
+		.run();
+}
+
+async function recordFailure(env: Env, website: string, game: string, dayKey: string, username: string, why: string): Promise<void> {
+	// periode negatif = catatan "gagal baca" per hari & game (tidak bentrok dengan periode asli); attempts naik tiap putaran gagal
+	const pseudo = -Number(dayKey.replace(/\D/g, "")) || -1;
+	const now = tsNow();
+	const db = getTurso(env);
+	await db
 		.prepare(
 			`INSERT INTO toto_macau_log (website, game, period, slot_key, market, number, row_at, status, attempts, username, detail, created_at, updated_at)
 			 VALUES (?, ?, ?, ?, '', '', '', 'FAILED', 1, ?, ?, ?, ?)
 			 ON CONFLICT(website, game, period) DO UPDATE SET attempts = attempts + 1, detail = excluded.detail, updated_at = excluded.updated_at`,
 		)
-		.bind(website, game.game, pseudo, slotKey, username, why.slice(0, 300), now, now)
+		.bind(website, game, pseudo, dayKey, username, why.slice(0, 300), now, now)
 		.run();
-	void r;
-	const row = await db.prepare(`SELECT attempts FROM toto_macau_log WHERE website = ? AND game = ? AND period = ?`).bind(website, game.game, pseudo).first<{ attempts: number }>();
+	const row = await db.prepare(`SELECT attempts FROM toto_macau_log WHERE website = ? AND game = ? AND period = ?`).bind(website, game, pseudo).first<{ attempts: number }>();
 	if (Number(row?.attempts) === TOTO_MAX_ATTEMPTS) {
-		await logActivity(env, username, "TOTO MACAU AUTO", `[${website}] ${game.game} gagal dibaca: ${why}`, "GAGAL", "").catch(() => {});
+		await logActivity(env, username, "TOTO MACAU AUTO", `[${website}] ${game} gagal: ${why}`, "GAGAL", "").catch(() => {});
 	}
 }
 
-async function handleRow(a: {
-	env: Env;
-	db: ReturnType<typeof getTurso>;
-	website: string;
+interface AdminRow extends TotoRow {
 	game: TotoGame;
-	row: TotoRow;
-	reader: string;
-	acc: PanelZCfg;
-	mode: number;
-	send: NonNullable<TotoDeps["send"]>;
-	nowTs: string;
-}): Promise<void> {
-	const { env, db, website, game, row, reader, acc, mode, send } = a;
-	const market = game.slots[row.hour];
-	const slotKey = `${row.date} ${String(row.hour).padStart(2, "0")}`;
-	const now = tsNow();
-	const log = async (status: string, detail: string, attempts = 0): Promise<void> => {
-		await db
-			.prepare(`UPDATE toto_macau_log SET status = ?, detail = ?, attempts = ?, username = ?, updated_at = ? WHERE website = ? AND game = ? AND period = ?`)
-			.bind(status, detail.slice(0, 300), attempts, reader, now, website, game.game, row.period)
+	market: string;
+}
+
+/** Satu website: baca admin (m17 & m51), baca Panel-Z, cocokkan per (pasaran, tanggal), isi yang kosong (mode 2). */
+async function reconcileWebsite(
+	env: Env,
+	website: string,
+	cands: Cand[],
+	pz: PanelZCfg,
+	mode: number,
+	deps: { f: Fetcher; panel: PanelOpen; nowMs: number },
+	budget: { used: number },
+	sum: TotoSummary,
+): Promise<void> {
+	const db = getTurso(env);
+	const today = dayOf(deps.nowMs);
+	const since = dayOf(deps.nowMs, LOOKBACK_DAYS);
+	const adminRows: AdminRow[] = [];
+	let reader = cands[0].username;
+
+	for (const game of TOTO_GAMES) {
+		let html = "";
+		let lastErr = "";
+		let ok = false;
+		for (const c of cands) {
+			budget.used++;
+			sum.net = true;
+			try {
+				html = await adminReq(deps.f, c.sess, game.path);
+				reader = c.username;
+				ok = true;
+				break;
+			} catch (e) {
+				lastErr = e instanceof Error ? e.message : String(e);
+			}
+		}
+		if (!ok) {
+			await recordFailure(env, website, game.game, today, cands[0].username, `Sesi admin ${website} habis atau halaman tidak bisa dibuka — tempel PHPSESSID baru di menu Auto Prediksi (${lastErr})`);
+			sum.failed++;
+			continue;
+		}
+		if (!game.title.test(htmlText(html))) {
+			await recordFailure(env, website, game.game, today, reader, "Halaman yang terbuka bukan daftar nomor game ini (bentuk halaman berubah?).");
+			sum.failed++;
+			continue;
+		}
+		const rows = parseTotoRows(html);
+		if (!rows.length) {
+			await recordFailure(env, website, game.game, today, reader, "Tabel angka tidak terbaca (bentuk halaman berubah?).");
+			sum.failed++;
+			continue;
+		}
+		for (const r of rows) {
+			if (r.hitung !== "yes" || r.date < since || r.date > today) continue; // belum dihitung admin / terlalu lama / tanggal aneh
+			const market = game.slots[r.hour];
+			const bad = !market ? `jam ${r.hour} bukan jam draw yang dikenal` : !new RegExp(`^\\d{${game.digits}}$`).test(r.number) ? `angka "${r.number}" bukan ${game.digits} digit` : "";
+			if (bad) {
+				await upsertLog(env, { website, game: game.game, period: r.period, slotKey: `${r.date} ${String(r.hour).padStart(2, "0")}`, market: market ?? "", number: r.number, rowAt: `${r.date} ${r.time}`, status: "SKIPPED", detail: "Dilewati: " + bad, username: reader });
+				continue;
+			}
+			adminRows.push({ ...r, game, market });
+		}
+	}
+	if (!adminRows.length) return;
+	adminRows.sort((a, b) => (a.date + a.time < b.date + b.time ? -1 : 1));
+
+	// Panel-Z: masuk sekali, baca daftar result.
+	budget.used += 2;
+	sum.net = true;
+	const panel = await deps.panel(pz);
+	if (typeof panel === "string") {
+		await recordFailure(env, website, "pz", today, reader, `Panel-Z tidak bisa dibuka: ${panel}`);
+		sum.failed++;
+		return;
+	}
+	const zRows = parsePanelZRows(panel.html);
+	if (!zRows.length) {
+		await recordFailure(env, website, "pz", today, reader, "Daftar result Panel-Z tidak terbaca (bentuk halaman berubah / belum ada baris Toto Macau).");
+		sum.failed++;
+		return;
+	}
+
+	const posted: { a: AdminRow; rowId: string }[] = [];
+	for (const a of adminRows) {
+		const base = { website, game: a.game.game, period: a.period, slotKey: `${a.date} ${String(a.hour).padStart(2, "0")}`, market: a.market, number: a.number, rowAt: `${a.date} ${a.time}`, username: reader };
+		const targets = zRows.filter((z) => z.market === a.market && z.date === a.date);
+		if (targets.length !== 1) {
+			await upsertLog(env, { ...base, status: "MISSING", detail: targets.length ? `Baris ganda (${targets.length}x) untuk ${a.market} ${a.date} di Panel-Z — tidak diisi` : `Baris ${a.market} tanggal ${a.date} tidak ada di Panel-Z — tidak diisi` });
+			sum.missing++;
+			continue;
+		}
+		const z = targets[0];
+		const cur = await db.prepare(`SELECT status, attempts, updated_at FROM toto_macau_log WHERE website = ? AND game = ? AND period = ?`).bind(website, a.game.game, a.period).first<{ status: string; attempts: number; updated_at: string }>();
+		if (cur?.status === "SENDING" && String(cur.updated_at) > tsPlusMinutes(-10)) continue; // putaran lain sedang mengirim baris ini
+		if (z.filled && z.value === a.number) {
+			await upsertLog(env, { ...base, status: cur?.status === "SENT" ? "SENT" : "VERIFIED", detail: cur?.status === "SENT" ? "Terkirim & terbaca di Panel-Z" : "Panel-Z sudah berisi angka yang sama" });
+			sum.already++;
+			continue;
+		}
+		if (z.filled) {
+			await upsertLog(env, { ...base, status: "CONFLICT", detail: `BEDA: Panel-Z berisi ${z.value}, admin ${a.number} — tidak ditimpa, cek manual` });
+			sum.conflict++;
+			continue;
+		}
+		// baris ada & masih kosong
+		if (mode !== 2) {
+			await upsertLog(env, { ...base, status: "PENDING", detail: "Belum terisi di Panel-Z (mode 1: belum dikirim)" });
+			sum.pending++;
+			continue;
+		}
+		if (cur?.status === "FAILED" && Number(cur.attempts) >= TOTO_MAX_ATTEMPTS) {
+			sum.failed++;
+			continue;
+		}
+		if (budget.used >= SUBREQ_BUDGET) {
+			await upsertLog(env, { ...base, status: "PENDING", detail: "Antre — dikirim pada putaran berikutnya" });
+			sum.pending++;
+			continue;
+		}
+		// klaim atomik: hanya satu putaran yang berhasil mengubah ke SENDING
+		await upsertLog(env, { ...base, status: "PENDING", detail: "Mengirim ke Panel-Z…" });
+		const claim = await db
+			.prepare(`UPDATE toto_macau_log SET status = 'SENDING', attempts = attempts + 1, updated_at = ? WHERE website = ? AND game = ? AND period = ? AND status <> 'SENDING' AND attempts < ?`)
+			.bind(tsNow(), website, a.game.game, a.period, TOTO_MAX_ATTEMPTS)
 			.run();
-	};
-	const activity = (status: string, detail: string) => logActivity(env, reader, "TOTO MACAU AUTO", `[${website}] ${market} periode ${row.period} — ${detail}`, status, `Angka: ${row.number}`).catch(() => {});
+		if (claim.meta.changes !== 1) continue;
+		budget.used++;
+		const r = await panel.push(z.id, a.number);
+		if (/Berhasil/i.test(r)) posted.push({ a, rowId: z.id });
+		else {
+			await db.prepare(`UPDATE toto_macau_log SET status = 'FAILED', detail = ?, updated_at = ? WHERE website = ? AND game = ? AND period = ?`).bind(("Panel-Z: " + r).slice(0, 300), tsNow(), website, a.game.game, a.period).run();
+			await logActivity(env, reader, "TOTO MACAU AUTO", `[${website}] ${a.market} ${a.date} — Panel-Z: ${r}`, "GAGAL", `Angka: ${a.number}`).catch(() => {});
+			sum.failed++;
+		}
+	}
 
-	if (row.hitung !== "yes") return; // belum dihitung admin -> tunggu tick berikutnya (tidak diklaim)
-	const bad = !market ? `jam ${row.hour} bukan jam draw yang dikenal` : !new RegExp(`^\\d{${game.digits}}$`).test(row.number) ? `angka "${row.number}" bukan ${game.digits} digit` : "";
+	// Baca ulang Panel-Z: angka yang baru dikirim HARUS tampil di baris yang benar.
+	if (posted.length) {
+		budget.used++;
+		let after: PanelZRow2[] = [];
+		try {
+			after = parsePanelZRows(await panel.reload());
+		} catch {
+			after = [];
+		}
+		for (const { a, rowId } of posted) {
+			const z = after.find((x) => x.id === rowId);
+			const okRead = !!z && z.filled && z.value === a.number;
+			await db
+				.prepare(`UPDATE toto_macau_log SET status = ?, detail = ?, updated_at = ? WHERE website = ? AND game = ? AND period = ?`)
+				.bind(okRead ? "SENT" : "FAILED", okRead ? "Terkirim ke Panel-Z & terverifikasi (dibaca ulang)" : "Terkirim tetapi angka belum tampil di baris Panel-Z — cek manual", tsNow(), website, a.game.game, a.period)
+				.run();
+			await logActivity(env, reader, "TOTO MACAU AUTO", `[${website}] ${a.market} ${a.date} — ${okRead ? "terkirim & terverifikasi di Panel-Z" : "terkirim tapi belum terbaca di Panel-Z"}`, okRead ? "BERHASIL" : "GAGAL", `Angka: ${a.number}`).catch(() => {});
+			if (okRead) sum.posted++;
+			else sum.failed++;
+		}
+	}
+}
+type PanelZRow2 = ReturnType<typeof parsePanelZRows>[number];
 
-	// Klaim atomik: baris unik (website, game, periode) -> tidak pernah diproses dobel walau tick tumpang tindih.
-	const ins = await db
+async function passMark(env: Env, website: string): Promise<void> {
+	const now = tsNow();
+	await getTurso(env)
 		.prepare(
-			`INSERT OR IGNORE INTO toto_macau_log (website, game, period, slot_key, market, number, row_at, status, attempts, username, detail, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+			`INSERT INTO toto_macau_log (website, game, period, slot_key, status, created_at, updated_at) VALUES (?, 'pass', 0, '', 'PASS', ?, ?)
+			 ON CONFLICT(website, game, period) DO UPDATE SET updated_at = excluded.updated_at`,
 		)
-		.bind(website, game.game, row.period, slotKey, market ?? "", row.number, `${row.date} ${row.time}`, bad ? "SKIPPED" : "RECORDED", reader, bad ? "Dilewati: " + bad : "Tercatat", now, now)
+		.bind(website, now, now)
 		.run();
-	const fresh = ins.meta.changes > 0;
-	if (bad) {
-		if (fresh) await activity("GAGAL", "dilewati: " + bad);
-		return;
-	}
-	const cur = await db
-		.prepare(`SELECT status, attempts FROM toto_macau_log WHERE website = ? AND game = ? AND period = ?`)
-		.bind(website, game.game, row.period)
-		.first<{ status: string; attempts: number }>();
-	if (!cur) return;
-	if (fresh && mode === 1) {
-		await activity("INFO", `terbaca ${row.number} (mode catat saja, belum dikirim ke Panel-Z)`);
-		return;
-	}
-	if (mode !== 2) return;
-	if (cur.status === "SENT" || cur.status === "SKIPPED") return;
-	if (cur.status === "FAILED" && Number(cur.attempts) >= TOTO_MAX_ATTEMPTS) return;
+}
 
-	// Klaim kirim: hanya satu pemanggil yang berhasil mengubah RECORDED/FAILED(<3) menjadi SENDING.
-	const claim = await db
-		.prepare(`UPDATE toto_macau_log SET status = 'SENDING', attempts = attempts + 1, updated_at = ? WHERE website = ? AND game = ? AND period = ? AND status IN ('RECORDED','FAILED') AND attempts < ?`)
-		.bind(now, website, game.game, row.period, TOTO_MAX_ATTEMPTS)
-		.run();
-	if (claim.meta.changes !== 1) return;
-	const attempts = Number(cur.attempts) + 1;
-	const r = await send(market!, row.number, acc);
-	if (/Berhasil/i.test(r)) {
-		await log("SENT", "Terkirim ke Panel-Z", attempts);
-		await activity("BERHASIL", `terkirim ke Panel-Z (${row.number})`);
-	} else {
-		await log("FAILED", r, attempts);
-		await activity("GAGAL", `Panel-Z: ${r}` + (attempts >= TOTO_MAX_ATTEMPTS ? " — percobaan habis, CEK MANUAL" : " — dicoba lagi"));
+/**
+ * Satu putaran rekonsiliasi. `only` = batasi ke username tertentu (tombol "Cek & Isi Sekarang"); `force` = abaikan jeda antar putaran.
+ */
+export async function totoMacauRun(env: Env, opts: { only?: string[]; force?: boolean; maxSites?: number } & TotoDeps = {}): Promise<TotoSummary> {
+	const sum: TotoSummary = { websites: 0, posted: 0, already: 0, pending: 0, conflict: 0, missing: 0, failed: 0, net: false, message: "" };
+	const mode = await getSys(env, "sys_totomacau_mode");
+	if (mode <= 0) {
+		sum.message = "Auto Check Toto Macau dimatikan (Pengaturan Sistem).";
+		return sum;
 	}
+	await ensureTables(env);
+	const nowMs = opts.nowMs ?? Date.now();
+	const f: Fetcher = opts.fetchFn ?? ((u, i) => fetch(u, i));
+	const panel: PanelOpen = opts.panel ?? openPanelZ;
+	const byWebsite = await candidates(env, opts.only);
+	if (!byWebsite.size) {
+		sum.message = "Tidak ada website yang memenuhi syarat (Auto Prediksi AKTIF, izin Panel-Z, menu Result, PHPSESSID tersimpan).";
+		return sum;
+	}
+	const accounts = await getSiteAccounts(env, [...byWebsite.keys()]);
+	// urutan: yang terakhir diperiksa paling lama didahulukan
+	const db = getTurso(env);
+	const marks = await db.prepare(`SELECT website, updated_at FROM toto_macau_log WHERE game = 'pass' AND period = 0`).all<{ website: string; updated_at: string }>();
+	const last = new Map((marks.results ?? []).map((m) => [String(m.website), String(m.updated_at)]));
+	const interval = passIntervalMin(nowMs);
+	const due = [...byWebsite.keys()]
+		.filter((w) => {
+			const acc = accounts.get(w);
+			return !!acc && !!acc.panelz.url && !!acc.panelz.user;
+		})
+		.filter((w) => opts.force || !last.get(w) || last.get(w)! <= tsPlusMinutes(-interval))
+		.sort((x, y) => (last.get(x) ?? "").localeCompare(last.get(y) ?? ""))
+		.slice(0, opts.maxSites ?? 4);
+	const budget = { used: 0 };
+	for (const website of due) {
+		if (budget.used >= SUBREQ_BUDGET) break;
+		sum.websites++;
+		await passMark(env, website);
+		await reconcileWebsite(env, website, byWebsite.get(website)!, accounts.get(website)!.panelz, mode, { f, panel, nowMs }, budget, sum);
+	}
+	sum.message = sum.websites
+		? `${sum.websites} website diperiksa: ${sum.posted} dikirim, ${sum.already} sudah ada, ${sum.pending} belum terisi, ${sum.conflict} beda, ${sum.missing} baris tidak ada, ${sum.failed} gagal.`
+		: "Belum waktunya putaran berikutnya.";
+	return sum;
+}
+
+/** Dipanggil cron tiap menit. true = ada panggilan jaringan. */
+export async function totoMacauTick(env: Env, deps: TotoDeps = {}): Promise<boolean> {
+	return (await totoMacauRun(env, deps)).net;
 }

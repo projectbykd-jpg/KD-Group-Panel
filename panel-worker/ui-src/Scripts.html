@@ -4354,16 +4354,29 @@
         .autoInputTotoLog(currentSessionToken);
     }
     let aiTotoData = null;
+    function autoInputTotoRunNow(btn) {
+      if (btn) { btn.disabled = true; btn.style.opacity = '.6'; }
+      toast('Memeriksa admin & Panel-Z…');
+      google.script.run
+        .withSuccessHandler(r => {
+          if (btn) { btn.disabled = false; btn.style.opacity = ''; }
+          if (apiFailed(r)) { toast(apiMessage(r)); return; }
+          showActionPopup('DONE', 'Cek & Isi Selesai', (r && r.message) || 'Selesai.', 'fa-check');
+          autoInputTotoLoad(true);
+        })
+        .withFailureHandler(err => { if (btn) { btn.disabled = false; btn.style.opacity = ''; } toast((err && err.message) || 'Gagal memeriksa'); })
+        .autoInputTotoRun(currentSessionToken);
+    }
     function autoInputTotoPaint() {
       const box = document.getElementById('aiTotoBox');
       if (!box) return;
       const esc = escapeHtml;
       const d = aiTotoData;
       if (!d) { box.textContent = 'Auto Check Toto Macau belum bisa dimuat.'; return; }
-      const modeTxt = d.mode === 2 ? '<span class="text-emerald-400 font-extrabold">MODE 2 · CATAT + POSTING KE PANEL-Z</span>' : d.mode === 1 ? '<span class="text-amber-300 font-extrabold">MODE 1 · HANYA BACA &amp; CATAT (belum posting)</span>' : '<span class="text-slate-500 font-extrabold">MATI</span>';
-      const stCls = { SENT: 'text-emerald-400', RECORDED: 'text-sky-300', FAILED: 'text-rose-400', SKIPPED: 'text-slate-400', SENDING: 'text-amber-300' };
-      const stTxt = { SENT: 'TERKIRIM', RECORDED: 'TERCATAT', FAILED: 'GAGAL', SKIPPED: 'DILEWATI', SENDING: 'MENGIRIM' };
-      const rows = (d.rows || []).slice(0, 40).map(r => `<tr class="border-t border-white/5 align-top">
+      const modeTxt = d.mode === 2 ? '<span class="text-emerald-400 font-extrabold">MODE 2 · CEK + ISI PANEL-Z YANG KOSONG</span>' : d.mode === 1 ? '<span class="text-amber-300 font-extrabold">MODE 1 · HANYA BACA &amp; CATAT (belum posting)</span>' : '<span class="text-slate-500 font-extrabold">MATI</span>';
+      const stCls = { SENT: 'text-emerald-400', VERIFIED: 'text-emerald-300', RECORDED: 'text-sky-300', PENDING: 'text-amber-300', CONFLICT: 'text-rose-400', MISSING: 'text-slate-400', FAILED: 'text-rose-400', SKIPPED: 'text-slate-400', SENDING: 'text-amber-300' };
+      const stTxt = { SENT: 'TERKIRIM', VERIFIED: 'SUDAH ADA', RECORDED: 'TERCATAT', PENDING: 'BELUM TERISI', CONFLICT: 'BEDA ANGKA', MISSING: 'BARIS TIDAK ADA', FAILED: 'GAGAL', SKIPPED: 'DILEWATI', SENDING: 'MENGIRIM' };
+      const rows = (d.rows || []).slice(0, 80).map(r => `<tr class="border-t border-white/5 align-top">
           <td class="p-2 text-[10px] text-slate-400 whitespace-nowrap" data-label="Tanggal & jam draw">${esc(r.rowAt)}</td>
           <td class="p-2 text-xs font-bold text-cyan-300" data-label="Website">${esc(r.website)}</td>
           <td class="p-2 text-xs" data-label="Pasaran tujuan">${esc(r.market || '-')}<div class="text-[10px] text-slate-500">periode ${esc(r.period)}</div></td>
@@ -4371,8 +4384,8 @@
           <td class="p-2 text-[10px] font-extrabold ${stCls[r.status] || ''}" data-label="Status">${stTxt[r.status] || esc(r.status)}</td>
           <td class="p-2 text-[11px] text-slate-300 stack-full" data-label="Keterangan">${esc(r.detail)}${r.attempts ? ' (' + Number(r.attempts) + '/' + Number(d.maxAttempts) + ' percobaan)' : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="p-3 text-center text-slate-500">Belum ada draw tercatat (3 hari terakhir).</td></tr>';
       box.innerHTML = `<div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-          <div class="text-[11px] font-extrabold text-slate-300 tracking-wider">AUTO CHECK TOTO MACAU &amp; TOTO MACAO 5D</div><div class="text-[10px]">${modeTxt}</div></div>
-        <div class="text-[11px] text-slate-400 leading-relaxed mb-2">Membaca daftar nomor di admin AG/AGWL memakai PHPSESSID tersimpan akun yang punya izin Panel-Z &amp; menu Result. Hanya angka berstatus <b>Hitung: Yes</b> (tanggal, jam &amp; angka dari admin) yang diproses, satu kali per draw per website. Mode diatur admin di Pengaturan Sistem.</div>
+          <div class="text-[11px] font-extrabold text-slate-300 tracking-wider">AUTO CHECK TOTO MACAU &amp; TOTO MACAO 5D</div><div class="flex items-center gap-2"><span class="text-[10px]">${modeTxt}</span><button onclick="autoInputTotoRunNow(this)" class="bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-extrabold px-3 py-1.5 rounded-lg text-[10px]"><i class="fa-solid fa-bolt mr-1"></i>CEK &amp; ISI SEKARANG</button></div></div>
+        <div class="text-[11px] text-slate-400 leading-relaxed mb-2">Membaca daftar nomor di admin AG/AGWL (3 hari terakhir, hanya yang <b>Hitung: Yes</b>) memakai PHPSESSID tersimpan akun yang punya izin Panel-Z &amp; menu Result, lalu mencocokkannya dengan baris <b>pasaran + tanggal</b> yang sama di Panel-Z: kosong (xxxx) = diisi, sudah sama = ditandai, beda angka = <b>tidak ditimpa</b> &amp; diperingatkan. Mode diatur admin di Pengaturan Sistem.</div>
         <div class="overflow-auto rounded-xl border border-white/5" style="max-height:40vh"><table class="w-full text-left stack-sm"><thead><tr class="text-[10px] text-slate-400 uppercase tracking-wider"><th class="p-2">Tanggal &amp; jam draw</th><th class="p-2">Website</th><th class="p-2">Pasaran tujuan</th><th class="p-2">Angka</th><th class="p-2">Status</th><th class="p-2">Keterangan</th></tr></thead><tbody>${rows}</tbody></table></div>`;
     }
 

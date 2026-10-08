@@ -36,6 +36,7 @@ import {
 	autoInputRetryTick,
 	autoInputAlerts,
 	autoInputTotoLog,
+	autoInputTotoRun,
 	autoInputAckAlerts,
 	autoInputSaveSession,
 	autoInputSetEnabled,
@@ -220,6 +221,7 @@ const ROUTES: Record<string, Handler> = {
 	autoInputRun: (env, b) => autoInputRun(env, s(b.token), rowId(b.jobId)),
 	autoInputAlerts: (env, b) => autoInputAlerts(env, s(b.token)),
 	autoInputTotoLog: (env, b) => autoInputTotoLog(env, s(b.token)),
+	autoInputTotoRun: (env, b) => autoInputTotoRun(env, s(b.token)),
 	autoInputAckAlerts: (env, b) => autoInputAckAlerts(env, s(b.token), Array.isArray(b.ids) ? (b.ids as unknown[]).map(Number) : []),
 	autoInputTest: (env, b) => autoInputTest(env, s(b.token), s(b.website), s(b.market)),
 

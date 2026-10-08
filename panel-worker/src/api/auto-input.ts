@@ -1,7 +1,7 @@
 // Endpoint menu "Auto Prediksi" + kaitan ke alur KIRIM SEMUA SISTEM (send.ts).
 // Logika inti: lib/auto-input.ts (rencana, sesi, antrean) & lib/auto-input-run.ts (eksekutor).
 import { getSys } from "../lib/settings";
-import { ackTotoAlerts, listTotoLog, pendingTotoAlerts, TOTO_MAX_ATTEMPTS } from "../lib/toto-macau";
+import { ackTotoAlerts, listTotoLog, pendingTotoAlerts, TOTO_MAX_ATTEMPTS, totoMacauRun } from "../lib/toto-macau";
 import { requireSession } from "./auth";
 import { logActivity } from "../lib/activity";
 import { dateKeyNow } from "../lib/time";
@@ -256,4 +256,12 @@ export async function autoInputTotoLog(env: Env, token: string) {
 		maxAttempts: TOTO_MAX_ATTEMPTS,
 		rows: await listTotoLog(env, s.profile.websites, 3),
 	};
+}
+
+/** Tombol "Cek & Isi Sekarang": rekonsiliasi admin <-> Panel-Z untuk website milik akun ini, tanpa menunggu jadwal cron. */
+export async function autoInputTotoRun(env: Env, token: string) {
+	const s = await gate(env, token);
+	const sum = await totoMacauRun(env, { only: [s.username], force: true, maxSites: 5 });
+	await logActivity(env, s.username, "TOTO MACAU AUTO", "Cek & Isi Sekarang — " + sum.message, sum.failed || sum.conflict ? "GAGAL" : "BERHASIL", "").catch(() => {});
+	return { success: true, ...sum };
 }
