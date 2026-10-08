@@ -13,7 +13,7 @@
 import { adminDomain } from "./integrations";
 import { getTurso } from "./turso";
 import { getSys } from "./settings";
-import { tsNow, tsPlusMinutes } from "./time";
+import { retentionFrom, tsNow, tsPlusMinutes } from "./time";
 import type { Processed } from "./parser";
 import { PREDICTION_SITE_NAMES } from "./prediction";
 
@@ -478,12 +478,20 @@ export async function listJobs(env: Env, username: string, days?: number): Promi
 	await ensureAutoInputTables(env);
 	await expireRunning(env);
 	const n = days ?? (await getSys(env, "sys_auto_input_history_days"));
-	const from = new Date(Date.now() + 7 * 3600_000 - n * 86400_000).toISOString().slice(0, 10) + " 00:00:00";
+	const from = retentionFrom(n);
 	const res = await getTurso(env)
 		.prepare(`SELECT * FROM auto_input_job WHERE username = ? AND created_at >= ? ORDER BY id DESC LIMIT 2000`)
 		.bind(username, from)
 		.all<Record<string, unknown>>();
 	return (res.results ?? []).map(rowToJob);
+}
+
+/** Hapus job yang lebih lama dari N hari (batas sama dengan riwayat yang ditampilkan). Job yang masih RUNNING tidak disentuh. */
+export async function pruneAutoInputJobs(env: Env, days?: number): Promise<number> {
+	await ensureAutoInputTables(env);
+	const n = days ?? (await getSys(env, "sys_auto_input_history_days"));
+	const r = await getTurso(env).prepare(`DELETE FROM auto_input_job WHERE created_at < ? AND status <> 'RUNNING'`).bind(retentionFrom(n)).run();
+	return r.meta.changes;
 }
 
 /**
