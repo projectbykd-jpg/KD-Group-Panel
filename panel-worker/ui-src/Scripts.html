@@ -7083,6 +7083,34 @@ Tindakan ini tidak dapat dibatalkan.`,
         .withFailureHandler(e => { if (btn) btn.disabled = false; toast((e && e.message) || String(e)); })
         .botFbTest(currentSessionToken, { page_id: val('botFbPageId'), page_token: val('botFbToken') });
     }
+    function botTgTest() {
+      const btn = document.getElementById('botTgTestBtn');
+      const chat = document.getElementById('botTgChatId');
+      if (btn) btn.disabled = true;
+      toast('Mengirim pesan uji ke channel…');
+      google.script.run
+        .withSuccessHandler(res => {
+          if (btn) btn.disabled = false;
+          if (apiFailed(res)) { toast(apiMessage(res, 'Tes channel gagal')); return; }
+          notifyCenter(res.message || (res.ok ? 'Terkirim' : 'Gagal'), res.ok ? 'success' : 'warning', res.ok ? 'Channel Telegram terhubung' : 'Channel Telegram bermasalah');
+        })
+        .withFailureHandler(e => { if (btn) btn.disabled = false; toast((e && e.message) || String(e)); })
+        .botTgChannelTest(currentSessionToken, { chat_id: chat ? String(chat.value || '').trim() : '' });
+    }
+    function botTgSendNow() {
+      const btn = document.getElementById('botTgSendBtn');
+      if (btn) btn.disabled = true;
+      toast('Mengirim 1 artikel ke channel…');
+      google.script.run
+        .withSuccessHandler(res => {
+          if (btn) btn.disabled = false;
+          if (apiFailed(res)) { toast(apiMessage(res, 'Gagal mengirim')); return; }
+          notifyCenter(res.message || 'Selesai', res.posted ? 'success' : 'warning', res.posted ? 'Terkirim ke channel' : 'Belum terkirim');
+          if (res.snapshot) applyBotNews(res.snapshot);
+        })
+        .withFailureHandler(e => { if (btn) btn.disabled = false; toast((e && e.message) || String(e)); })
+        .botTgChannelSendNow(currentSessionToken);
+    }
     function botAiTest(id) {
       const p = (botAiData && botAiData.providers || []).find(x => x.id === id);
       toast('Mengetes ' + (p ? p.name : 'provider') + '…');
@@ -7226,10 +7254,15 @@ Tindakan ini tidak dapat dibatalkan.`,
       set('botBlogId', c.blog_id); set('botBloggerSiteUrl', c.blogger_site_url);
       set('botFbEnabled', c.fb_enabled); set('botFbPageId', c.fb_page_id); set('botFbPageUrl', c.fb_page_url);
       set('botWaChannelUrl', c.wa_channel_url);
+      set('botTgEnabled', c.tg_channel_enabled); set('botTgChatId', c.tg_channel_id); set('botTgUrl', c.tg_channel_url);
       set('botNewsBannerEnabled', c.news_banner_enabled); set('botNewsBannerImage', c.news_banner_image); set('botNewsBannerUrl', c.news_banner_url); set('botNewsBannerText', c.news_banner_text);
       }
       const hint = document.getElementById('botCredHint');
       if (hint) hint.textContent = (c.ai_providers_on ? c.ai_providers_on + ' AI provider aktif' : 'Belum ada AI provider aktif') + ' · ' + (c.has_blogger ? 'Blogger OK' : 'Blogger BELUM tersambung');
+      const tgHint = document.getElementById('botTgHint');
+      if (tgHint) tgHint.textContent = c.tg_channel_last_error ? 'Bermasalah: ' + c.tg_channel_last_error.slice(22) : (c.tg_channel_enabled ? (c.tg_channel_id ? 'Aktif' : 'Aktif, tapi Chat ID kosong') : 'Nonaktif');
+      const tgStats = document.getElementById('botTgStats');
+      if (tgStats) { const t = snap.tg || {}; tgStats.textContent = 'Hari ini terkirim ' + (t.postedToday || 0) + ' · antrean ' + (t.queue || 0) + (t.lastAt ? ' · terakhir ' + t.lastAt : ''); }
       const fbHint = document.getElementById('botFbHint');
       if (fbHint) fbHint.textContent = c.has_facebook ? 'Page ID & token tersimpan (belum dites) — klik TES FACEBOOK' : 'Facebook belum tersambung';
       renderBloggerStatus(c);
@@ -7417,7 +7450,7 @@ Tindakan ini tidak dapat dibatalkan.`,
 
     function saveBotNewsConfig(){
       const g=id=>{const el=document.getElementById(id);return !el?'':(el.type==='checkbox'?(el.checked?'1':'0'):String(el.value||'').trim());};
-      const data={enabled:g('botEnabled'),attribution:g('botAttribution'),per_run:g('botPerRun'),daily_cap:g('botDailyCap'),site_per_run:g('botSitePerRun'),auto_interval_minutes:g('botAutoInterval'),para_min:g('botParaMin'),para_max:g('botParaMax'),images_per_article:g('botImagesPer'),post_labels:g('botLabels'),promo_url:g('botPromoUrl'),promo_text:g('botPromoText'),rewrite_style:g('botStyle'),blogger_blog_id:g('botBlogId'),fb_enabled:g('botFbEnabled'),fb_page_id:g('botFbPageId'),fb_page_url:g('botFbPageUrl'),wa_channel_url:g('botWaChannelUrl'),blogger_site_url:g('botBloggerSiteUrl'),news_banner_enabled:g('botNewsBannerEnabled'),news_banner_image:g('botNewsBannerImage'),news_banner_url:g('botNewsBannerUrl'),news_banner_text:g('botNewsBannerText')};
+      const data={enabled:g('botEnabled'),attribution:g('botAttribution'),per_run:g('botPerRun'),daily_cap:g('botDailyCap'),site_per_run:g('botSitePerRun'),auto_interval_minutes:g('botAutoInterval'),para_min:g('botParaMin'),para_max:g('botParaMax'),images_per_article:g('botImagesPer'),post_labels:g('botLabels'),promo_url:g('botPromoUrl'),promo_text:g('botPromoText'),rewrite_style:g('botStyle'),blogger_blog_id:g('botBlogId'),fb_enabled:g('botFbEnabled'),fb_page_id:g('botFbPageId'),fb_page_url:g('botFbPageUrl'),wa_channel_url:g('botWaChannelUrl'),tg_channel_enabled:g('botTgEnabled'),tg_channel_id:g('botTgChatId'),tg_channel_url:g('botTgUrl'),blogger_site_url:g('botBloggerSiteUrl'),news_banner_enabled:g('botNewsBannerEnabled'),news_banner_image:g('botNewsBannerImage'),news_banner_url:g('botNewsBannerUrl'),news_banner_text:g('botNewsBannerText')};
       const fbTok=g('botFbToken'); if(fbTok) data.fb_page_token=fbTok;
       const bcId=g('botBloggerClientId'); if(bcId) data.blogger_client_id=bcId;
       const bcSecret=g('botBloggerClientSecret'); if(bcSecret) data.blogger_client_secret=bcSecret;

@@ -49,6 +49,8 @@ export const INT_DEFS: IntDef[] = [
 		hint: "Bot Telegram (dari @BotFather) yang mengirim pemberitahuan saat ada galat baru di Admin > Error & Bug. Kosong = tidak ada notifikasi. Tidak pernah ditampilkan ulang.", check: TG_TOKEN },
 	{ key: "int_alert_tg_chat", group: "Notifikasi Galat (Telegram)", label: "Chat ID tujuan notifikasi", def: "",
 		hint: "Chat ID admin/grup yang menerima notifikasi (kirim pesan ke bot dulu, lalu cek lewat @userinfobot / getUpdates). Pakai tombol TES TELEGRAM di Admin > Error & Bug untuk memastikan.", check: TG_CHAT },
+	{ key: "int_tgch_token", group: "Channel Telegram (Auto Posting)", label: "Token bot channel Telegram", secret: true, def: "",
+		hint: "Bot (dari @BotFather) yang memposting berita ke channel Anda; harus sudah jadi admin channel dengan izin Post Messages. Kosong = memakai token bot Notifikasi Galat di atas. Chat ID channel, link promosi, dan tombol aktif ada di BOT > Setting > Sosial & Promo. Tidak pernah ditampilkan ulang.", check: TG_TOKEN },
 	{ key: "int_news_site_url", group: "Web Berita & Struk", label: "Alamat web berita sendiri", def: "https://lokalstore88.online",
 		hint: "Dipakai untuk backlink, caption Facebook, dan alamat artikel di sitemap. Tanpa garis miring di akhir.", check: HTTPS },
 	{ key: "int_struk_base_url", group: "Web Berita & Struk", label: "Alamat dasar struk disbursement", def: "https://dbb2b.q2checkout.com/struk/disbursement/",
@@ -108,6 +110,8 @@ export const newsSiteUrl = () => intVal("int_news_site_url").replace(/\/+$/, "")
 export const strukBaseUrl = () => intVal("int_struk_base_url");
 export const adminDomain = () => intVal("int_admin_domain").toLowerCase();
 export const alertTgCfg = () => ({ token: intVal("int_alert_tg_token"), chatId: intVal("int_alert_tg_chat") });
+/** Token bot channel: diisi sendiri, atau (bila kosong) memakai token bot Notifikasi Galat. */
+export const tgChannelToken = () => intVal("int_tgch_token") || intVal("int_alert_tg_token");
 export const linktreeCfg = () => ({ loginUrl: intVal("int_linktree_login_url"), postUrl: intVal("int_linktree_post_url"), apiKey: intVal("int_linktree_api_key") });
 
 export type IntView = { key: string; group: string; label: string; hint: string; secret: boolean; value: string; mask: string; source: "admin" | "env" | "bawaan"; def: string };

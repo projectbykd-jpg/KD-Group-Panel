@@ -103,6 +103,8 @@ import {
 	botAiTest,
 	botAiModels,
 	botFbTest,
+	botTgChannelSendNow,
+	botTgChannelTest,
 	botFbRunNow,
 	botFbTemplateGenerate,
 	botNewsAddSource,
@@ -117,6 +119,7 @@ import {
 	botNewsStatus,
 	botNewsToggleSource,
 } from "./api/bot";
+import { tgChannelRun } from "./lib/tg-channel";
 import { botNewsRun, disableGnewsSources, fbDirectRun, newsPruneQueueDaily, newsPullSources, publicNewsBanner, publicNewsDetail, publicNewsList, publicNewsPopular, publicNewsRandom, publicNewsRssXml, publicNewsSitemapXml, seedCategorySources } from "./lib/bot-news";
 import {
 	livechatBotPull,
@@ -341,6 +344,8 @@ const ROUTES: Record<string, Handler> = {
 	botAiTopUp: (env, b) => botAiTopUp(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
 	botAiTest: (env, b) => botAiTest(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
 	botFbTest: (env, b) => botFbTest(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
+	botTgChannelTest: (env, b) => botTgChannelTest(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
+	botTgChannelSendNow: (env, b) => botTgChannelSendNow(env, s(b.token)),
 	botAiModels: (env, b) => botAiModels(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
 
 	// Live Chat Auto-Reply — sisi panel (sesi login ADMIN/OPERATOR)
@@ -772,6 +777,8 @@ export default {
 			// yang belum diproses & lebih lama dari kemarin jam 22:00 WIB. TIDAK
 			// PERNAH menyentuh artikel yang sudah tayang (lihat komentar di fungsinya).
 			await newsPruneQueueDaily(env).catch(cronFail(env, "prune antrean berita"));
+			// Auto Posting channel Telegram (nonaktif = 1 query konfigurasi saja; jeda/batas harian diatur di Admin > Pengaturan Sistem).
+			await tgChannelRun(env).catch(cronFail(env, "posting channel telegram"));
 		} else {
 			// Percobaan ulang otomatis Auto Prediksi (job gagal -> coba lagi tiap ±2 menit). Maks 1 job/tick; kalau jalan, pump Invest
 			// menunggu tick berikutnya supaya tidak berebut batas 50 subrequest per invocation.

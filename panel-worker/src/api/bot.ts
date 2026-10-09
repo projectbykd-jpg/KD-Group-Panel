@@ -43,6 +43,7 @@ import {
 	requeueBloggerAuthFailures,
 	resetBloggerTokenCache,
 } from "../lib/bot-news";
+import { TG_CHAT_RE, tgChannelRun, tgChannelTest } from "../lib/tg-channel";
 
 async function gate(env: Env, token: string) {
 	// BOT & ADMIN sama-sama boleh; OPERATOR/VIEWER ditolak.
@@ -65,7 +66,7 @@ export async function botNewsSaveConfig(env: Env, token: string, data: Record<st
 		// API key AI TIDAK lewat sini lagi -- dikelola per provider (botAiSave).
 		"enabled", "per_run", "daily_cap", "site_per_run", "attribution", "rewrite_style", "images_per_article",
 		"blogger_blog_id", "para_min", "para_max", "promo_url", "promo_text", "post_labels",
-		"fb_enabled", "fb_page_id", "fb_page_token", "fb_direct_enabled", "fb_direct_daily_cap", "fb_page_url", "wa_channel_url", "blogger_site_url",
+		"fb_enabled", "fb_page_id", "fb_page_token", "fb_direct_enabled", "fb_direct_daily_cap", "fb_page_url", "wa_channel_url", "blogger_site_url", "tg_channel_enabled", "tg_channel_id", "tg_channel_url",
 		"news_banner_enabled", "news_banner_image", "news_banner_url", "news_banner_text", "auto_interval_minutes",
 		"blogger_client_id", "blogger_client_secret", "blogger_redirect_uri",
 	];
@@ -73,6 +74,9 @@ export async function botNewsSaveConfig(env: Env, token: string, data: Record<st
 		if (Object.prototype.hasOwnProperty.call(data, k)) {
 			let v = String((data as any)[k] ?? "").trim();
 			if (k === "enabled" || k === "attribution" || k === "fb_enabled" || k === "fb_direct_enabled" || k === "news_banner_enabled") v = v === "1" || v === "true" ? "1" : "0";
+			if (k === "tg_channel_enabled") v = v === "1" || v === "true" ? "1" : "0";
+			if (k === "tg_channel_id" && v && !TG_CHAT_RE.test(v)) throw new Error("Chat ID channel tidak valid. Contoh: -1001234567890 atau @namakanal.");
+			if (k === "tg_channel_url" && v && !/^https:\/\/(t\.me|telegram\.me)\/[^\s]{3,200}$/i.test(v)) throw new Error("Link channel Telegram harus berupa https://t.me/… (salin dari info channel).");
 			if (k === "para_min" || k === "para_max") v = v ? String(Math.min(40, Math.max(1, Math.floor(Number(v) || 0)))) : "";
 			if (k === "images_per_article") v = v ? String(Math.min(8, Math.max(1, Math.floor(Number(v) || 1)))) : "";
 			// kosongkan input token/secret TIDAK menghapus yg tersimpan
@@ -83,6 +87,22 @@ export async function botNewsSaveConfig(env: Env, token: string, data: Record<st
 	if (Object.keys(patch).length) await botCfgSet(env, patch);
 	await logActivity(env, s.username, "BOT NEWS SETTING", "Ubah konfigurasi: " + Object.keys(patch).join(", "), "BERHASIL", "");
 	return botNewsSnapshot(env);
+}
+
+/** Tombol TES CHANNEL TELEGRAM: satu pesan uji ke channel + penjelasan bila gagal. Chat ID dari form (atau yang tersimpan). */
+export async function botTgChannelTest(env: Env, token: string, data: Record<string, unknown>) {
+	const s = await gate(env, token);
+	const r = await tgChannelTest(env, String(data.chat_id ?? ""));
+	await logActivity(env, s.username, "BOT CHANNEL TELEGRAM TES", r.message.slice(0, 250), r.ok ? "BERHASIL" : "GAGAL", "");
+	return { success: true, ...r };
+}
+
+/** Tombol KIRIM 1 ARTIKEL SEKARANG: melewati saklar aktif & jeda antar posting (batas harian tetap berlaku). */
+export async function botTgChannelSendNow(env: Env, token: string) {
+	const s = await gate(env, token);
+	const r = await tgChannelRun(env, { force: true });
+	await logActivity(env, s.username, "BOT CHANNEL TELEGRAM", r.message.slice(0, 250), r.posted ? "BERHASIL" : "INFO", "");
+	return { success: true, ...r, snapshot: await botNewsSnapshot(env) };
 }
 
 export async function botNewsAddSource(env: Env, token: string, data: Record<string, unknown>) {
