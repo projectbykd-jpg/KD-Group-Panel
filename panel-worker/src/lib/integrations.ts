@@ -24,6 +24,8 @@ const HTTPS = (v: string) => (/^https:\/\/[A-Za-z0-9.-]+(:\d+)?(\/[^\s]*)?$/.tes
 const HTTP_OR_S = (v: string) => (/^https?:\/\/[A-Za-z0-9.-]+(:\d+)?(\/[^\s]*)?$/.test(v) && v.length <= 300 ? "" : "Harus diawali http:// atau https:// dan berupa alamat yang valid.");
 const DOMAIN = (v: string) => (/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(v) && v.length <= 100 ? "" : "Isi nama domain saja (mis. suksesbogil.com), tanpa https:// dan tanpa garis miring.");
 const TOKEN = (v: string) => (v.length >= 20 && v.length <= 300 && !/\s/.test(v) ? "" : "Token 20-300 karakter tanpa spasi.");
+const TG_TOKEN = (v: string) => (/^\d{5,15}:[A-Za-z0-9_-]{20,60}$/.test(v) ? "" : "Format token bot Telegram: 123456789:AAxxxxxxxx (dari @BotFather).");
+const TG_CHAT = (v: string) => (v === "" || /^(-?\d{5,20}|@[A-Za-z0-9_]{5,32})$/.test(v) ? "" : "Chat ID berupa angka (mis. 123456789 atau -1001234567890) atau @namakanal.");
 const KEY = (v: string) => (v.length >= 8 && v.length <= 200 && !/\s/.test(v) ? "" : "Kunci 8-200 karakter tanpa spasi.");
 
 export const INT_DEFS: IntDef[] = [
@@ -43,6 +45,10 @@ export const INT_DEFS: IntDef[] = [
 		hint: "Endpoint pengiriman notifikasi hasil.", check: HTTP_OR_S },
 	{ key: "int_linktree_api_key", group: "LinkTree (kirim hasil)", label: "API key LinkTree", secret: true, def: "bbd53ebb-ba2b-11ec-9377-f2937b475656",
 		hint: "Kunci API pengiriman LinkTree. Bawaan lama masih tertanam di kode repo -- sebaiknya isi kunci baru di sini.", check: KEY },
+	{ key: "int_alert_tg_token", group: "Notifikasi Galat (Telegram)", label: "Token bot Telegram notifikasi", secret: true, def: "",
+		hint: "Bot Telegram (dari @BotFather) yang mengirim pemberitahuan saat ada galat baru di Admin > Error & Bug. Kosong = tidak ada notifikasi. Tidak pernah ditampilkan ulang.", check: TG_TOKEN },
+	{ key: "int_alert_tg_chat", group: "Notifikasi Galat (Telegram)", label: "Chat ID tujuan notifikasi", def: "",
+		hint: "Chat ID admin/grup yang menerima notifikasi (kirim pesan ke bot dulu, lalu cek lewat @userinfobot / getUpdates). Pakai tombol TES TELEGRAM di Admin > Error & Bug untuk memastikan.", check: TG_CHAT },
 	{ key: "int_news_site_url", group: "Web Berita & Struk", label: "Alamat web berita sendiri", def: "https://lokalstore88.online",
 		hint: "Dipakai untuk backlink, caption Facebook, dan alamat artikel di sitemap. Tanpa garis miring di akhir.", check: HTTPS },
 	{ key: "int_struk_base_url", group: "Web Berita & Struk", label: "Alamat dasar struk disbursement", def: "https://dbb2b.q2checkout.com/struk/disbursement/",
@@ -101,6 +107,7 @@ export const publicUrl = (env: Env) => intVal("int_public_url", env).replace(/\/
 export const newsSiteUrl = () => intVal("int_news_site_url").replace(/\/+$/, "");
 export const strukBaseUrl = () => intVal("int_struk_base_url");
 export const adminDomain = () => intVal("int_admin_domain").toLowerCase();
+export const alertTgCfg = () => ({ token: intVal("int_alert_tg_token"), chatId: intVal("int_alert_tg_chat") });
 export const linktreeCfg = () => ({ loginUrl: intVal("int_linktree_login_url"), postUrl: intVal("int_linktree_post_url"), apiKey: intVal("int_linktree_api_key") });
 
 export type IntView = { key: string; group: string; label: string; hint: string; secret: boolean; value: string; mask: string; source: "admin" | "env" | "bawaan"; def: string };

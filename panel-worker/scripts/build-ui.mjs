@@ -87,6 +87,7 @@ const ARG_MAP = {
 	adminErrorList: ["token", "options"],
 	adminErrorSet: ["token", "ids", "status"],
 	adminErrorDelete: ["token", "ids", "scope"],
+	adminErrorAlertTest: ["token"],
 	clientErrorReport: ["token", "report"],
 	adminSaveSystemSettings: ["token", "values"],
 	adminGetMasterData: ["token"],

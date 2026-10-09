@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { adminErrorDelete, adminErrorList, adminErrorSet, clientErrorReport, resetClientReportLimit } from "../src/api/error-log";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { adminErrorAlertTest, adminErrorDelete, adminErrorList, adminErrorSet, clientErrorReport, resetClientReportLimit } from "../src/api/error-log";
 import { checkLogin } from "../src/api/auth";
 import { hashPassword } from "../src/lib/crypto";
 import { cronFail, deleteErrors, fingerprint, isUnexpectedError, listErrors, pruneErrorLog, recordError, resetErrorThrottle, scrub, setErrorStatus } from "../src/lib/error-log";
-import { resetSysCache } from "../src/lib/settings";
+import { resetIntegrationsCache, saveIntegrations } from "../src/lib/integrations";
+import { resetSysCache, saveSys } from "../src/lib/settings";
 import { fakeEnv } from "./helpers/fake-env";
 
 let ctx: ReturnType<typeof fakeEnv>;
@@ -185,5 +186,74 @@ describe("retensi & batas baris", () => {
 	it("cronFail mencatat sumber cron dan tidak melempar", async () => {
 		await cronFail(ctx.env, "uji cron")(new Error("D1_ERROR boom"));
 		expect(rows()[0]).toMatchObject({ source: "cron", loc: "uji cron" });
+	});
+});
+
+describe("notifikasi Telegram galat baru", () => {
+	const sent: { url: string; body: string }[] = [];
+	const setup = async (chat = "123456789", gapMin?: number) => {
+		sent.length = 0;
+		vi.stubGlobal("fetch", async (url: string, init: { body: URLSearchParams }) => {
+			sent.push({ url: String(url), body: init.body.toString() });
+			return new Response("{}", { status: 200 });
+		});
+		const r = await saveIntegrations(ctx.env, { int_alert_tg_token: "123456789:AAEhBOweik6ad9r_QXMENQjcrEZhGbbpR_H", int_alert_tg_chat: chat });
+		expect(r.ok).toBe(true);
+		resetIntegrationsCache();
+		if (gapMin) {
+			await saveSys(ctx.env, { sys_errorlog_alert_gap_min: gapMin });
+		}
+		resetSysCache();
+	};
+	afterEach(() => vi.unstubAllGlobals());
+
+	it("tanpa token/chat: tidak mengirim apa pun", async () => {
+		sent.length = 0;
+		vi.stubGlobal("fetch", async () => { sent.push({ url: "x", body: "" }); return new Response("{}"); });
+		await rec("galat tanpa konfigurasi");
+		expect(sent).toHaveLength(0);
+		expect(rows()).toHaveLength(1);
+	});
+	it("galat BARU dikirim; pengulangan & galat lain dalam jeda minimum tidak (anti banjir)", async () => {
+		await setup();
+		await rec("galat pertama D1_ERROR");
+		expect(sent).toHaveLength(1);
+		expect(sent[0].url).toContain("api.telegram.org/bot123456789:");
+		expect(decodeURIComponent(sent[0].body.replace(/\+/g, " "))).toMatch(/Error baru.*\n\(api\) aksiX\ngalat pertama/s);
+		resetErrorThrottle();
+		await rec("galat pertama D1_ERROR"); // pengulangan: bukan baru
+		await rec("galat kedua lain sama sekali"); // baru tapi masih dalam jeda 60 menit
+		expect(sent).toHaveLength(1);
+		expect(rows()).toHaveLength(2); // tetap tercatat di menu
+	});
+	it("muncul lagi setelah ditandai Selesai -> dikirim lagi (setelah jeda)", async () => {
+		await setup();
+		await rec("galat bisa kambuh");
+		await setErrorStatus(ctx.env, [Number(rows()[0].id)], "resolved");
+		ctx.db.prepare(`UPDATE settings SET value = '0' WHERE key = 'errlog_alert_at'`).run(); // jeda sudah lewat
+		resetErrorThrottle();
+		await rec("galat bisa kambuh");
+		expect(sent).toHaveLength(2);
+		expect(decodeURIComponent(sent[1].body.replace(/\+/g, " "))).toContain("Error muncul lagi");
+	});
+	it("Telegram gagal tidak menggagalkan pencatatan; tes Telegram admin: butuh konfigurasi & token tidak bocor di pesan galat", async () => {
+		await setup();
+		vi.stubGlobal("fetch", async () => new Response('{"ok":false,"description":"Unauthorized 123456789:AAEhBOweik6ad9r_QXMENQjcrEZhGbbpR_H"}', { status: 401 }));
+		await rec("galat saat telegram mati");
+		expect(rows()).toHaveLength(1);
+		const boss = await addUser("Boss", "ADMIN");
+		const r = await adminErrorAlertTest(ctx.env, boss);
+		expect(r.success).toBe(false);
+		expect(r.message).not.toContain("AAEhBOweik6ad9r");
+		const op = await addUser("Op", "OPERATOR");
+		await expect(adminErrorAlertTest(ctx.env, op)).rejects.toThrow();
+	});
+	it("tes Telegram tanpa konfigurasi memberi petunjuk; format token/chat ditolak saat simpan", async () => {
+		const boss = await addUser("Boss", "ADMIN");
+		expect((await adminErrorAlertTest(ctx.env, boss)).success).toBe(false);
+		const bad = await saveIntegrations(ctx.env, { int_alert_tg_token: "bukan-token", int_alert_tg_chat: "123456789" });
+		expect(bad.ok).toBe(false);
+		const bad2 = await saveIntegrations(ctx.env, { int_alert_tg_chat: "abc def" });
+		expect(bad2.ok).toBe(false);
 	});
 });

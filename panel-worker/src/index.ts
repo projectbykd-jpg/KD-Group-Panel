@@ -27,7 +27,7 @@ import {
 	adminSetAutoPost,
 	pruneActivityLogCron,
 } from "./api/admin";
-import { adminErrorDelete, adminErrorList, adminErrorSet, clientErrorReport } from "./api/error-log";
+import { adminErrorAlertTest, adminErrorDelete, adminErrorList, adminErrorSet, clientErrorReport } from "./api/error-log";
 import { cronFail, isUnexpectedError, pruneErrorLog, recordError } from "./lib/error-log";
 import { logTotoEvent, totoDispatchTick, totoMacauRun } from "./lib/toto-macau";
 import {
@@ -208,6 +208,7 @@ const ROUTES: Record<string, Handler> = {
 	adminGetSystemSettings: (env, b) => adminGetSystemSettings(env, s(b.token)),
 	adminErrorList: (env, b) => adminErrorList(env, s(b.token), b.options),
 	adminErrorSet: (env, b) => adminErrorSet(env, s(b.token), b.ids, b.status),
+	adminErrorAlertTest: (env, b) => adminErrorAlertTest(env, s(b.token)),
 	adminErrorDelete: (env, b) => adminErrorDelete(env, s(b.token), b.ids, b.scope),
 	clientErrorReport: (env, b) => clientErrorReport(env, s(b.token), b.report),
 	adminSaveSystemSettings: (env, b) => adminSaveSystemSettings(env, s(b.token), b.values),

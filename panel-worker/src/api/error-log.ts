@@ -1,6 +1,8 @@
 // API menu Admin > Error & Bug + penerima laporan galat dari browser.
 import { requireSession } from "./auth";
 import { logActivity } from "../lib/activity";
+import { alertTgCfg, loadIntegrations } from "../lib/integrations";
+import { sendTelegram } from "../senders/telegram";
 import { deleteErrors, listErrors, recordError, setErrorStatus } from "../lib/error-log";
 
 export async function adminErrorList(env: Env, token: string, options: unknown) {
@@ -21,6 +23,16 @@ export async function adminErrorDelete(env: Env, token: string, ids: unknown, sc
 	const n = await deleteErrors(env, ids, String(scope ?? ""));
 	if (n) await logActivity(env, s.username, "HAPUS LOG ERROR", `${n} catatan error dihapus.`, "BERHASIL", "");
 	return { success: true, removed: n };
+}
+
+/** Tombol TES TELEGRAM: kirim pesan uji ke bot/chat yang diisi di Admin > Integrasi. */
+export async function adminErrorAlertTest(env: Env, token: string) {
+	await requireSession(env, token, { admin: true, ignoreMaintenance: true });
+	await loadIntegrations(env);
+	const c = alertTgCfg();
+	if (!c.token || !c.chatId) return { success: false, message: "Isi Token bot & Chat ID di Admin › Integrasi › Notifikasi Galat (Telegram) dulu." };
+	const r = await sendTelegram("✅ Tes notifikasi Error & Bug — KD-Group Panel. Bila pesan ini sampai, pemberitahuan galat baru akan dikirim ke sini.", c);
+	return r === "Terkirim" ? { success: true, message: "Pesan uji terkirim ke Telegram." } : { success: false, message: "Gagal kirim: " + r.replace(c.token, "***") };
 }
 
 // Pembatas per user (per isolate): satu tab yang rusak tidak boleh membanjiri tabel.

@@ -67,10 +67,10 @@
 	let REPLIED = loadRepliedMap();
 
 	// Toleransi sebelum membalas member yang BARU chat 1x (belum dianggap spam).
-	const GRACE_MS = 30_000;
+	let GRACE_MS = 30_000; // bawaan; diganti nilai dari panel (Admin > Pengaturan Sistem > Live Chat Bot) saat sinkron
 	// SATU balasan per burst: selama member masih spam (jeda antar pesan < BURST_RESET_MS) bot TIDAK membalas lagi.
 	// Jeda tanpa pesan baru sebelum burst dianggap selesai (balasan berikutnya baru boleh).
-	const BURST_RESET_MS = 90_000;
+	let BURST_RESET_MS = 90_000; // bawaan; diganti nilai dari panel saat sinkron
 
 	function getToken() {
 		try {
@@ -227,6 +227,9 @@
 		if (r && r.success) {
 			enabledKeys = r.enabledKeys || [];
 			templates = r.templates || [];
+			// jeda dari panel (admin bisa ubah); angka tak valid diabaikan -> tetap bawaan
+			if (Number(r.burstResetSec) >= 30 && Number(r.burstResetSec) <= 600) BURST_RESET_MS = Number(r.burstResetSec) * 1000;
+			if (Number(r.graceSec) >= 5 && Number(r.graceSec) <= 300) GRACE_MS = Number(r.graceSec) * 1000;
 			catchUpNewlyEnabled();
 		}
 	}
