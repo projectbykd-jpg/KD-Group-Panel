@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: import("node:sqlite").DatabaseSync } }));
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
-import { ackTotoAlerts, dismissTotoRows, listTotoEvents, listTotoLog, logTotoEvent, parseTotoRows, passIntervalMin, pendingTotoAlerts, pruneTotoMacau, resetTotoTablesFlag, totoDispatchAt, totoDispatchTick, totoMacauRun } from "../src/lib/toto-macau";
+import { ackTotoAlerts, dismissTotoRows, listTotoEvents, listTotoLog, logTotoEvent, parseTotoRows, passIntervalMin, pendingTotoAlerts, totoWindowState, pruneTotoMacau, resetTotoTablesFlag, totoDispatchAt, totoDispatchTick, totoMacauRun } from "../src/lib/toto-macau";
 import { openPanelZ, panelZPageCount, parsePanelZRows, type PanelZHandle } from "../src/senders/panelz";
 import { defaultAdminBase, resetAutoInputTablesFlag, saveSession, setEnabled } from "../src/lib/auto-input";
 import { resetSysCache, saveSys } from "../src/lib/settings";
@@ -73,9 +73,29 @@ describe("pembaca tabel admin & Panel-Z", () => {
 	it("Panel-Z: baris tanpa tautan update / tanggal tidak terbaca dilewati (tidak ditebak)", () => {
 		expect(parsePanelZRows(`<table><tr><td>1</td><td>TOTOMACAU-13</td><td><input value=""></td><td>besok</td></tr></table>`)).toEqual([]);
 	});
-	it("jeda putaran: 3 menit setelah jam draw, 30 menit di luar itu", () => {
+	it("jendela pemicu: aktif sekitar jam draw (-2 s/d +45 menit), di luar itu mati (0) -- tidak selalu aktif", () => {
+		const wib = (h: number, m: number) => Date.UTC(2026, 9, 8, h - 7 + 24, m); // jam WIB hari yang sama (h>=7 aman; dipakai untuk 11..23)
 		expect(passIntervalMin(Date.UTC(2026, 9, 8, 6, 20))).toBe(3); // 13:20 WIB
-		expect(passIntervalMin(Date.UTC(2026, 9, 8, 4, 0))).toBe(30); // 11:00 WIB
+		expect(passIntervalMin(Date.UTC(2026, 9, 8, 4, 0))).toBe(0); // 11:00 WIB: di luar jendela -> tidak aktif
+		expect(passIntervalMin(Date.UTC(2026, 9, 8, 5, 57))).toBe(0); // 12:57 -- belum 2 menit sebelum 13:00
+		expect(passIntervalMin(Date.UTC(2026, 9, 8, 5, 58))).toBe(3); // 12:58 -- 2 menit sebelum
+		expect(passIntervalMin(Date.UTC(2026, 9, 8, 6, 45))).toBe(3); // 13:45 -- batas akhir
+		expect(passIntervalMin(Date.UTC(2026, 9, 8, 6, 46))).toBe(0); // 13:46
+		expect(passIntervalMin(wib(23, 50))).toBe(0); // 23:50: setelah jendela 23:00, sebelum jendela 00:00
+		expect(passIntervalMin(wib(23, 59))).toBe(3); // 23:59: jendela draw 00:00 (lintas tengah malam)
+		expect(passIntervalMin(Date.UTC(2026, 9, 8, 17, 30))).toBe(3); // 00:30 WIB: masih jendela draw 00
+		// pengaturan admin: jendela lebih lebar, sapuan rutin 60 menit
+		const cfg = { before: 10, after: 20, fast: 2, idle: 60 };
+		expect(passIntervalMin(Date.UTC(2026, 9, 8, 5, 52), cfg)).toBe(2); // 12:52 (10 menit sebelum 13:00)
+		expect(passIntervalMin(Date.UTC(2026, 9, 8, 6, 25), cfg)).toBe(60); // 13:25 > +20
+	});
+	it("totoWindowState: jendela berikutnya & sisa waktu (untuk kartu)", () => {
+		const idle = totoWindowState(Date.UTC(2026, 9, 8, 4, 0)); // 11:00 WIB
+		expect(idle).toMatchObject({ active: false, endsInMin: null, nextAt: "12:58", nextInMin: 118, nextName: "TOTOMACAU-13" });
+		const on = totoWindowState(Date.UTC(2026, 9, 8, 6, 30)); // 13:30 WIB
+		expect(on).toMatchObject({ active: true, endsInMin: 15 });
+		// 21:00 WIB: draw 5D 21 jendela 20:58 -> sesudah 19:45 sebelum 20:58
+		expect(totoWindowState(Date.UTC(2026, 9, 8, 13, 0))).toMatchObject({ active: false, nextAt: "20:58", nextName: "TOTOMACAU-21-5D" });
 	});
 });
 
@@ -383,9 +403,11 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 	});
 	it("pemicu cron: memicu workflow sesuai jeda, tidak dobel, dipercepat bila ada baris menunggu, mati bila mode 0", async () => {
 		await setMode(2);
+		await saveSys(env, { sys_totomacau_idle_min: 30 }); // sapuan rutin 30 menit DIHIDUPKAN admin (bawaan: mati)
+		resetSysCache();
 		const calls: number[] = [];
 		const dispatch = async () => void calls.push(1);
-		const t0 = Date.UTC(2026, 9, 8, 4, 0); // 11:00 WIB: di luar jendela draw -> jeda 30 menit
+		const t0 = Date.UTC(2026, 9, 8, 4, 0); // 11:00 WIB: di luar jendela draw -> jeda 30 menit (sapuan rutin diaktifkan)
 		expect(await totoDispatchAt(env)).toBe(""); // belum pernah memicu
 		expect(await totoDispatchTick(env, dispatch, t0)).toBe(true);
 		expect(await totoDispatchAt(env)).toBe("2026-10-08 11:00:00"); // waktu WIB pemicu terakhir (untuk kartu)
@@ -406,6 +428,46 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 		expect(await totoDispatchTick(env, async () => { throw new Error("token kosong"); }, t0 + 400 * 60_000)).toBe(true);
 		const ev = await listTotoEvents(env, ["HUGOTOGEL"], 10);
 		expect(ev.events[0].msg).toMatch(/Gagal memicu GitHub Actions: token kosong/);
+	});
+	it("pemicu TIDAK selalu aktif: bawaan hanya di sekitar jam draw; baris menunggu membangunkannya; pengaturan admin dihormati", async () => {
+		await setMode(2);
+		const calls: number[] = [];
+		const dispatch = async () => void calls.push(1);
+		const t11 = Date.UTC(2026, 9, 8, 4, 0); // 11:00 WIB
+		expect(await totoDispatchTick(env, dispatch, t11)).toBe(false); // di luar jendela: diam
+		expect(await totoDispatchTick(env, dispatch, t11 + 60 * 60_000)).toBe(false); // 12:00 juga diam
+		expect(calls.length).toBe(0);
+		const t1258 = Date.UTC(2026, 9, 8, 5, 58);
+		expect(await totoDispatchTick(env, dispatch, t1258)).toBe(true); // jendela draw 13:00 dibuka
+		expect(await totoDispatchTick(env, dispatch, t1258 + 60_000)).toBe(false); // jeda 3 menit
+		expect(await totoDispatchTick(env, dispatch, t1258 + 3 * 60_000)).toBe(true);
+		expect(await totoDispatchTick(env, dispatch, Date.UTC(2026, 9, 8, 6, 50))).toBe(false); // 13:50 jendela sudah ditutup
+		expect(calls.length).toBe(2);
+		// baris menunggu (draw baru-baru ini) membangunkan pemicu walau di luar jendela
+		const now = tsPlusMinutes(0);
+		turso.current!.raw.prepare(`INSERT INTO toto_macau_log (website, game, period, slot_key, status, created_at, updated_at) VALUES ('HUGOTOGEL','m17',99,'k','MISSING',?,?)`).run(now, now);
+		turso.current!.raw.prepare(`UPDATE toto_macau_log SET row_at = ? WHERE period = 99`).run(tsPlusMinutes(-30));
+		expect(await totoDispatchTick(env, dispatch, Date.UTC(2026, 9, 8, 9, 0))).toBe(true);
+		// jendela diatur admin: sesudah draw hanya 5 menit
+		turso.current!.raw.prepare(`DELETE FROM toto_macau_log WHERE period = 99`).run();
+		await saveSys(env, { sys_totomacau_after_min: 5 });
+		resetSysCache();
+		expect(await totoDispatchTick(env, dispatch, Date.UTC(2026, 9, 8, 16, 0, 0) + 10 * 60_000)).toBe(false); // 23:10: lewat 5 menit sesudah 23:00
+		expect(await totoDispatchTick(env, dispatch, Date.UTC(2026, 9, 8, 16, 0, 0) + 30 * 60_000)).toBe(false);
+	});
+	it("putaran non-paksa di luar jendela draw: tidak memeriksa (bawaan), kecuali sapuan rutin dihidupkan atau ada baris menunggu", async () => {
+		await addUser("tester");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("tester");
+		await setMode(2);
+		await run(); // putaran pertama (paksa): mencatat tanda pemeriksaan website
+		const db = turso.current!.raw;
+		db.prepare(`UPDATE toto_macau_log SET status = 'SENT' WHERE period > 0`).run(); // tidak ada baris menunggu
+		db.prepare(`UPDATE toto_macau_log SET updated_at = ? WHERE game = 'pass'`).run(tsPlusMinutes(-300)); // terakhir diperiksa 5 jam lalu
+		expect((await run({ force: false })).websites).toBe(0); // NOW = 01:52 WIB, di luar jendela, sapuan rutin mati -> diam
+		await saveSys(env, { sys_totomacau_idle_min: 30 });
+		resetSysCache();
+		expect((await run({ force: false })).websites).toBe(1); // sapuan rutin dihidupkan admin -> jalan
 	});
 	// 11 hari draw Toto Macau (6/hari), terbaru dulu, 20 baris per halaman admin ([ >> ] = start=20&end=40 ...)
 	function manyDraws() {

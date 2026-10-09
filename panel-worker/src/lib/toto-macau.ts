@@ -235,18 +235,61 @@ export interface TotoSummary {
 	skippedBusy: number;
 }
 
-/** Ada draw yang terbit 3..45 menit lalu? Saat itu putaran tiap 3 menit; selain itu tiap 30 menit. */
-export function passIntervalMin(nowMs: number): number {
+/**
+ * Jendela aktif pemicu otomatis (diatur di Admin > Pengaturan Sistem > Auto Check Toto Macau):
+ * aktif dari `before` menit SEBELUM sampai `after` menit SESUDAH tiap jam draw; di luar itu `idle` menit (0 = tidak aktif).
+ */
+export interface TotoWindowCfg {
+	before: number;
+	after: number;
+	fast: number;
+	idle: number;
+}
+export const DEFAULT_TOTO_WINDOW: TotoWindowCfg = { before: 2, after: 45, fast: 3, idle: 0 };
+export async function getTotoWindowCfg(env: Env): Promise<TotoWindowCfg> {
+	const [before, after, fast, idle] = await Promise.all([
+		getSys(env, "sys_totomacau_before_min"),
+		getSys(env, "sys_totomacau_after_min"),
+		getSys(env, "sys_totomacau_fast_min"),
+		getSys(env, "sys_totomacau_idle_min"),
+	]);
+	return { before, after, fast, idle };
+}
+const DAY_MIN = 24 * 60;
+function drawSlots(): { min: number; name: string }[] {
+	const out: { min: number; name: string }[] = [];
+	for (const g of TOTO_GAMES) for (const [hs, name] of Object.entries(g.slots)) out.push({ min: Number(hs) * 60, name });
+	return out.sort((x, y) => x.min - y.min);
+}
+export interface TotoWindowState {
+	active: boolean;
+	/** sisa menit jendela yang sedang aktif (null bila tidak aktif) */
+	endsInMin: number | null;
+	/** jendela berikutnya: jam mulai "HH:MM" (WIB), menit lagi, dan draw-nya */
+	nextAt: string;
+	nextInMin: number;
+	nextName: string;
+}
+export function totoWindowState(nowMs: number, cfg: TotoWindowCfg = DEFAULT_TOTO_WINDOW): TotoWindowState {
 	const d = new Date(nowMs + 7 * 3600_000);
-	const minOfDay = d.getUTCHours() * 60 + d.getUTCMinutes();
-	for (const g of TOTO_GAMES) {
-		for (const hs of Object.keys(g.slots)) {
-			let diff = minOfDay - Number(hs) * 60;
-			if (diff < 0) diff += 24 * 60;
-			if (diff >= 3 && diff <= 45) return 3;
+	const now = d.getUTCHours() * 60 + d.getUTCMinutes();
+	let endsIn: number | null = null;
+	let next = { inMin: Infinity, at: 0, name: "" };
+	for (const s of drawSlots()) {
+		for (const shift of [-DAY_MIN, 0, DAY_MIN]) {
+			const rel = now - (s.min + shift); // menit sejak draw (negatif = sebelum draw)
+			if (rel >= -cfg.before && rel <= cfg.after) endsIn = Math.max(endsIn ?? 0, cfg.after - rel);
 		}
+		const start = (((s.min - cfg.before) % DAY_MIN) + DAY_MIN) % DAY_MIN;
+		const inMin = (((start - now) % DAY_MIN) + DAY_MIN) % DAY_MIN || DAY_MIN;
+		if (inMin < next.inMin) next = { inMin, at: start, name: s.name };
 	}
-	return 30;
+	const hh = (m: number) => String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
+	return { active: endsIn !== null, endsInMin: endsIn, nextAt: hh(next.at), nextInMin: next.inMin, nextName: next.name };
+}
+/** Jeda putaran saat ini (menit): `fast` di dalam jendela draw, selain itu `idle`; 0 = tidak aktif. */
+export function passIntervalMin(nowMs: number, cfg: TotoWindowCfg = DEFAULT_TOTO_WINDOW): number {
+	return totoWindowState(nowMs, cfg).active ? cfg.fast : cfg.idle;
 }
 
 
@@ -724,6 +767,15 @@ async function hotWebsites(env: Env, mode: number, nowMs: number = Date.now()): 
 	return new Set((res.results ?? []).map((r) => String(r.website)));
 }
 
+/** Untuk kartu: apakah pemicu SEHARUSNYA aktif sekarang (jendela draw / ada baris menunggu / sapuan rutin) dan kapan jendela berikutnya. */
+export async function totoWindowInfo(env: Env, nowMs: number = Date.now()): Promise<TotoWindowState & { hot: boolean; expectActive: boolean; activeForMin: number; idle: number; before: number; after: number }> {
+	const cfg = await getTotoWindowCfg(env);
+	const mode = await getSys(env, "sys_totomacau_mode");
+	const w = totoWindowState(nowMs, cfg);
+	const hot = (await hotWebsites(env, mode, nowMs)).size > 0;
+	return { ...w, hot, expectActive: mode > 0 && (w.active || hot || cfg.idle > 0), activeForMin: w.endsInMin === null ? 0 : cfg.before + cfg.after - w.endsInMin, idle: cfg.idle, before: cfg.before, after: cfg.after };
+}
+
 /** Kapan cron terakhir memicu workflow (WIB "yyyy-MM-dd HH:mm:ss"), "" bila belum pernah. Dipakai kartu untuk menampilkan apakah pemicu otomatis hidup. */
 export async function totoDispatchAt(env: Env): Promise<string> {
 	const row = await env.DB.prepare(`SELECT value FROM settings WHERE key = 'toto_dispatch_at'`).first<{ value: string }>();
@@ -732,24 +784,30 @@ export async function totoDispatchAt(env: Env): Promise<string> {
 }
 
 /**
- * Dipanggil cron Cloudflare tiap menit: memicu workflow GitHub Actions (toto-macau.yml) sesuai jeda -- 3 menit bila ada draw baru (3..45 menit
- * setelah jam draw) atau ada baris yang masih menunggu, selain itu 30 menit. Jadwal `schedule` GitHub sendiri sering telat, jadi pemicu utama di sini.
- * Murah: 1 baca D1 pada tick biasa. true = workflow dipicu (tick ini memakai jatah subrequest).
+ * Dipanggil cron Cloudflare tiap menit: memicu workflow GitHub Actions (toto-macau.yml) HANYA di sekitar jam draw (jendela -sebelum/+sesudah menit,
+ * Admin > Pengaturan Sistem) atau bila ada baris yang masih menunggu/gagal; di luar itu tidak memicu (kecuali "Jeda di luar jam draw" > 0).
+ * Jadwal `schedule` GitHub sendiri sering telat, jadi pemicu utama di sini. Murah: 1 baca D1 pada tick biasa.
+ * true = workflow dipicu (tick ini memakai jatah subrequest).
  */
 export async function totoDispatchTick(env: Env, dispatch: () => Promise<void>, nowMs: number = Date.now()): Promise<boolean> {
 	const mode = await getSys(env, "sys_totomacau_mode");
 	if (mode <= 0) return false;
 	const row = await env.DB.prepare(`SELECT value FROM settings WHERE key = 'toto_dispatch_at'`).first<{ value: string }>();
 	const last = Number(row?.value || 0);
-	if (nowMs - last < 3 * 60_000 - 20_000) return false;
+	const cfg = await getTotoWindowCfg(env);
+	if (nowMs - last < cfg.fast * 60_000 - 20_000) return false;
+	const win = totoWindowState(nowMs, cfg);
+	// di luar jendela draw dan "jeda di luar" = 0: tidak perlu memeriksa apa pun (hanya baris menunggu yang membangunkan pemicu)
 	await ensureTables(env);
 	const hot = (await hotWebsites(env, mode, nowMs)).size > 0;
-	const interval = (hot ? 3 : passIntervalMin(nowMs)) * 60_000;
+	const intervalMin = hot ? cfg.fast : win.active ? cfg.fast : cfg.idle;
+	if (intervalMin <= 0) return false;
+	const interval = intervalMin * 60_000;
 	if (nowMs - last < interval - 20_000) return false;
 	await env.DB.prepare(`INSERT INTO settings (key, value) VALUES ('toto_dispatch_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).bind(String(nowMs)).run();
 	try {
 		await dispatch();
-		await logTotoEvent(env, "", "info", "INFO", `Cron memicu GitHub Actions (${hot ? "ada baris menunggu" : interval <= 3 * 60_000 ? "ada draw baru" : "sapuan rutin"})`);
+		await logTotoEvent(env, "", "info", "INFO", `Cron memicu GitHub Actions (${hot ? "ada baris menunggu" : win.active ? "jendela jam draw" : "sapuan rutin"})`);
 	} catch (e) {
 		console.error("toto dispatch error", e instanceof Error ? e.message : e);
 		await logTotoEvent(env, "", "info", "ERR", "Gagal memicu GitHub Actions: " + (e instanceof Error ? e.message : String(e)).slice(0, 200));
@@ -783,7 +841,8 @@ export async function totoMacauRun(env: Env, opts: { only?: string[]; exclude?: 
 	const markMap = new Map((marks.results ?? []).map((m) => [String(m.website), { at: String(m.updated_at), running: m.status === 'RUN', more: m.detail === 'MORE' }]));
 	const last = new Map([...markMap].map(([w, m]) => [w, m.at]));
 	const hot = await hotWebsites(env, mode, nowMs);
-	const baseInterval = passIntervalMin(nowMs);
+	const wcfg = await getTotoWindowCfg(env);
+	const baseInterval = passIntervalMin(nowMs, wcfg); // 0 = di luar jendela draw dan sapuan rutin mati
 	const due = [...byWebsite.keys()]
 		.filter((w) => {
 			const acc = accounts.get(w);
@@ -796,7 +855,8 @@ export async function totoMacauRun(env: Env, opts: { only?: string[]; exclude?: 
 			if (m.running && m.at > tsPlusMinutes(-LEASE_MIN)) return false; // sedang diperiksa proses lain
 			if (m.more) return true; // masih ada yang antre dari putaran sebelumnya: lanjut
 			// jeda minimum: tombol (force) hanya menghilangkan jeda 3/30 menit, tidak membolehkan pemeriksaan ulang beruntun dari banyak user
-			return m.at <= tsPlusMinutes(opts.force ? -(MIN_GAP_SEC_FORCE / 60) : -(hot.has(w) ? 3 : baseInterval));
+			if (!opts.force && !hot.has(w) && baseInterval <= 0) return false; // bukan waktunya: di luar jendela draw, tidak ada baris menunggu
+			return m.at <= tsPlusMinutes(opts.force ? -(MIN_GAP_SEC_FORCE / 60) : -(hot.has(w) ? wcfg.fast : baseInterval));
 		})
 		.sort((x, y) => (last.get(x) ?? "").localeCompare(last.get(y) ?? ""))
 		.slice(0, opts.maxSites ?? 4);

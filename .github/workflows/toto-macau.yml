@@ -5,8 +5,8 @@ name: TOTO MACAU auto check (bypass limit Cloudflare)
 # (/__cron?job=totomacau) -- workflow ini hanya MENGULANG panggilan itu, 1 website per panggilan,
 # jadi tiap panggilan jauh di bawah batas 50 subrequest Cloudflare dan tidak ada yang dipaksa.
 #
-# Pemicu (semua otomatis, tanpa klik): (1) cron Cloudflare tiap menit memicu workflow ini sesuai jeda (3 menit setelah jam draw atau
-# bila ada baris menunggu, selain itu 30 menit -- lihat totoDispatchTick); (2) jadwal di bawah sebagai cadangan (jadwal GitHub sering
+# Pemicu (semua otomatis, tanpa klik): (1) cron Cloudflare tiap menit memicu workflow ini HANYA di jendela jam draw (bawaan -2..+45 menit,
+# tiap 3 menit) atau bila ada baris menunggu; di luar itu diam -- semua diatur di Admin > Pengaturan Sistem (lihat totoDispatchTick); (2) jadwal di bawah sebagai cadangan (jadwal GitHub sering
 # telat); (3) tombol "CEK & ISI SEKARANG" di menu Auto Prediksi (input user + force) hanya untuk memaksa sekarang; (4) opsional cron-job.org
 # lewat /__cron?job=githubtoto. Jeda per website diatur Worker sendiri, jadi dobel pemicu aman: klaim baris atomik di database
 # mencegah kirim ganda dan group `concurrency` mencegah dua run tumpang-tindih.
