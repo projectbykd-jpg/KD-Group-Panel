@@ -9,12 +9,13 @@
 // Aman diulang: artikel DIKLAIM dulu (tg_posted_at diisi) baru dikirim -> tak pernah dobel; gagal sementara melepas klaim,
 // gagal permanen menandai 'error'. Masalah konfigurasi (token/Chat ID/izin bot) TIDAK menandai artikel; terlihat di BOT > Setting.
 import { logActivity } from "./activity";
-import { botCfg, botCfgSet, ensureNewsCategoryColumns, FB_TEMPLATE_EVERGREEN_HASHTAGS, tgPromoUrl } from "./bot-news";
+import { botCfg, botCfgSet, ensureNewsCategoryColumns, newsCategoryLabel, tgPromoUrl } from "./bot-news";
 import { loadIntegrations, newsSiteUrl, tgChannelToken } from "./integrations";
 import { getSys } from "./settings";
 import { tsNow } from "./time";
 import { getTurso } from "./turso";
-import { sendTelegram, sendTelegramPhoto } from "../senders/telegram";
+import { sendTelegram, sendTelegramPhoto, sendTelegramRich } from "../senders/telegram";
+import type { TgSendOpts } from "../senders/telegram";
 
 const CAPTION_MAX = 1024; // batas caption foto Telegram
 
@@ -45,31 +46,46 @@ export interface TgArticle {
 	category: string;
 }
 
-/** Caption channel: judul, ringkasan (dipotong agar muat), tautan artikel, promosi channel/WA/FB, hashtag. Maks 1024 karakter. */
-export function tgChannelCaption(r: Pick<TgArticle, "title" | "excerpt" | "category">, link: string, cfg: Record<string, string>): string {
-	const opt: string[] = [];
+const esc = (t: string) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const escAttr = (t: string) => esc(t).replace(/"/g, "&quot;");
+const cut = (t: string, n: number) => (t.length <= n ? t : t.slice(0, Math.max(0, n - 1)).replace(/\s+\S*$/, "") + "…");
+
+export interface TgPost {
+	/** Caption/teks berformat HTML (judul tebal, ringkasan, tautan baca, hashtag, footer). */
+	html: string;
+	/** Versi polos (tanpa tag) untuk cadangan bila Telegram menolak format. */
+	plain: string;
+	/** Tombol URL di bawah posting: [Baca selengkapnya] + [Gabung Channel | WhatsApp | Facebook]. */
+	buttons: { text: string; url: string }[][];
+}
+
+/**
+ * Template posting channel: bersih ala media profesional -- judul tebal, ringkasan singkat, satu tautan baca, dua-tiga tagar,
+ * footer kecil; tanpa deretan emoji, tanpa HURUF BESAR, tanpa URL mentah panjang (tautan ada di teks bertautan & tombol).
+ * Teks terlihat dijaga <= 1024 karakter (batas caption foto Telegram); ringkasan yang dipotong, bukan tautan/footer.
+ */
+export function tgChannelPost(r: Pick<TgArticle, "title" | "excerpt" | "category">, link: string, cfg: Record<string, string>): TgPost {
 	const tg = tgPromoUrl(cfg);
-	if (tg) opt.push(`✈️ Gabung Channel Telegram kami: ${tg}`);
-	const wa = (cfg.wa_channel_url || "").trim();
-	if (wa) opt.push(`💬 Saluran WhatsApp: ${wa}`);
-	const fb = (cfg.fb_page_url || "").trim();
-	if (fb) opt.push(`📘 Fanspage Facebook: ${fb}`);
-	const cat = String(r.category || "").replace(/[^A-Za-z0-9]/g, "");
-	const tags = [...new Set([...(cat ? ["#" + cat.charAt(0).toUpperCase() + cat.slice(1)] : []), ...FB_TEMPLATE_EVERGREEN_HASHTAGS])].slice(0, 5).join(" ");
-	const must = [r.title, `🔗 Baca selengkapnya: ${link}`];
-	const build = (extra: string[], excerpt: string) => [r.title, ...(excerpt ? [excerpt] : []), must[1], ...extra].join("\n\n");
-	// buang bagian opsional dari belakang sampai muat (judul + tautan selalu ada)
-	let extra = [...opt, ...(tags ? [tags] : [])];
-	while (extra.length && build(extra, "").length > CAPTION_MAX) extra = extra.slice(0, -1);
-	const base = build(extra, "");
-	const room = CAPTION_MAX - base.length - 2;
-	let ex = String(r.excerpt || "").trim();
-	if (ex === r.title) ex = "";
-	if (ex && room > 60) {
-		if (ex.length > room) ex = ex.slice(0, room - 1).replace(/\s+\S*$/, "") + "…";
-		return build(extra, ex);
-	}
-	return base.slice(0, CAPTION_MAX);
+	const wa = /^https?:\/\//i.test((cfg.wa_channel_url || "").trim()) ? cfg.wa_channel_url.trim() : "";
+	const fb = /^https?:\/\//i.test((cfg.fb_page_url || "").trim()) ? cfg.fb_page_url.trim() : "";
+	const title = cut(String(r.title || "").trim(), 200);
+	const catTag = String(r.category || "").replace(/[^A-Za-z0-9]/g, "");
+	const tags = [...(catTag ? ["#" + newsCategoryLabel(r.category).replace(/[^A-Za-z0-9]/g, "")] : []), "#BeritaTerkini", "#LapakStore88"].slice(0, 3).join("  ");
+	const readText = "Baca selengkapnya →";
+	const footPlain = tg ? "LapakStore88 News · Gabung channel" : "LapakStore88 News";
+	const fixed = title.length + readText.length + tags.length + footPlain.length + 8; // 4 pemisah baris kosong (2 karakter masing-masing)
+	let ex = String(r.excerpt || "").trim().replace(/\s+/g, " ");
+	if (ex === title) ex = "";
+	const room = Math.min(1024 - fixed - 2, 420);
+	ex = ex && room > 60 ? cut(ex, room) : "";
+	const readHtml = `<a href="${escAttr(link)}">${readText}</a>`;
+	const footHtml = tg ? `<i>LapakStore88 News</i> · <a href="${escAttr(tg)}">Gabung channel</a>` : `<i>LapakStore88 News</i>`;
+	const html = [`<b>${esc(title)}</b>`, ...(ex ? [esc(ex)] : []), readHtml, tags, footHtml].join("\n\n");
+	const plain = [title, ...(ex ? [ex] : []), `${readText} ${link}`, tags, tg ? `LapakStore88 News · Gabung channel: ${tg}` : "LapakStore88 News"].join("\n\n");
+	const buttons: TgPost["buttons"] = [[{ text: "Baca selengkapnya", url: link }]];
+	const social = [...(tg ? [{ text: "Gabung Channel", url: tg }] : []), ...(wa ? [{ text: "WhatsApp", url: wa }] : []), ...(fb ? [{ text: "Facebook", url: fb }] : [])];
+	if (social.length) buttons.push(social);
+	return { html, plain, buttons };
 }
 
 const wibCutoff = (hours: number) => new Date(Date.now() + 7 * 3600_000 - hours * 3600_000).toISOString().slice(0, 19).replace("T", " ");
@@ -124,11 +140,18 @@ export async function tgChannelRun(env: Env, opts: { force?: boolean } = {}): Pr
 	const release = (v: string) => db.prepare(`UPDATE news_article SET tg_posted_at = ? WHERE id = ?`).bind(v, id).run();
 	try {
 		const link = `${newsSiteUrl()}/berita/artikel/?id=${id}`;
-		const caption = tgChannelCaption(row, link, cfg);
+		const post = tgChannelPost(row, link, cfg);
 		const tgCfg = { token, chatId };
 		const img = String(row.image_url || "");
-		let res = /^https?:\/\//i.test(img) ? await sendTelegramPhoto(tgCfg, img, caption) : "photo-skip";
-		if (res !== "Terkirim" && (res === "photo-skip" || photoProblem(res))) res = await sendTelegram(caption, tgCfg);
+		const rich: TgSendOpts = { parseMode: "HTML", buttons: post.buttons };
+		const plainOpts: TgSendOpts = { buttons: post.buttons };
+		let res = /^https?:\/\//i.test(img) ? await sendTelegramPhoto(tgCfg, img, post.html, rich) : "photo-skip";
+		// Telegram menolak format (jarang) -> kirim ulang polos, jangan hilangkan artikel
+		if (/can't parse entities/i.test(res)) res = await sendTelegramPhoto(tgCfg, img, post.plain.slice(0, 1024), plainOpts);
+		if (res !== "Terkirim" && (res === "photo-skip" || photoProblem(res))) {
+			res = await sendTelegramRich(tgCfg, post.html, rich);
+			if (/can't parse entities/i.test(res)) res = await sendTelegramRich(tgCfg, post.plain, plainOpts);
+		}
 		if (res === "Terkirim") {
 			await setLastError(env, cfg, "");
 			return { posted: 1, ok: true, message: `Terkirim ke channel: ${String(row.title).slice(0, 80)}` };

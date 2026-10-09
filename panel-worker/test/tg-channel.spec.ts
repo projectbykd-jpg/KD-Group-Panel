@@ -4,7 +4,7 @@ const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: im
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
 import { botCfgSet, ensureNewsCategoryColumns, publicNewsRssXml, resetNewsColumnsGuard, tgPromoUrl } from "../src/lib/bot-news";
-import { explainTgError, tgChannelCaption, tgChannelRun, tgChannelTest } from "../src/lib/tg-channel";
+import { explainTgError, tgChannelPost, tgChannelRun, tgChannelTest } from "../src/lib/tg-channel";
 import { saveIntegrations, resetIntegrationsCache } from "../src/lib/integrations";
 import { resetSysCache, saveSys } from "../src/lib/settings";
 import { botNewsSaveConfig } from "../src/api/bot";
@@ -49,26 +49,40 @@ beforeEach(async () => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-describe("caption channel Telegram", () => {
+const visible = (h: string) => h.replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
+
+describe("template posting channel Telegram", () => {
 	const cfg = { tg_channel_url: TG_URL, wa_channel_url: "https://wa.test/c", fb_page_url: "https://fb.test/p" };
-	it("memuat judul, tautan artikel, link promosi Telegram, WA, FB dan hashtag; maks 1024", () => {
-		const c = tgChannelCaption({ title: "Judul Berita", excerpt: "Ringkasan.", category: "bola" }, "https://web.test/berita/artikel/?id=7", cfg);
-		expect(c).toContain("Judul Berita");
-		expect(c).toContain("https://web.test/berita/artikel/?id=7");
-		expect(c).toContain(TG_URL);
-		expect(c).toContain("https://wa.test/c");
-		expect(c).toContain("#Bola");
-		expect(c.length).toBeLessThanOrEqual(1024);
+	const LINK = "https://web.test/berita/artikel/?id=7";
+	it("bersih: judul tebal, ringkasan, satu tautan baca, tagar, footer; tombol Baca + Channel/WhatsApp/Facebook", () => {
+		const p = tgChannelPost({ title: "Judul Berita", excerpt: "Ringkasan singkat.", category: "bola" }, LINK, cfg);
+		expect(p.html).toContain("<b>Judul Berita</b>");
+		expect(p.html).toContain(`<a href="${LINK}">Baca selengkapnya →</a>`);
+		expect(p.html).toContain("#Bola");
+		expect(p.html).toContain("#BeritaTerkini");
+		expect(p.html).toContain(`<a href="${TG_URL}">Gabung channel</a>`);
+		expect(p.html).not.toMatch(/https?:\/\/[^"<]*\s/); // tidak ada URL mentah di teks (hanya di atribut href)
+		expect(p.buttons[0]).toEqual([{ text: "Baca selengkapnya", url: LINK }]);
+		expect(p.buttons[1].map((b) => b.text)).toEqual(["Gabung Channel", "WhatsApp", "Facebook"]);
+		expect(p.html).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u); // tanpa emoji (kesan profesional, bukan alay)
+		expect(p.html).not.toMatch(/[A-Z]{6,}/); // tanpa huruf besar semua
 	});
-	it("ringkasan panjang dipotong agar tautan & promosi TIDAK terpotong", () => {
-		const c = tgChannelCaption({ title: "T".repeat(150), excerpt: "kata ".repeat(400), category: "umum" }, "https://web.test/berita/artikel/?id=7", cfg);
-		expect(c.length).toBeLessThanOrEqual(1024);
-		expect(c).toContain(TG_URL);
-		expect(c).toContain("https://web.test/berita/artikel/?id=7");
-		expect(c).toContain("…");
+	it("teks yang terlihat <= 1024 walau judul & ringkasan panjang; tautan & footer tidak ikut terpotong", () => {
+		const p = tgChannelPost({ title: "T".repeat(300), excerpt: "kata ".repeat(400), category: "umum" }, LINK, cfg);
+		expect(visible(p.html).length).toBeLessThanOrEqual(1024);
+		expect(p.html).toContain(LINK);
+		expect(p.html).toContain("Gabung channel");
 	});
-	it("tanpa link Telegram diisi: tidak ada baris promosi Telegram; link tidak valid diabaikan", () => {
-		expect(tgChannelCaption({ title: "A", excerpt: "", category: "umum" }, "https://w/1", {})).not.toContain("Telegram");
+	it("karakter HTML di judul/ringkasan di-escape (tidak merusak format, tidak bisa menyisipkan tag)", () => {
+		const p = tgChannelPost({ title: 'Harga <b>naik</b> & "turun"', excerpt: "A < B > C", category: "umum" }, LINK, cfg);
+		expect(p.html).toContain("<b>Harga &lt;b&gt;naik&lt;/b&gt; &amp; \"turun\"</b>");
+		expect(p.html).toContain("A &lt; B &gt; C");
+	});
+	it("tanpa link Telegram/WA/FB: tidak ada tombol sosial & footer polos; link tidak valid diabaikan", () => {
+		const p = tgChannelPost({ title: "A", excerpt: "", category: "umum" }, "https://w/1", {});
+		expect(p.buttons).toHaveLength(1);
+		expect(p.html).not.toContain("Gabung");
+		expect(tgChannelPost({ title: "A", excerpt: "", category: "umum" }, "https://w/1", { wa_channel_url: "javascript:x" }).buttons).toHaveLength(1);
 		expect(tgPromoUrl({ tg_channel_url: "javascript:alert(1)" })).toBe("");
 		expect(tgPromoUrl({ tg_channel_url: TG_URL })).toBe(TG_URL);
 	});
@@ -85,8 +99,13 @@ describe("posting otomatis ke channel", () => {
 		expect(sent[0].method).toBe("sendPhoto");
 		expect(sent[0].body.get("chat_id")).toBe(CHAT);
 		expect(sent[0].body.get("photo")).toBe("https://img.test/a.jpg");
-		expect(sent[0].body.get("caption")).toContain("Berita Terbaru");
+		expect(sent[0].body.get("caption")).toContain("<b>Berita Terbaru</b>");
 		expect(sent[0].body.get("caption")).toContain(TG_URL);
+		expect(sent[0].body.get("parse_mode")).toBe("HTML");
+		const kb = JSON.parse(String(sent[0].body.get("reply_markup"))).inline_keyboard;
+		expect(kb[0][0].text).toBe("Baca selengkapnya");
+		expect(kb[0][0].url).toMatch(/\/berita\/artikel\/\?id=2$/);
+		expect(kb[1].map((b: { text: string }) => b.text)).toEqual(["Gabung Channel", "WhatsApp", "Facebook"]);
 		expect(rowTg(2)).toMatch(/^20/);
 		expect(rowTg(1)).toBe("");
 		// jeda antar posting (bawaan 10 menit): tick berikutnya menunggu
@@ -128,6 +147,16 @@ describe("posting otomatis ke channel", () => {
 		expect(r.posted).toBe(1);
 		expect(sent.map((s) => s.method)).toEqual(["sendPhoto", "sendMessage"]);
 		expect(sent[1].body.get("text")).toContain("Judul 8");
+	});
+	it("Telegram menolak format HTML -> dikirim ulang polos (artikel tetap terkirim, tombol tetap ada)", async () => {
+		await article(13);
+		stub((m, b) => (b.get("parse_mode") === "HTML" ? { status: 400, body: { ok: false, description: "Bad Request: can't parse entities: Unsupported start tag" } } : {}));
+		const r = await tgChannelRun(ctx.env);
+		expect(r.posted).toBe(1);
+		expect(sent.map((x) => x.method)).toEqual(["sendPhoto", "sendPhoto"]);
+		expect(sent[1].body.get("parse_mode")).toBeNull();
+		expect(sent[1].body.get("caption")).not.toContain("<b>");
+		expect(sent[1].body.get("reply_markup")).toBeTruthy();
 	});
 	it("artikel tanpa gambar -> sendMessage langsung", async () => {
 		await article(9, { image: "" });

@@ -23,7 +23,7 @@ const NEWS_CATEGORY_LABELS: Record<string, string> = {
 	kesehatan: "Kesehatan",
 	lifestyle: "Lifestyle",
 };
-function newsCategoryLabel(cat: string): string {
+export function newsCategoryLabel(cat: string): string {
 	return NEWS_CATEGORY_LABELS[cat] || NEWS_CATEGORY_LABELS.umum;
 }
 
@@ -1873,38 +1873,44 @@ export async function botNewsRun(
 
 
 /** Hitungan harian per jalur (Blogger / Situs Sendiri / Template FB) untuk 7 hari terakhir (WIB), tanggal terlama dulu. */
-async function newsDaily7(env: Env): Promise<{ date: string; blogger: number; site: number; fb: number }[]> {
+async function newsDaily7(env: Env): Promise<{ date: string; blogger: number; site: number; fb: number; tg: number }[]> {
 	const days: string[] = [];
 	const base = new Date(todayKey() + "T00:00:00Z").getTime();
 	for (let i = 6; i >= 0; i--) days.push(new Date(base - i * 86400_000).toISOString().slice(0, 10));
 	const from = days[0];
 	const q = async (sql: string) =>
 		((await getTurso(env).prepare(sql).bind(from).all<{ d: string; c: number }>()).results ?? []);
-	const [b, st, fb] = await Promise.all([
+	const [b, st, fb, tg] = await Promise.all([
 		q(`SELECT substr(posted_at,1,10) AS d, COUNT(*) AS c FROM news_article WHERE status='posted' AND substr(posted_at,1,10) >= ? GROUP BY d`),
 		q(`SELECT substr(site_posted_at,1,10) AS d, COUNT(*) AS c FROM news_article WHERE site_posted_at != '' AND substr(site_posted_at,1,10) >= ? GROUP BY d`),
 		q(`SELECT substr(fb_direct_posted_at,1,10) AS d, COUNT(*) AS c FROM news_article WHERE fb_direct_posted_at NOT IN ('', 'error') AND substr(fb_direct_posted_at,1,10) >= ? GROUP BY d`),
+		// kolom tg_posted_at dibuat malas (ensureNewsCategoryColumns); bila belum ada, jalur Telegram dianggap 0
+		q(`SELECT substr(tg_posted_at,1,10) AS d, COUNT(*) AS c FROM news_article WHERE tg_posted_at LIKE '20%' AND substr(tg_posted_at,1,10) >= ? GROUP BY d`).catch(() => []),
 	]);
 	const m = (rows: { d: string; c: number }[]) => new Map(rows.map((r) => [String(r.d), Number(r.c)]));
-	const mb = m(b), ms = m(st), mf = m(fb);
-	return days.map((date) => ({ date, blogger: mb.get(date) ?? 0, site: ms.get(date) ?? 0, fb: mf.get(date) ?? 0 }));
+	const mb = m(b), ms = m(st), mf = m(fb), mt = m(tg);
+	return days.map((date) => ({ date, blogger: mb.get(date) ?? 0, site: ms.get(date) ?? 0, fb: mf.get(date) ?? 0, tg: mt.get(date) ?? 0 }));
 }
 /** Ringkasan posting channel Telegram untuk panel BOT (jumlah hari ini, antrean, posting terakhir). */
-export async function tgChannelStats(env: Env): Promise<{ postedToday: number; queue: number; lastAt: string }> {
+export async function tgChannelStats(env: Env): Promise<{ postedToday: number; queue: number; lastAt: string; total: number; cap: number; gapMin: number }> {
 	try {
 		const wib = (h: number) => new Date(Date.now() + 7 * 3600_000 - h * 3600_000).toISOString().slice(0, 19).replace("T", " ");
 		const r = await getTurso(env)
 			.prepare(
 				`SELECT SUM(CASE WHEN substr(tg_posted_at,1,10) = ? AND tg_posted_at LIKE '20%' THEN 1 ELSE 0 END) AS today,
 				        SUM(CASE WHEN tg_posted_at = '' AND site_posted_at != '' AND site_posted_at >= ? THEN 1 ELSE 0 END) AS queue,
-				        MAX(CASE WHEN tg_posted_at LIKE '20%' THEN tg_posted_at ELSE NULL END) AS last
+				        MAX(CASE WHEN tg_posted_at LIKE '20%' THEN tg_posted_at ELSE NULL END) AS last,
+				        SUM(CASE WHEN tg_posted_at LIKE '20%' THEN 1 ELSE 0 END) AS total
 				 FROM news_article`,
 			)
 			.bind(todayKey(), wib(await getSys(env, "sys_tgch_max_age_h")))
-			.first<{ today: number | null; queue: number | null; last: string | null }>();
-		return { postedToday: Number(r?.today ?? 0), queue: Number(r?.queue ?? 0), lastAt: String(r?.last ?? "") };
+			.first<{ today: number | null; queue: number | null; last: string | null; total: number | null }>();
+		return {
+			postedToday: Number(r?.today ?? 0), queue: Number(r?.queue ?? 0), lastAt: String(r?.last ?? ""), total: Number(r?.total ?? 0),
+			cap: await getSys(env, "sys_tgch_daily_cap"), gapMin: await getSys(env, "sys_tgch_gap_min"),
+		};
 	} catch {
-		return { postedToday: 0, queue: 0, lastAt: "" };
+		return { postedToday: 0, queue: 0, lastAt: "", total: 0, cap: 0, gapMin: 0 };
 	}
 }
 
@@ -1960,6 +1966,15 @@ export async function botNewsSnapshot(env: Env) {
 				 FROM news_article WHERE site_posted_at != '' ORDER BY site_posted_at DESC, id DESC LIMIT 200`,
 			)
 			.all()).results ?? [];
+	// Riwayat channel Telegram (200 terbaru). Kolom dibuat malas; bila belum ada -> kosong, tidak menggagalkan dashboard.
+	const tgHistory =
+		(await getTurso(env)
+			.prepare(
+				`SELECT id, source, title, url, category, tg_posted_at FROM news_article
+				 WHERE tg_posted_at LIKE '20%' ORDER BY tg_posted_at DESC, id DESC LIMIT 200`,
+			)
+			.all()
+			.catch(() => ({ results: [] }))).results ?? [];
 	const byStatus: Record<string, number> = {};
 	for (const r of counts) byStatus[String(r.status)] = Number(r.c);
 	const [site, daily7, fbTotal] = await Promise.all([
@@ -2028,6 +2043,7 @@ export async function botNewsSnapshot(env: Env) {
 		recent,
 		history,
 		siteHistory,
+		tgHistory,
 		fbDirectHistory,
 	};
 }

@@ -1086,7 +1086,7 @@
               <div class="bot-subhead">
                 <div class="bot-subhead-ico"><i class="fa-solid fa-chart-column"></i></div>
                 <div class="bot-subhead-txt"><h3>Tren 7 hari terakhir</h3><p>Jumlah artikel yang tayang per hari di tiap jalur (WIB).</p></div>
-                <div class="bot-legend"><span class="lg-blogger">Blogger</span><span class="lg-site">Situs Sendiri</span><span class="lg-fb">Template FB</span></div>
+                <div class="bot-legend"><span class="lg-blogger">Blogger</span><span class="lg-site">Situs Sendiri</span><span class="lg-fb">Template FB</span><span class="lg-tg">Channel Telegram</span></div>
               </div>
               <div id="botTrend" class="bot-trend" role="img" aria-label="Grafik 7 hari"></div>
             </div>
@@ -1149,11 +1149,12 @@
           <div class="glass-card rounded-3xl p-5 flex flex-col gap-4">
             <div class="bot-subhead">
               <div class="bot-subhead-ico"><i class="fa-solid fa-clock-rotate-left"></i></div>
-              <div class="bot-subhead-txt"><h3>Riwayat posting</h3><p>Dua jalur dipisah supaya tidak dobel: artikel di Situs Sendiri tidak ikut diposting ke Blogger.</p></div>
+              <div class="bot-subhead-txt"><h3>Riwayat posting</h3><p>Tiap jalur dipisah supaya tidak dobel: artikel di Situs Sendiri tidak ikut diposting ke Blogger, dan Channel Telegram punya catatannya sendiri.</p></div>
             </div>
             <div class="bot-tabs" role="tablist">
               <button type="button" class="bot-tab active" data-hist="blogger" onclick="botHistTab('blogger')"><i class="fa-brands fa-blogger"></i>Blogger <span id="botHistCount" class="bot-tab-n"></span></button>
               <button type="button" class="bot-tab" data-hist="site" onclick="botHistTab('site')"><i class="fa-solid fa-globe"></i>Situs Sendiri <span id="botSiteHistCount" class="bot-tab-n"></span></button>
+              <button type="button" class="bot-tab" data-hist="tg" onclick="botHistTab('tg')"><i class="fa-brands fa-telegram"></i>Channel Telegram <span id="botTgHistCount" class="bot-tab-n"></span></button>
             </div>
             <div data-hist-pane="blogger" class="flex flex-col gap-3">
               <input id="botHistSearch" oninput="renderBotHistory()" class="glass-inner rounded-lg px-3 py-2 text-xs text-slate-100 w-full sm:w-72" placeholder="cari judul...">
@@ -1162,6 +1163,10 @@
             <div data-hist-pane="site" class="flex flex-col gap-3" style="display:none">
               <input id="botSiteHistSearch" oninput="renderBotSiteHistory()" class="glass-inner rounded-lg px-3 py-2 text-xs text-slate-100 w-full sm:w-72" placeholder="cari judul...">
               <div id="botSiteHistoryList" class="bot-log"></div>
+            </div>
+            <div data-hist-pane="tg" class="flex flex-col gap-3" style="display:none">
+              <input id="botTgHistSearch" oninput="renderBotTgHistory()" class="glass-inner rounded-lg px-3 py-2 text-xs text-slate-100 w-full sm:w-72" placeholder="cari judul...">
+              <div id="botTgHistoryList" class="bot-log"></div>
             </div>
           </div>
         </div>

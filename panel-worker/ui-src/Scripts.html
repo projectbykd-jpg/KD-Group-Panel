@@ -6709,6 +6709,22 @@ Tindakan ini tidak dapat dibatalkan.`,
       })).join('') || '<div class="bot-empty">Belum ada postingan.</div>';
     }
 
+    let botTgHistoryCache = [];
+    function renderBotTgHistory(){
+      const box = document.getElementById('botTgHistoryList');
+      const cnt = document.getElementById('botTgHistCount');
+      if (!box) return;
+      const q = (document.getElementById('botTgHistSearch')||{}).value || '';
+      const ql = q.toLowerCase();
+      const rows = botTgHistoryCache.filter(h => !ql || String(h.title||'').toLowerCase().includes(ql));
+      if (cnt) cnt.textContent = botTgHistoryCache.length + (q ? ' · ' + rows.length : '');
+      box.innerHTML = rows.map(h => botLogRow({
+        time: String(h.tg_posted_at||'').slice(0,16).replace('T',' '),
+        href: botSiteUrl ? botSiteUrl + '/berita/artikel/?id=' + Number(h.id) : '', title: h.title,
+        meta: botEsc(h.source) + ' · ' + botEsc(h.category||'umum') + ' · <a href="' + botEsc(h.url) + '" target="_blank">sumber asli</a>',
+      })).join('') || '<div class="bot-empty">Belum ada postingan ke channel Telegram.</div>';
+    }
+
     function renderBotSubpage(page){
       BOT_PAGES.forEach(p => {
         const el = document.getElementById('bot-sec-' + p.replace('bot-', ''));
@@ -7240,6 +7256,8 @@ Tindakan ini tidak dapat dibatalkan.`,
       renderBotHistory();
       botSiteHistoryCache = snap.siteHistory || [];
       renderBotSiteHistory();
+      botTgHistoryCache = snap.tgHistory || [];
+      renderBotTgHistory();
       const set = (id,v)=>{ const el=document.getElementById(id); if(el){ if(el.type==='checkbox') el.checked=!!v; else el.value=(v==null?'':v); } };
       set('botEnabled', c.enabled);
       renderBotAutoBar(!!c.enabled);
@@ -7312,16 +7330,19 @@ Tindakan ini tidak dapat dibatalkan.`,
       if (sc) { const all = snap.sources || []; sc.textContent = all.filter(x => x.active).length + ' aktif / ' + all.length; }
     }
 
-    // ---------- Dashboard Bot: 3 jalur (struktur identik), tren 7 hari, kesehatan ----------
+    // ---------- Dashboard Bot: 4 jalur (struktur identik), tren 7 hari, kesehatan ----------
     function renderBotDashboard(snap){
       const c = snap.config || {}, bs = snap.byStatus || {};
       botSiteUrl = String(c.site_url || '').replace(/\/+$/, '');
       const n = v => Number(v || 0).toLocaleString('id-ID');
       const bloggerState = !c.has_blogger_client ? ['bad', 'Belum diatur'] : !c.has_blogger ? ['bad', 'Belum terhubung'] : c.blogger_auth_error ? ['bad', 'Terputus'] : ['ok', 'Terhubung'];
+      const tgs = snap.tg || {};
+      const tgState = (!c.tg_channel_id) ? ['bad', 'Belum diatur'] : c.tg_channel_last_error ? ['bad', 'Bermasalah'] : c.tg_channel_enabled ? ['ok', 'Otomatis'] : ['mute', 'Mati'];
       const channels = [
         { tone: 'blogger', icon: 'fa-brands fa-blogger', name: 'Blogger', st: bloggerState, today: snap.postedToday, cap: Number(c.daily_cap || 0), total: bs.posted, note: 'Batas ' + n(c.daily_cap) + ' per hari' },
         { tone: 'site', icon: 'fa-solid fa-globe', name: 'Situs Sendiri', st: ['ok', 'Aktif'], today: snap.siteToday, cap: 0, total: snap.siteTotal, note: 'Maks ' + n(c.site_per_run) + ' per putaran' },
         { tone: 'fb', icon: 'fa-brands fa-facebook', name: 'Template Facebook', st: c.fb_direct_enabled ? ['ok', 'Otomatis'] : ['mute', 'Manual'], today: snap.fbDirectPostedToday, cap: Number(c.fb_direct_daily_cap || 0), total: snap.fbTotal, note: 'Antre ' + n(snap.fbDirectQueue) + ' artikel' },
+        { tone: 'tg', icon: 'fa-brands fa-telegram', name: 'Channel Telegram', st: tgState, today: tgs.postedToday, cap: Number(tgs.cap || 0), total: tgs.total, note: 'Antre ' + n(tgs.queue) + ' · jeda ' + n(tgs.gapMin) + ' mnt' },
       ];
       const ch = document.getElementById('botChannels');
       if (ch) ch.innerHTML = channels.map(o => {
@@ -7335,15 +7356,15 @@ Tindakan ini tidak dapat dibatalkan.`,
         </div>`;
       }).join('');
 
-      // Tren 7 hari: 3 batang per hari, tinggi relatif terhadap nilai terbesar
+      // Tren 7 hari: 4 batang per hari, tinggi relatif terhadap nilai terbesar
       const d7 = snap.daily7 || [];
-      const mx = Math.max(1, ...d7.map(d => Math.max(d.blogger, d.site, d.fb)));
+      const mx = Math.max(1, ...d7.map(d => Math.max(d.blogger, d.site, d.fb, d.tg || 0)));
       const tr = document.getElementById('botTrend');
       if (tr) tr.innerHTML = d7.map((d, i) => {
         const bar = (cls, v, name) => `<i class="b-${cls}" style="height:${v ? Math.max(5, Math.round(v * 100 / mx)) : 0}%" title="${name}: ${v}"></i>`;
         const dd = d.date.slice(8, 10) + '/' + d.date.slice(5, 7);
-        return `<div class="bot-day ${i === d7.length - 1 ? 'today' : ''}"><div class="bot-day-bars">${bar('blogger', d.blogger, 'Blogger')}${bar('site', d.site, 'Situs Sendiri')}${bar('fb', d.fb, 'Template FB')}</div>
-          <div class="bot-day-n">${d.blogger + d.site + d.fb}</div><div class="bot-day-l">${i === d7.length - 1 ? 'Hari ini' : dd}</div></div>`;
+        return `<div class="bot-day ${i === d7.length - 1 ? 'today' : ''}"><div class="bot-day-bars">${bar('blogger', d.blogger, 'Blogger')}${bar('site', d.site, 'Situs Sendiri')}${bar('fb', d.fb, 'Template FB')}${bar('tg', d.tg || 0, 'Channel Telegram')}</div>
+          <div class="bot-day-n">${d.blogger + d.site + d.fb + (d.tg || 0)}</div><div class="bot-day-l">${i === d7.length - 1 ? 'Hari ini' : dd}</div></div>`;
       }).join('') || '<div class="bot-empty">Belum ada data.</div>';
 
       // Kesehatan & antrean: baris seragam label | nilai
@@ -7354,6 +7375,7 @@ Tindakan ini tidak dapat dibatalkan.`,
         ['fa-circle-check', 'Total tayang (Blogger + Situs)', n(Number(bs.posted || 0) + Number(snap.siteTotal || 0)), ''],
         ['fa-rss', 'Sumber berita aktif', srcOn + ' / ' + src.length, srcOn ? 'ok' : 'bad'],
         ['fa-microchip', 'AI provider aktif', n(c.ai_providers_on) + ' / ' + n(c.ai_providers), Number(c.ai_providers_on || 0) ? 'ok' : 'bad'],
+        ['fa-paper-plane', 'Channel Telegram', tgState[1] + (tgs.lastAt ? ' · terakhir ' + String(tgs.lastAt).slice(11, 16) : ''), tgState[0] === 'bad' ? 'bad' : tgState[0] === 'ok' ? 'ok' : 'mute'],
         ['fa-robot', 'Auto-post', c.enabled ? 'Aktif · tiap ' + n(c.auto_interval_minutes) + ' mnt' : 'Nonaktif', c.enabled ? 'ok' : 'mute'],
       ];
       const hl = document.getElementById('botHealth');
