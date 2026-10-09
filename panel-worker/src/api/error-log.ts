@@ -2,8 +2,7 @@
 import { requireSession } from "./auth";
 import { logActivity } from "../lib/activity";
 import { alertTgCfg, loadIntegrations } from "../lib/integrations";
-import { sendTelegram } from "../senders/telegram";
-import { deleteErrors, listErrors, recordError, recordTestError, setErrorStatus } from "../lib/error-log";
+import { deleteErrors, deliverAlert, listErrors, recordError, recordTestError, setErrorStatus } from "../lib/error-log";
 
 export async function adminErrorList(env: Env, token: string, options: unknown) {
 	await requireSession(env, token, { admin: true, ignoreMaintenance: true });
@@ -31,8 +30,9 @@ export async function adminErrorAlertTest(env: Env, token: string) {
 	await loadIntegrations(env);
 	const c = alertTgCfg();
 	if (!c.token || !c.chatId) return { success: false, message: "Isi Token bot & Chat ID di Admin › Integrasi › Notifikasi Galat (Telegram) dulu." };
-	const r = await sendTelegram("✅ Tes notifikasi Error & Bug — KD-Group Panel. Bila pesan ini sampai, pemberitahuan galat baru akan dikirim ke sini.", c);
-	return r === "Terkirim" ? { success: true, message: "Pesan uji terkirim ke Telegram." } : { success: false, message: "Gagal kirim: " + r.replace(c.token, "***") };
+	const { result: r, migratedTo } = await deliverAlert(env, "✅ Tes notifikasi Error & Bug — KD-Group Panel. Bila pesan ini sampai, pemberitahuan galat baru akan dikirim ke sini.", false);
+	if (r === "Terkirim") return { success: true, message: migratedTo ? `Grup naik jadi supergroup: Chat ID dipindahkan otomatis ke ${migratedTo} dan pesan uji terkirim.` : "Pesan uji terkirim ke Telegram." };
+	return { success: false, message: "Gagal kirim: " + r.replace(c.token, "***") };
 }
 
 /** Tombol UJI GALAT PALSU: mencatat satu galat uji dan memicu notifikasi Telegram (menguji seluruh rantai). */

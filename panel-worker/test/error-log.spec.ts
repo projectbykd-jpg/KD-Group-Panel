@@ -289,3 +289,63 @@ describe("notifikasi Telegram galat baru", () => {
 		expect(g.message).not.toContain("AAEhBOweik6ad9r");
 	});
 });
+
+describe("pengaman notifikasi Telegram: grup naik jadi supergroup & kegagalan tercatat", () => {
+	const activity = () => ctx.db.prepare(`SELECT action, status, detail FROM activity_log WHERE action LIKE 'NOTIFIKASI GALAT%' ORDER BY id`).all() as { action: string; status: string; detail: string }[];
+	const TOKEN = "123456789:AAEhBOweik6ad9r_QXMENQjcrEZhGbbpR_H";
+	const calls: string[] = [];
+	const stub = (chat: string, handler: (chatId: string) => Response) => {
+		calls.length = 0;
+		vi.stubGlobal("fetch", async (_u: string, init: { body: URLSearchParams }) => {
+			const id = init.body.get("chat_id") ?? "";
+			calls.push(id);
+			return handler(id);
+		});
+		return saveIntegrations(ctx.env, { int_alert_tg_token: TOKEN, int_alert_tg_chat: chat }).then(() => resetIntegrationsCache());
+	};
+	const migrated = (id: string) => new Response(`{"ok":false,"error_code":400,"description":"Bad Request: group chat was upgraded to a supergroup chat","parameters":{"migrate_to_chat_id":${id}}}`, { status: 400 });
+	afterEach(() => vi.unstubAllGlobals());
+
+	it("galat baru ke grup yang sudah naik supergroup: kirim ulang ke ID baru, ID baru DISIMPAN, tercatat di Aktivitas", async () => {
+		await stub("-5454722371", (id) => (id === "-5454722371" ? migrated("-1003723948512") : new Response("{}", { status: 200 })));
+		const r = await rec("galat saat grup berganti id");
+		expect(r.alert).toBe("terkirim");
+		expect(calls).toEqual(["-5454722371", "-1003723948512"]);
+		expect((ctx.db.prepare(`SELECT value FROM settings WHERE key = 'int_alert_tg_chat'`).get() as { value: string }).value).toBe("-1003723948512");
+		expect(activity().map((a) => a.action)).toEqual(["NOTIFIKASI GALAT"]);
+		// berikutnya langsung ke ID baru (tanpa migrasi lagi)
+		await rec("galat kedua setelah migrasi", { loc: "lain" });
+		ctx.db.prepare(`UPDATE settings SET value = '0' WHERE key = 'errlog_alert_at'`).run();
+		resetErrorThrottle();
+		await rec("galat ketiga setelah migrasi", { loc: "lain2" });
+		expect(calls.at(-1)).toBe("-1003723948512");
+	});
+	it("tombol Tes Telegram ikut memindahkan ID otomatis dan mengatakannya", async () => {
+		await stub("-5454722371", (id) => (id === "-5454722371" ? migrated("-1003723948512") : new Response("{}", { status: 200 })));
+		const boss = await addUser("Boss", "ADMIN");
+		const r = await adminErrorAlertTest(ctx.env, boss);
+		expect(r.success).toBe(true);
+		expect(r.message).toContain("-1003723948512");
+	});
+	it("migrate_to_chat_id tidak valid tidak disimpan; kegagalan lain dicatat 'GAGAL' tanpa token", async () => {
+		await stub("-5454722371", () => migrated("12345")); // bukan format supergroup (-100…)
+		const r = await rec("galat dengan migrasi aneh");
+		expect(r.alert).toBe("gagal");
+		expect((ctx.db.prepare(`SELECT value FROM settings WHERE key = 'int_alert_tg_chat'`).get() as { value: string }).value).toBe("-5454722371");
+		await stub("-5454722371", () => new Response(`Forbidden ${TOKEN}`, { status: 403 }));
+		ctx.db.prepare(`UPDATE settings SET value = '0' WHERE key = 'errlog_alert_at'`).run();
+		resetErrorThrottle();
+		const r2 = await rec("galat saat telegram menolak", { loc: "lain3" });
+		expect(r2.alert).toBe("gagal");
+		const fails = activity().filter((a) => a.action === "NOTIFIKASI GALAT GAGAL");
+		expect(fails.length).toBeGreaterThanOrEqual(1);
+		expect(JSON.stringify(fails)).not.toContain("AAEhBOweik6ad9r");
+		expect(fails.every((f) => f.status === "GAGAL")).toBe(true);
+	});
+	it("tes manual yang gagal tidak mengotori Log Aktivitas (hasilnya tampil di layar)", async () => {
+		await stub("-5454722371", () => new Response("Forbidden", { status: 403 }));
+		const boss = await addUser("Boss", "ADMIN");
+		expect((await adminErrorAlertTest(ctx.env, boss)).success).toBe(false);
+		expect(activity()).toHaveLength(0);
+	});
+});

@@ -9,7 +9,8 @@
 //  - Retensi & batas baris diatur di Admin > Pengaturan Sistem (sys_errorlog_days, sys_errorlog_max_rows).
 //  - Tabel dibuat otomatis (CREATE TABLE IF NOT EXISTS) -- tanpa migrasi manual.
 import { getSys } from "./settings";
-import { alertTgCfg, loadIntegrations } from "./integrations";
+import { alertTgCfg, loadIntegrations, saveIntegrations } from "./integrations";
+import { logActivity } from "./activity";
 import { sendTelegram } from "../senders/telegram";
 import { tsNow } from "./time";
 
@@ -157,10 +158,39 @@ async function alertState(env: Env, force: boolean): Promise<"ok" | "belum-diatu
 	const row = await env.DB.prepare(`SELECT value FROM settings WHERE key = 'errlog_alert_at'`).first<{ value: string }>();
 	return Date.now() - Number(row?.value || 0) >= (await getSys(env, "sys_errorlog_alert_gap_min")) * 60_000 ? "ok" : "jeda";
 }
+/**
+ * Kirim pesan ke Telegram admin dengan dua pengaman:
+ *  - grup naik jadi supergroup (ID berganti): Telegram membalas `migrate_to_chat_id` -> kirim ulang ke ID baru dan SIMPAN ID baru itu;
+ *  - gagal karena sebab lain: dicatat di Log Aktivitas (bukan dibuang diam-diam). Pengujian manual (`logFailure` false) cukup menampilkannya ke layar.
+ * Mengembalikan "Terkirim" atau teks "Tele Error: ..."; `migratedTo` terisi bila ID dipindahkan otomatis.
+ */
+export async function deliverAlert(env: Env, text: string, logFailure = true): Promise<{ result: string; migratedTo?: string }> {
+	const cfg = alertTgCfg();
+	const redact = (s: string) => s.split(cfg.token).join("***").slice(0, 300);
+	let result = await sendTelegram(text, cfg);
+	if (result === "Terkirim") return { result };
+	let migratedTo: string | undefined;
+	const m = /"migrate_to_chat_id"\s*:\s*(-100\d{5,20})/.exec(result);
+	if (m) {
+		const saved = await saveIntegrations(env, { int_alert_tg_chat: m[1] }).catch(() => ({ ok: false as const }));
+		if (saved.ok) {
+			const retry = await sendTelegram(text, { token: cfg.token, chatId: m[1] });
+			if (retry === "Terkirim") {
+				migratedTo = m[1];
+				result = retry;
+				await logActivity(env, "SISTEM", "NOTIFIKASI GALAT", `Grup Telegram naik jadi supergroup: Chat ID dipindahkan otomatis ke ${m[1]}.`, "INFO", "").catch(() => {});
+				return { result, migratedTo };
+			}
+			result = retry;
+		}
+	}
+	if (logFailure) await logActivity(env, "SISTEM", "NOTIFIKASI GALAT GAGAL", redact(result), "GAGAL", "").catch(() => {});
+	return { result: redact(result), migratedTo };
+}
 async function sendAlert(env: Env, kind: string, e: { source: string; loc: string; message: string }): Promise<string> {
 	// tanda dulu, baru kirim: dua galat bersamaan tidak jadi dua pesan
 	await env.DB.prepare(`INSERT INTO settings (key, value) VALUES ('errlog_alert_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).bind(String(Date.now())).run();
-	return sendTelegram(`⚠️ Error ${kind} — KD-Group Panel\n(${e.source}) ${e.loc || "-"}\n${e.message.slice(0, 300)}\n\nBuka Admin › Error & Bug untuk detail.`, alertTgCfg());
+	return (await deliverAlert(env, `⚠️ Error ${kind} — KD-Group Panel\n(${e.source}) ${e.loc || "-"}\n${e.message.slice(0, 300)}\n\nBuka Admin › Error & Bug untuk detail.`)).result;
 }
 
 export interface RecordResult {
