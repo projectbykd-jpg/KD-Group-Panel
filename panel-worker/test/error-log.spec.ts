@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { adminErrorAlertTest, adminErrorDelete, adminErrorList, adminErrorSet, clientErrorReport, resetClientReportLimit } from "../src/api/error-log";
+import { adminErrorAlertTest, adminErrorSelfTest, adminErrorDelete, adminErrorList, adminErrorSet, clientErrorReport, resetClientReportLimit } from "../src/api/error-log";
 import { checkLogin } from "../src/api/auth";
 import { hashPassword } from "../src/lib/crypto";
 import { cronFail, deleteErrors, fingerprint, isUnexpectedError, listErrors, pruneErrorLog, recordError, resetErrorThrottle, scrub, setErrorStatus } from "../src/lib/error-log";
@@ -27,6 +27,7 @@ beforeEach(() => {
 	resetErrorThrottle();
 	resetClientReportLimit();
 	resetSysCache();
+	resetIntegrationsCache(); // cache Integrasi bersifat per-modul: jangan bocor antar tes
 });
 
 describe("scrub: rahasia dibuang sebelum disimpan", () => {
@@ -101,7 +102,7 @@ describe("penyaring noise & galat tak terduga", () => {
 	});
 	it("recordError tidak pernah melempar walau D1 rusak", async () => {
 		const broken = { ...ctx.env, DB: { prepare: () => { throw new Error("D1 mati"); } } } as unknown as Env;
-		await expect(recordError(broken, { source: "api", message: "apa saja" })).resolves.toBeUndefined();
+		await expect(recordError(broken, { source: "api", message: "apa saja" })).resolves.toEqual({ alert: "" });
 	});
 	it("rahasia di pesan/stack tidak sampai ke tabel", async () => {
 		await rec("gagal login password=Hunter2xyz", { detail: "at x cookie: PHPSESSID=abcdef" });
@@ -255,5 +256,36 @@ describe("notifikasi Telegram galat baru", () => {
 		expect(bad.ok).toBe(false);
 		const bad2 = await saveIntegrations(ctx.env, { int_alert_tg_chat: "abc def" });
 		expect(bad2.ok).toBe(false);
+	});
+
+	it("UJI GALAT PALSU: tercatat + Telegram terkirim; ditekan lagi tetap kirim (abaikan jeda), hanya satu kartu uji; operator ditolak", async () => {
+		await setup();
+		const boss = await addUser("Boss", "ADMIN");
+		const r1 = await adminErrorSelfTest(ctx.env, boss);
+		expect(r1).toMatchObject({ success: true, alert: "terkirim" });
+		expect(r1.message).toContain("TERKIRIM");
+		expect(sent).toHaveLength(1);
+		expect(rows().filter((r) => r.loc === "uji-galat")).toHaveLength(1);
+		// tekan lagi: jeda minimum 60 menit sedang berjalan, tapi uji harus tetap kirim; kartu uji lama diganti (bukan menumpuk)
+		const r2 = await adminErrorSelfTest(ctx.env, boss);
+		expect(r2.alert).toBe("terkirim");
+		expect(sent).toHaveLength(2);
+		expect(rows().filter((r) => r.loc === "uji-galat")).toHaveLength(1);
+		const op = await addUser("Op", "OPERATOR");
+		await expect(adminErrorSelfTest(ctx.env, op)).rejects.toThrow();
+	});
+	it("UJI GALAT PALSU tanpa konfigurasi: tetap tercatat, memberi petunjuk, tidak mengirim apa pun; Telegram gagal tidak membocorkan token", async () => {
+		sent.length = 0;
+		vi.stubGlobal("fetch", async () => { sent.push({ url: "x", body: "" }); return new Response("{}"); });
+		const boss = await addUser("Boss", "ADMIN");
+		const r = await adminErrorSelfTest(ctx.env, boss);
+		expect(r.alert).toBe("belum-diatur");
+		expect(sent).toHaveLength(0);
+		expect(rows().filter((x) => x.loc === "uji-galat")).toHaveLength(1);
+		await setup();
+		vi.stubGlobal("fetch", async () => new Response("Unauthorized 123456789:AAEhBOweik6ad9r_QXMENQjcrEZhGbbpR_H", { status: 401 }));
+		const g = await adminErrorSelfTest(ctx.env, boss);
+		expect(g.alert).toBe("gagal");
+		expect(g.message).not.toContain("AAEhBOweik6ad9r");
 	});
 });
