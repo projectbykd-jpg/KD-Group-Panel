@@ -138,8 +138,27 @@ export interface HomeInsights {
 	nowMinutes: number;
 	/** 'all' = gabungan semua user (admin); 'own' = hanya akun sendiri. */
 	scope: "all" | "own";
+	/** 7 hari terakhir (lama -> hari ini). Log hanya disimpan sys_log_retention_days (bawaan 7). */
+	days: { date: string; n: number; f: number }[];
+	/** Peta panas 7 hari x 24 jam (baris searah `days`). */
+	heat: number[][];
+	/** Aktivitas per jam KEMARIN (pembanding "jam yang sama"). */
+	yHourly: number[];
+	/** Jenis aktivitas terbanyak hari ini. */
+	actions: { action: string; n: number; f: number }[];
+	/** Hanya admin: kesehatan sistem ringkas. */
+	health: HomeHealth | null;
+}
+export interface HomeHealth {
+	openErrors: number;
+	cronAgoMin: number | null;
+	autoPost: boolean;
+	activeSessions: number;
+	maintenance: boolean;
 }
 const _insightCache = new Map<string, { ts: number; data: HomeInsights }>();
+/** Hanya untuk tes: kosongkan cache wawasan Dashboard. */
+export const resetInsightCache = (): void => _insightCache.clear();
 
 export async function getHomeInsights(env: Env, profile: UserProfile): Promise<HomeInsights> {
 	const isAdmin = profile.role === "ADMIN";
@@ -150,31 +169,68 @@ export async function getHomeInsights(env: Env, profile: UserProfile): Promise<H
 	if (hit && Date.now() - hit.ts < ttl) return { ...hit.data, nowMinutes };
 
 	const today = dateKeyNow();
-	const scope = isAdmin ? "ts >= ? AND ts < ?" : "ts >= ? AND ts < ? AND username = ?";
-	const args: unknown[] = isAdmin ? [dayLo(today), dayHi(today)] : [dayLo(today), dayHi(today), profile.username];
-	const [hr, top] = await Promise.all([
+	const dayKeys: string[] = [];
+	for (let i = 6; i >= 0; i--) dayKeys.push(new Date(Date.parse(today + "T00:00:00Z") - i * 86400_000).toISOString().slice(0, 10));
+	const own = isAdmin ? "" : " AND username = ?";
+	const wArgs: unknown[] = isAdmin ? [dayLo(dayKeys[0]), dayHi(today)] : [dayLo(dayKeys[0]), dayHi(today), profile.username];
+	const tArgs: unknown[] = isAdmin ? [dayLo(today), dayHi(today)] : [dayLo(today), dayHi(today), profile.username];
+	const [wk, top, act] = await Promise.all([
+		// SATU query untuk 7 hari: dari sini diturunkan per jam hari ini, kemarin, tren harian, dan peta panas.
 		env.DB.prepare(
-			`SELECT substr(ts, 12, 2) AS h, COUNT(*) AS n,
+			`SELECT substr(ts, 1, 10) AS d, substr(ts, 12, 2) AS h, COUNT(*) AS n,
 			        SUM(CASE WHEN upper(status) IN ('GAGAL','ERROR') THEN 1 ELSE 0 END) AS f
-			 FROM activity_log WHERE ${scope} GROUP BY h`,
-		).bind(...args).all<{ h: string; n: number; f: number }>(),
+			 FROM activity_log WHERE ts >= ? AND ts < ?${own} GROUP BY d, h`,
+		).bind(...wArgs).all<{ d: string; h: string; n: number; f: number }>(),
 		isAdmin
-			? env.DB.prepare(`SELECT username, COUNT(*) AS n FROM activity_log WHERE ${scope} GROUP BY username ORDER BY n DESC LIMIT 5`)
-				.bind(...args).all<{ username: string; n: number }>()
+			? env.DB.prepare(`SELECT username, COUNT(*) AS n FROM activity_log WHERE ts >= ? AND ts < ? GROUP BY username ORDER BY n DESC LIMIT 5`)
+				.bind(...tArgs).all<{ username: string; n: number }>()
 			: Promise.resolve({ results: [] as { username: string; n: number }[] }),
+		env.DB.prepare(
+			`SELECT action, COUNT(*) AS n, SUM(CASE WHEN upper(status) IN ('GAGAL','ERROR') THEN 1 ELSE 0 END) AS f
+			 FROM activity_log WHERE ts >= ? AND ts < ?${own} GROUP BY action ORDER BY n DESC LIMIT 6`,
+		).bind(...tArgs).all<{ action: string; n: number; f: number }>(),
 	]);
-	const hourly = Array(24).fill(0), hourlyFailed = Array(24).fill(0);
-	for (const r of hr.results ?? []) {
-		const h = Number(r.h);
-		if (h >= 0 && h < 24) { hourly[h] = Number(r.n || 0); hourlyFailed[h] = Number(r.f || 0); }
+	const hourly = Array(24).fill(0), hourlyFailed = Array(24).fill(0), yHourly = Array(24).fill(0);
+	const heat: number[][] = dayKeys.map(() => Array(24).fill(0));
+	const days = dayKeys.map((date) => ({ date, n: 0, f: 0 }));
+	for (const r of wk.results ?? []) {
+		const h = Number(r.h), di = dayKeys.indexOf(String(r.d));
+		if (di < 0 || !(h >= 0 && h < 24)) continue;
+		const n = Number(r.n || 0), f = Number(r.f || 0);
+		heat[di][h] = n; days[di].n += n; days[di].f += f;
+		if (di === 6) { hourly[h] = n; hourlyFailed[h] = f; }
+		if (di === 5) yHourly[h] = n;
+	}
+	let health: HomeHealth | null = null;
+	if (isAdmin) {
+		const one = async <T>(sql: string, ...b: unknown[]): Promise<T | null> => {
+			try { return await env.DB.prepare(sql).bind(...b).first<T>(); } catch { return null; }
+		};
+		const [hb, ap, ss, er, mt] = await Promise.all([
+			one<{ value: string }>(`SELECT value FROM settings WHERE key = 'cron_heartbeat'`),
+			one<{ value: string }>(`SELECT value FROM settings WHERE key = 'autopost_enabled'`),
+			one<{ n: number }>(`SELECT COUNT(DISTINCT username) AS n FROM sessions WHERE expires_at > ?`, Date.now()),
+			one<{ n: number }>(`SELECT COUNT(*) AS n FROM error_log WHERE status = 'open'`), // tabel belum ada = 0
+			getMaintenance(env).catch(() => null),
+		]);
+		const hbMs = Date.parse(String(hb?.value ?? "").slice(0, 19).replace(" ", "T") + "+07:00");
+		health = {
+			openErrors: Number(er?.n ?? 0),
+			cronAgoMin: Number.isFinite(hbMs) ? Math.max(0, Math.round((Date.now() - hbMs) / 60000)) : null,
+			autoPost: String(ap?.value || "TRUE").toUpperCase().trim() !== "FALSE",
+			activeSessions: Number(ss?.n ?? 0),
+			maintenance: !!mt?.enabled,
+		};
 	}
 	const data: HomeInsights = {
-		hourly, hourlyFailed,
+		hourly, hourlyFailed, yHourly, days, heat,
 		topUsers: (top.results ?? []).map((r) => ({ username: String(r.username || ""), n: Number(r.n || 0) })),
+		actions: (act.results ?? []).map((r) => ({ action: String(r.action || "AKTIVITAS"), n: Number(r.n || 0), f: Number(r.f || 0) })),
 		schedule: JADWAL_PREDIKSI_CONFIG.map((x) => ({ jam: x.jam, nama: x.nama, total: x.pasaran.length })),
 		closing: [...CLOSING_PREDICTION_SLOTS],
 		nowMinutes,
 		scope: isAdmin ? "all" : "own",
+		health,
 	};
 	_insightCache.set(key, { ts: Date.now(), data });
 	if (_insightCache.size > 64) {
