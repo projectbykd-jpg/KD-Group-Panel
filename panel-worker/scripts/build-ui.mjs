@@ -84,6 +84,10 @@ const ARG_MAP = {
 	lapGetConfig: ["token"],
 	lapSaveConfig: ["token", "data"],
 	adminGetSystemSettings: ["token"],
+	adminErrorList: ["token", "options"],
+	adminErrorSet: ["token", "ids", "status"],
+	adminErrorDelete: ["token", "ids", "scope"],
+	clientErrorReport: ["token", "report"],
 	adminSaveSystemSettings: ["token", "values"],
 	adminGetMasterData: ["token"],
 	adminSaveMasterData: ["token", "key", "value"],
@@ -184,6 +188,8 @@ const shim = `<script>
           // Galat di fungsi tampilan (bukan jaringan): dulu ikut ditangkap .catch di bawah dan tampil sebagai
           // "Tidak dapat menghubungi server" sehingga bug render tidak bisa dilacak. Sekarang jujur + tercatat di console.
           try { console.error("[panel] galat saat memproses jawaban " + fn, renderErr); } catch (e) {}
+          // Masuk Admin > Error & Bug (bug tampilan nyata, bukan jaringan).
+          try { window.dispatchEvent(new CustomEvent("kd:client-error", { detail: { message: "Galat tampilan (" + fn + "): " + ((renderErr && renderErr.message) || renderErr), stack: renderErr && renderErr.stack, loc: "render:" + fn } })); } catch (e) {}
           (onErr || function () {})(new Error("Galat tampilan (" + fn + "): " + ((renderErr && renderErr.message) || renderErr)));
         }
       })

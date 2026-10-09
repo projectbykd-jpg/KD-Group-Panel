@@ -1,0 +1,50 @@
+// API menu Admin > Error & Bug + penerima laporan galat dari browser.
+import { requireSession } from "./auth";
+import { logActivity } from "../lib/activity";
+import { deleteErrors, listErrors, recordError, setErrorStatus } from "../lib/error-log";
+
+export async function adminErrorList(env: Env, token: string, options: unknown) {
+	await requireSession(env, token, { admin: true, ignoreMaintenance: true });
+	const o = (options && typeof options === "object" ? options : {}) as Record<string, unknown>;
+	const out = await listErrors(env, { status: String(o.status ?? ""), source: String(o.source ?? "") });
+	return { success: true, ...out };
+}
+
+export async function adminErrorSet(env: Env, token: string, ids: unknown, status: unknown) {
+	await requireSession(env, token, { admin: true, ignoreMaintenance: true });
+	const n = await setErrorStatus(env, ids, String(status ?? ""));
+	return { success: true, changed: n };
+}
+
+export async function adminErrorDelete(env: Env, token: string, ids: unknown, scope: unknown) {
+	const s = await requireSession(env, token, { admin: true, ignoreMaintenance: true });
+	const n = await deleteErrors(env, ids, String(scope ?? ""));
+	if (n) await logActivity(env, s.username, "HAPUS LOG ERROR", `${n} catatan error dihapus.`, "BERHASIL", "");
+	return { success: true, removed: n };
+}
+
+// Pembatas per user (per isolate): satu tab yang rusak tidak boleh membanjiri tabel.
+const bucket = new Map<string, { at: number; n: number }>();
+export function resetClientReportLimit(): void {
+	bucket.clear();
+}
+
+/** Laporan galat dari browser (window.onerror / unhandledrejection / galat render). Semua user yang login boleh melapor. */
+export async function clientErrorReport(env: Env, token: string, report: unknown) {
+	const s = await requireSession(env, token, { allowBot: true, ignoreMaintenance: true });
+	const now = Date.now();
+	const b = bucket.get(s.username);
+	if (!b || now - b.at > 60_000) bucket.set(s.username, { at: now, n: 1 });
+	else if (++b.n > 20) return { success: true, dropped: true };
+	if (bucket.size > 200) bucket.clear();
+	const r = (report && typeof report === "object" ? report : {}) as Record<string, unknown>;
+	const str = (v: unknown, max: number) => String(v ?? "").slice(0, max);
+	await recordError(env, {
+		source: "browser",
+		message: str(r.message, 500),
+		detail: str(r.stack, 2500) + (r.ua ? "\nUA: " + str(r.ua, 160) : ""),
+		loc: str(r.loc, 120),
+		username: s.username,
+	});
+	return { success: true };
+}

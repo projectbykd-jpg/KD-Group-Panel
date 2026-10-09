@@ -16,6 +16,8 @@ export type SysSettingDef = {
 
 export const SYS_SETTINGS: SysSettingDef[] = [
 	{ key: "sys_log_retention_days", group: "Log & Retensi", label: "Simpan log aktivitas", hint: "Log lebih lama dari ini dihapus otomatis tiap hari.", unit: "hari", def: 7, min: 1, max: 90 },
+	{ key: "sys_errorlog_days", group: "Log & Retensi", label: "Simpan log Error & Bug", hint: "Catatan di Admin > Error & Bug yang terakhir terjadinya lebih lama dari ini dihapus otomatis tiap hari.", unit: "hari", def: 14, min: 1, max: 60 },
+	{ key: "sys_errorlog_max_rows", group: "Log & Retensi", label: "Batas baris log Error & Bug", hint: "Galat yang sama digabung jadi satu baris (dengan hitungan). Bila baris melebihi batas ini, yang paling lama (dan sudah Selesai/Diabaikan lebih dulu) dibuang.", unit: "baris", def: 500, min: 50, max: 5000 },
 	{ key: "sys_catchup_minutes", group: "Auto Posting Prediksi", label: "Toleransi susulan sesi", hint: "Sesi yang terlewat masih dikirim selama selisih waktunya tidak melebihi ini.", unit: "menit", def: 25, min: 5, max: 120 },
 	{ key: "sys_auto_input_history_days", group: "Auto Prediksi (Input Otomatis)", label: "Riwayat Auto Prediksi disimpan", hint: "Menu Auto Prediksi menampilkan semua job & catatan Auto Check Toto Macau selama N hari terakhir (tidak dibatasi 30 baris). Data yang lebih lama dihapus otomatis tiap hari (job yang masih berjalan tidak disentuh).", unit: "hari", def: 7, min: 1, max: 30 },
 	{ key: "sys_auto_input_retry_max", group: "Auto Prediksi (Input Otomatis)", label: "Percobaan ulang otomatis", hint: "Job Auto Prediksi yang GAGAL dicoba ulang otomatis sebanyak ini (tanpa klik user). 0 = mati. Angka yang sudah masuk tidak pernah diinput dobel; hanya Hitung yang dilanjutkan.", unit: "kali", def: 2, min: 0, max: 5 },

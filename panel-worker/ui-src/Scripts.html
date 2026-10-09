@@ -24,6 +24,35 @@
 
     let currentUser = "";
     let currentSessionToken = readStoredSessionToken();
+
+    // ===== Pelapor galat browser -> Admin > Error & Bug =====
+    // Maks 10 laporan per pemuatan halaman, pesan yang sama sekali saja; jaringan putus & galat ekstensi diabaikan.
+    // Pelapor memakai fetch sendiri (bukan google.script.run) supaya kegagalannya tidak memicu laporan baru.
+    let errReportedN = 0; const errReportedMsg = {};
+    function reportClientError(message, stack, loc) {
+      try {
+        if (!currentSessionToken || errReportedN >= 10) return;
+        const msg = String(message || '').slice(0, 500);
+        if (!msg || errReportedMsg[msg]) return;
+        errReportedMsg[msg] = 1; errReportedN++;
+        let pg = '?'; try { pg = String(currentPage); } catch (e) {}
+        fetch('/api', {
+          method: 'POST', credentials: 'same-origin', keepalive: true, headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'clientErrorReport', token: currentSessionToken,
+            report: { message: msg, stack: String(stack || '').slice(0, 2500), loc: loc || ('menu:' + pg), ua: navigator.userAgent } })
+        }).catch(() => {});
+      } catch (e) {}
+    }
+    window.addEventListener('error', ev => {
+      try {
+        if (ev.filename && ev.filename.indexOf(location.origin) !== 0) return;
+        reportClientError(ev.message, ev.error && ev.error.stack ? ev.error.stack : (ev.filename + ':' + ev.lineno + ':' + ev.colno));
+      } catch (e) {}
+    });
+    window.addEventListener('unhandledrejection', ev => {
+      try { const r = ev.reason; reportClientError('Promise ditolak: ' + ((r && r.message) || r), r && r.stack); } catch (e) {}
+    });
+    window.addEventListener('kd:client-error', ev => { try { const d = ev.detail || {}; reportClientError(d.message, d.stack, d.loc); } catch (e) {} });
     let globalPredictionsData = [];
     let globalClosingPrediction = null;
     // Data hasil 1x panggilan getBootstrapData saat panel dibuka. Dipakai sekali lalu
@@ -2777,7 +2806,7 @@
     }
 
     /* Menu admin: tampilkan satu panel per waktu (tidak numpuk scroll). */
-    const ADMIN_PANELS = ['users','sites','sesi','autopost','lapops','datamaster','integrasi','maintenance'];
+    const ADMIN_PANELS = ['users','sites','sesi','autopost','lapops','datamaster','integrasi','maintenance','errors'];
     // ---------- Admin: API key KHUSUS Asisten KD + provider cadangan ----------
     function asstCfgLoad() {
       const st = document.getElementById('asstCfgStatus');
@@ -3126,6 +3155,8 @@
         intLoad();
       } else if (key === 'maintenance') {
         loadMaintenanceState();
+      } else if (key === 'errors') {
+        errLoad();
       }
       if (!fromNav) pumpLivePoll(true);
     }
@@ -5564,6 +5595,121 @@
                 ? '<span class="px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-300 text-[9px] font-bold">✓ IKUT</span>'
                 : '<span class="px-2 py-1 rounded-full bg-slate-500/15 text-slate-400 text-[9px] font-bold">— tidak</span>'}</td>
             </tr>`).join('');
+    }
+
+    // ================= ADMIN > ERROR & BUG =================
+    const ERR_SRC = { api: 'API', cron: 'CRON', browser: 'BROWSER', toto: 'TOTO MACAU', 'auto-input': 'AUTO PREDIKSI', lainnya: 'LAIN' };
+    const errState = { rows: [], counts: { open: 0, resolved: 0, ignored: 0, total: 0 }, status: 'open', source: '', sel: new Set(), days: 14, loading: false };
+    function errLoad(force) {
+      if (errState.loading) return;
+      errState.loading = true;
+      const meta = document.getElementById('errMeta');
+      if (meta && !errState.rows.length) meta.textContent = 'Memuat…';
+      google.script.run.withSuccessHandler(r => {
+        errState.loading = false;
+        if (!r || !r.success) { if (meta) meta.textContent = 'Gagal memuat: ' + apiMessage(r); return; }
+        errState.rows = r.rows || []; errState.counts = r.counts || errState.counts; errState.days = r.retentionDays || 14;
+        const ids = new Set(errState.rows.map(x => x.id));
+        errState.sel.forEach(id => { if (!ids.has(id)) errState.sel.delete(id); });
+        errPaint();
+      }).withFailureHandler(e => {
+        errState.loading = false;
+        if (meta) meta.textContent = 'Gagal memuat: ' + ((e && e.message) || e);
+      }).adminErrorList(currentSessionToken, { status: errState.status === 'all' ? '' : errState.status, source: errState.source });
+    }
+    function errSetStatus(s) { errState.status = s; errState.sel.clear(); errLoad(true); }
+    function errSetSource(s) { errState.source = s; errState.sel.clear(); errLoad(true); }
+    function errPaint() {
+      const c = errState.counts;
+      const badge = document.getElementById('errTabBadge');
+      if (badge) { badge.hidden = !c.open; badge.textContent = c.open > 99 ? '99+' : String(c.open); badge.classList.toggle('bad', c.open > 0); }
+      const chips = document.getElementById('errChips');
+      if (chips) {
+        const chip = (k, label, n, bad) => `<button type="button" class="ai-chip${errState.status === k ? ' active' : ''}${bad && n ? ' bad' : ''}" onclick="errSetStatus('${k}')">${label} <b>${n}</b></button>`;
+        chips.innerHTML = chip('open', 'Terbuka', c.open, true) + chip('resolved', 'Selesai', c.resolved) + chip('ignored', 'Diabaikan', c.ignored) + chip('all', 'Semua', c.total);
+      }
+      const meta = document.getElementById('errMeta');
+      if (meta) meta.textContent = errState.rows.length + ' catatan ditampilkan · disimpan ' + errState.days + ' hari';
+      const list = document.getElementById('errList');
+      if (!list) return;
+      if (!errState.rows.length) {
+        list.innerHTML = '<div class="p-4 text-center text-xs text-slate-400">' + (errState.status === 'open' ? 'Tidak ada galat terbuka. Bagus.' : 'Tidak ada catatan.') + '</div>';
+      } else {
+        list.innerHTML = errState.rows.map(r => {
+          const src = ERR_SRC[r.source] || String(r.source || '').toUpperCase();
+          const st = r.status === 'open' ? '' : ` <span class="ai-pill ${r.status === 'resolved' ? 'ok' : ''}">${r.status === 'resolved' ? 'SELESAI' : 'DIABAIKAN'}</span>`;
+          const re = r.reopened ? ` <span class="ai-pill warn" title="Ditandai selesai tetapi muncul lagi">MUNCUL LAGI ×${r.reopened}</span>` : '';
+          const btns = (r.status === 'open'
+            ? `<button class="ai-btn" onclick="errSet([${r.id}],'resolved')"><i class="fa-solid fa-check"></i>Selesai</button><button class="ai-btn" onclick="errSet([${r.id}],'ignored')"><i class="fa-solid fa-eye-slash"></i>Abaikan</button>`
+            : `<button class="ai-btn" onclick="errSet([${r.id}],'open')"><i class="fa-solid fa-rotate-left"></i>Buka lagi</button>`)
+            + `<button class="ai-btn danger" onclick="errDelete([${r.id}])"><i class="fa-solid fa-trash"></i>Hapus</button>`;
+          return `<details class="ai-fold" data-eid="${r.id}">
+            <summary><input type="checkbox" class="ai-chk" ${errState.sel.has(r.id) ? 'checked' : ''} onclick="event.stopPropagation()" onchange="errToggle(${r.id},this.checked)" aria-label="Pilih">
+              <span class="ai-pill ${r.level === 'warn' ? 'warn' : ''}">${escapeHtml(src)}</span>
+              <span style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.message)}</span>
+              <span class="ai-badge ${r.status === 'open' ? 'bad' : ''}" title="Jumlah kejadian">${r.count}×</span></summary>
+            <div class="ai-help" style="display:flex;flex-direction:column;gap:6px">
+              <div>${st}${re}</div>
+              <div><b>Pesan:</b> ${escapeHtml(r.message)}</div>
+              <div><b>Lokasi:</b> ${escapeHtml(r.loc || '-')}${r.site ? ' · website ' + escapeHtml(r.site) : ''}${r.username ? ' · user ' + escapeHtml(r.username) : ''}</div>
+              <div><b>Pertama:</b> ${escapeHtml(r.first_at)} · <b>Terakhir:</b> ${escapeHtml(r.last_at)} · <b>Jumlah:</b> ${r.count}×</div>
+              ${r.detail ? `<pre style="white-space:pre-wrap;word-break:break-word;font-size:10.5px;max-height:220px;overflow:auto;margin:0;padding:8px;border-radius:8px;background:var(--ui-surface-2)">${escapeHtml(r.detail)}</pre>` : ''}
+              <div class="ai-selbar">${btns}</div>
+            </div></details>`;
+        }).join('');
+      }
+      errSelBar();
+    }
+    function errSelBar() {
+      const bar = document.getElementById('errSelBar'); if (!bar) return;
+      const n = errState.sel.size;
+      const done = errState.counts.resolved + errState.counts.ignored;
+      bar.hidden = !n && !done;
+      bar.innerHTML = (n
+        ? `<span class="ai-sel-count"><b>${n}</b> dipilih</span><button class="ai-btn" onclick="errSet(Array.from(errState.sel),'resolved')">Tandai Selesai</button><button class="ai-btn" onclick="errSet(Array.from(errState.sel),'ignored')">Abaikan</button><button class="ai-btn danger" onclick="errDelete(Array.from(errState.sel))">Hapus terpilih</button><button class="ai-btn" onclick="errState.sel.clear();errPaint()">Batal</button>`
+        : '<button class="ai-btn" onclick="errSelAll()">Pilih semua yang tampil</button>')
+        + (done ? `<button class="ai-btn danger" onclick="errDelete([],'done')">Bersihkan ${done} yang selesai/diabaikan</button>` : '');
+    }
+    function errSelAll() { errState.rows.forEach(r => errState.sel.add(r.id)); errPaint(); }
+    function errToggle(id, on) { if (on) errState.sel.add(id); else errState.sel.delete(id); errSelBar(); }
+    function errSet(ids, status) {
+      if (!ids.length) return;
+      google.script.run.withSuccessHandler(r => {
+        if (!r || !r.success) { toast(apiMessage(r)); return; }
+        errState.sel.clear(); errLoad(true);
+      }).withFailureHandler(e => toast('Gagal: ' + ((e && e.message) || e))).adminErrorSet(currentSessionToken, ids, status);
+    }
+    function errDelete(ids, scope) {
+      if (!scope && !ids.length) return;
+      if (!confirm(scope === 'done' ? 'Hapus semua catatan yang sudah Selesai/Diabaikan?' : 'Hapus ' + ids.length + ' catatan terpilih?')) return;
+      google.script.run.withSuccessHandler(r => {
+        if (!r || !r.success) { toast(apiMessage(r)); return; }
+        toast((r.removed || 0) + ' catatan dihapus'); errState.sel.clear(); errLoad(true);
+      }).withFailureHandler(e => toast('Gagal: ' + ((e && e.message) || e))).adminErrorDelete(currentSessionToken, ids, scope || '');
+    }
+    // Teks laporan untuk ditempel ke Claude: yang dipilih, kalau tidak ada = semua galat TERBUKA yang tampil.
+    function errReportText(rows, openTotal) {
+      const head = ['LAPORAN ERROR & BUG — KD-Group Panel', 'Dibuat: ' + new Date().toLocaleString('id-ID') + ' (waktu browser)', 'Ditampilkan ' + rows.length + ' dari ' + openTotal + ' galat terbuka. Format: [no] (sumber) lokasi — jumlah kejadian', ''];
+      const body = rows.map((r, i) => [
+        `[${i + 1}] (${r.source}) ${r.loc || '-'} — ${r.count}× — pertama ${r.first_at}, terakhir ${r.last_at}${r.site ? ' — website ' + r.site : ''}${r.username ? ' — user ' + r.username : ''}${r.reopened ? ' — MUNCUL LAGI setelah ditandai selesai ×' + r.reopened : ''}`,
+        'Pesan: ' + r.message,
+        r.detail ? 'Detail:\n' + r.detail : '', ''
+      ].filter(x => x !== '').join('\n') + '\n');
+      return head.concat(body).join('\n').slice(0, 30000);
+    }
+    function errCopyReport() {
+      const picked = errState.rows.filter(r => errState.sel.has(r.id));
+      const rows = picked.length ? picked : errState.rows.filter(r => r.status === 'open');
+      if (!rows.length) { toast('Tidak ada galat terbuka untuk disalin'); return; }
+      const text = errReportText(rows.slice(0, 40), picked.length ? picked.length : errState.counts.open);
+      const fallback = () => {
+        const ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+        document.body.appendChild(ta); ta.select();
+        let ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+        ta.remove(); toast(ok ? 'Laporan disalin (' + rows.length + ' galat) — tempel ke Claude' : 'Gagal menyalin, izinkan akses clipboard');
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => toast('Laporan disalin (' + rows.length + ' galat) — tempel ke Claude')).catch(fallback);
+      else fallback();
     }
 
     function loadActiveSessions() {
