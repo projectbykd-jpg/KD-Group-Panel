@@ -1012,7 +1012,7 @@ async function geminiFbCaption(env: Env, cfg: Record<string, string>, art: { tit
 		`JUDUL: ${art.title}\nRINGKASAN: ${art.excerpt || "(tidak ada)"}\nSUMBER: ${art.source}`;
 	try {
 		const { value } = await aiGenerate(env, cfg, { purpose: "fb-caption", messages: [{ role: "user", content: prompt }], temperature: 0.9, maxTokens: 400 }, (raw) => {
-			const text = raw.trim().replace(/^["']|["']$/g, "").slice(0, 500);
+			const text = stripEchoedPlaceholders(raw).slice(0, 500);
 			if (!text) throw new Error("caption kosong");
 			return text;
 		});
@@ -1072,6 +1072,27 @@ export async function fbDirectProcessOne(env: Env): Promise<{ done: boolean; tit
 // dipasang tetap di tiap template supaya jangkauan konsisten walau AI-nya kadang pelit hashtag.
 export const FB_TEMPLATE_EVERGREEN_HASHTAGS = ["#LapakStore88", "#BeritaTerkini", "#BeritaHariIni", "#InfoTerkini", "#BeritaViral", "#BeritaUpdate"];
 
+/**
+ * AI kadang menyalin placeholder format prompt mentah-mentah (mis. baris "<caption>" atau "Caption:" di awal) --
+ * buang baris pembuka/penutup semacam itu supaya tidak ikut ke caption yang dicopy-paste ke Facebook.
+ */
+export function stripEchoedPlaceholders(text: string): string {
+	return String(text ?? "")
+		.replace(/^\s*(?:<\/?\s*(?:caption|hashtag|hashtags)\s*>|\[\s*(?:caption|hashtag)[^\]]*\]|\*{0,2}caption\s*:\s*\*{0,2})\s*/gi, "")
+		.replace(/<\/?\s*(?:caption|hashtag|hashtags)\s*>/gi, "")
+		.replace(/^["']|["']$/g, "")
+		.trim();
+}
+
+/** Urai balasan AI template FB: "caption ===HASHTAG=== hashtag". Murni (tanpa I/O) supaya bisa diuji. */
+export function parseFbTemplateReply(raw: string): { text: string; hashtags: string[] } {
+	const [captionPart, hashtagPart] = raw.trim().split(/===HASHTAG===/i);
+	const text = stripEchoedPlaceholders(captionPart || raw).slice(0, 500);
+	if (!text) throw new Error("caption kosong");
+	const aiTags = (hashtagPart || "").match(/#[\p{L}\p{N}_]+/gu) || [];
+	return { text, hashtags: aiTags.slice(0, 8) };
+}
+
 /** Caption + hashtag utk template manual — link ditambahkan terpisah di bawah (bukan oleh AI). */
 async function geminiFbTemplateCaption(
 	env: Env,
@@ -1086,17 +1107,12 @@ async function geminiFbTemplateCaption(
 		`SETELAH itu, di baris terpisah setelah tanda "===HASHTAG===", tuliskan 5-8 hashtag ` +
 		`(gabungan Bahasa Indonesia, dipisah spasi, huruf tanpa spasi di dalamnya, contoh: #BeritaJakarta) ` +
 		`yang relevan dengan topik/tokoh/kategori berita ini SUPAYA postingan gampang muncul di pencarian & ` +
-		`beranda orang yang suka/cari berita. Balas HANYA dalam format:\n` +
-		`<caption>\n===HASHTAG===\n<hashtag1> <hashtag2> ...\n\n` +
+		`beranda orang yang suka/cari berita. Balas HANYA dengan teks captionnya (tanpa judul/label/tag apa pun di awal), ` +
+		`lalu baris baru berisi ===HASHTAG===, lalu baris baru berisi hashtagnya dipisah spasi. ` +
+		`JANGAN menulis kata "caption" atau tanda < > dalam balasanmu.\n\n` +
 		`JUDUL: ${art.title}\nRINGKASAN: ${art.excerpt || "(tidak ada)"}\nSUMBER: ${art.source}`;
 	try {
-		const { value } = await aiGenerate(env, cfg, { purpose: "fb-template", messages: [{ role: "user", content: prompt }], temperature: 0.9, maxTokens: 500 }, (raw) => {
-			const [captionPart, hashtagPart] = raw.trim().split(/===HASHTAG===/i);
-			const text = (captionPart || raw).replace(/^["']|["']$/g, "").trim().slice(0, 500);
-			if (!text) throw new Error("caption kosong");
-			const aiTags = (hashtagPart || "").match(/#[\p{L}\p{N}_]+/gu) || [];
-			return { text, hashtags: aiTags.slice(0, 8) };
-		});
+		const { value } = await aiGenerate(env, cfg, { purpose: "fb-template", messages: [{ role: "user", content: prompt }], temperature: 0.9, maxTokens: 500 }, parseFbTemplateReply);
 		return value;
 	} catch {
 		return { text: art.title, hashtags: [] };
@@ -1875,14 +1891,14 @@ export async function botNewsSnapshot(env: Env) {
 			.prepare(`SELECT id, source, title, status, url, post_url, error, found_at, posted_at FROM news_article ORDER BY id DESC LIMIT 40`)
 			.all()).results ?? [];
 	await ensureFbTemplateColumn(env);
-	const fbDirectHistory =
+	const fbDirectHistory = (
 		(await getTurso(env)
 			.prepare(
 				`SELECT id, source, title, url, post_url, image_url, fb_direct_posted_at, fb_template_caption
 				 FROM news_article WHERE fb_direct_posted_at NOT IN ('', 'error')
 				 ORDER BY fb_direct_posted_at DESC, id DESC LIMIT 100`,
 			)
-			.all()).results ?? [];
+			.all()).results ?? []).map((r) => ({ ...r, fb_template_caption: stripEchoedPlaceholders(String(r.fb_template_caption ?? "")) }));
 	const history =
 		(await getTurso(env)
 			.prepare(
