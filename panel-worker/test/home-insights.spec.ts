@@ -25,16 +25,20 @@ beforeEach(async () => {
 describe("Dashboard: wawasan per jam / top operator / jadwal", () => {
 	it("admin: menghitung per jam (+gagal), top operator, jadwal; operator: hanya miliknya & tanpa top operator", async () => {
 		const d = dateKeyNow();
-		log(`${d} 09:10:00`, "Opr", "BERHASIL"); log(`${d} 09:50:00`, "Opr", "GAGAL"); log(`${d} 09:55:00`, "Boss", "BERHASIL");
-		log(`${d} 14:05:00`, "Boss", "BERHASIL"); log("2000-01-01 09:00:00", "Opr", "BERHASIL"); // hari lain: tidak dihitung
+		// jam uji dipilih BUKAN jam sekarang: login saat tes ikut tercatat di jam berjalan dan akan mengacaukan hitungan
+		const nowH = new Date(Date.now() + 7 * 3600_000).getUTCHours();
+		const H1 = [9, 10, 11].find((h) => h !== nowH)!, H2 = [14, 15, 16].find((h) => h !== nowH)!;
+		const hh = (h: number) => String(h).padStart(2, "0");
+		log(`${d} ${hh(H1)}:10:00`, "Opr", "BERHASIL"); log(`${d} ${hh(H1)}:50:00`, "Opr", "GAGAL"); log(`${d} ${hh(H1)}:55:00`, "Boss", "BERHASIL");
+		log(`${d} ${hh(H2)}:05:00`, "Boss", "BERHASIL"); log("2000-01-01 09:00:00", "Opr", "BERHASIL"); // hari lain: tidak dihitung
 		const a = (await homeInsights(ctx.env, await tok("Boss", "pw-boss"))) as { hourly: number[]; hourlyFailed: number[]; topUsers: { username: string; n: number }[]; schedule: { jam: string }[]; closing: string[] };
-		expect(a.hourly[9]).toBe(3); expect(a.hourlyFailed[9]).toBe(1); expect(a.hourly[14]).toBe(1);
+		expect(a.hourly[H1]).toBe(3); expect(a.hourlyFailed[H1]).toBe(1); expect(a.hourly[H2]).toBe(1);
 		expect(a.hourly.reduce((x, y) => x + y, 0)).toBeGreaterThanOrEqual(4);
 		expect(a.topUsers.map((u) => u.username)).toContain("Opr");
 		expect((a as unknown as { scope: string }).scope).toBe("all"); expect(a.schedule).toHaveLength(7); expect(a.closing).toEqual(["06:15", "16:00"]);
 
 		const o = (await homeInsights(ctx.env, await tok("Opr", "pw-opr"))) as { hourly: number[]; topUsers: unknown[] };
-		expect(o.hourly[9]).toBe(2); expect(o.hourly[14]).toBe(0); // hanya aktivitas Opr
+		expect(o.hourly[H1]).toBe(2); expect(o.hourly[H2]).toBe(0); // hanya aktivitas Opr
 		expect(o.topUsers).toEqual([]); expect((o as unknown as { scope: string }).scope).toBe("own");
 	});
 	it("7 hari: tren harian, peta panas, kemarin jam yang sama, jenis aktivitas; operator tanpa kesehatan sistem", async () => {

@@ -9,6 +9,7 @@
 //      mengunci login CS ke IP tertentu, jadi bot TIDAK BISA login dari
 //      server (lihat catatan di lib/livechat-bot.ts).
 import { requireSession } from "./auth";
+import { getSys } from "../lib/settings";
 import { constEq } from "../lib/crypto";
 import type { MenuKey } from "../lib/menus";
 import { logActivity } from "../lib/activity";
@@ -187,7 +188,8 @@ export async function livechatBotSync(env: Env, key: string, rows: unknown) {
 export async function livechatBotPull(env: Env, key: string) {
 	const owner = await gateBotKey(env, key);
 	const { enabledKeys, templates } = await pullEnabledSessions(env, owner);
-	return { success: true, enabledKeys, templates };
+	// Jeda bot diatur admin (Pengaturan Sistem > Live Chat Bot); skrip memakai nilai ini, bawaan lokal bila server lama.
+	return { success: true, enabledKeys, templates, burstResetSec: await getSys(env, "sys_livechat_burst_reset_sec"), graceSec: await getSys(env, "sys_livechat_grace_sec") };
 }
 
 export async function livechatBotReport(env: Env, key: string, sessionKey: string, customerMessage: string, matchedTemplateId: number | null, replyText: string) {

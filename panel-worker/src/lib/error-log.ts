@@ -9,6 +9,8 @@
 //  - Retensi & batas baris diatur di Admin > Pengaturan Sistem (sys_errorlog_days, sys_errorlog_max_rows).
 //  - Tabel dibuat otomatis (CREATE TABLE IF NOT EXISTS) -- tanpa migrasi manual.
 import { getSys } from "./settings";
+import { alertTgCfg, loadIntegrations } from "./integrations";
+import { sendTelegram } from "../senders/telegram";
 import { tsNow } from "./time";
 
 export type ErrSource = "api" | "cron" | "browser" | "toto" | "auto-input" | "lainnya";
@@ -146,6 +148,20 @@ export function resetErrorThrottle(): void {
 	writes = 0;
 }
 
+/** Notifikasi Telegram hanya bila Token + Chat ID diisi admin dan jeda minimum sudah lewat (anti-banjir). */
+async function alertEligible(env: Env): Promise<boolean> {
+	await loadIntegrations(env);
+	const c = alertTgCfg();
+	if (!c.token || !c.chatId) return false;
+	const row = await env.DB.prepare(`SELECT value FROM settings WHERE key = 'errlog_alert_at'`).first<{ value: string }>();
+	return Date.now() - Number(row?.value || 0) >= (await getSys(env, "sys_errorlog_alert_gap_min")) * 60_000;
+}
+async function sendAlert(env: Env, kind: string, e: { source: string; loc: string; message: string }): Promise<void> {
+	// tanda dulu, baru kirim: dua galat bersamaan tidak jadi dua pesan
+	await env.DB.prepare(`INSERT INTO settings (key, value) VALUES ('errlog_alert_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).bind(String(Date.now())).run();
+	await sendTelegram(`⚠️ Error ${kind} — KD-Group Panel\n(${e.source}) ${e.loc || "-"}\n${e.message.slice(0, 300)}\n\nBuka Admin › Error & Bug untuk detail.`, alertTgCfg());
+}
+
 /** Catat satu galat. Tidak pernah melempar. */
 export async function recordError(env: Env, input: ErrInput): Promise<void> {
 	try {
@@ -161,6 +177,12 @@ export async function recordError(env: Env, input: ErrInput): Promise<void> {
 		lastWrite.set(fp, now);
 		if (lastWrite.size > 500) lastWrite.clear();
 		await ensureTable(env);
+		let alertKind = "";
+		if (await alertEligible(env).catch(() => false)) {
+			const prev = await env.DB.prepare(`SELECT status FROM error_log WHERE fp = ?`).bind(fp).first<{ status: string }>();
+			if (!prev) alertKind = "baru";
+			else if (prev.status === "resolved") alertKind = "muncul lagi";
+		}
 		const ts = tsNow();
 		await env.DB.prepare(
 			`INSERT INTO error_log (fp, source, level, message, detail, loc, username, site, count, reopened, first_at, last_at, status)
@@ -187,6 +209,7 @@ export async function recordError(env: Env, input: ErrInput): Promise<void> {
 				ts,
 			)
 			.run();
+		if (alertKind) await sendAlert(env, alertKind, { source, loc, message });
 		// batas baris: dicek tiap 25 tulisan (bukan tiap galat) supaya hemat
 		if (++writes % 25 === 0) await capRows(env);
 	} catch {

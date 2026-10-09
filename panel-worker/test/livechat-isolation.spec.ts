@@ -19,6 +19,7 @@ import {
 	resetLivechatKeyCache,
 } from "../src/api/livechat";
 import { hashPassword } from "../src/lib/crypto";
+import { resetSysCache, saveSys } from "../src/lib/settings";
 import { fakeEnv, fakeTurso } from "./helpers/fake-env";
 
 const MASTER = "master-secret-livechat";
@@ -127,5 +128,20 @@ describe("Live Chat: data & kunci terpisah per pengguna", () => {
 		ctx.db.prepare(`UPDATE users SET status = 'NONAKTIF' WHERE username_lc = 'ani'`).run();
 		resetLivechatKeyCache();
 		await expect(livechatBotPull(ctx.env, fresh)).rejects.toThrow(/tidak valid/);
+	});
+});
+
+describe("Live Chat: jeda bot diatur admin (Pengaturan Sistem)", () => {
+	it("pull membawa jeda rentetan & toleransi; bawaan 90/30 dtk, nilai admin dihormati dan dibatasi aman", async () => {
+		resetSysCache();
+		const key = await keyOf(await tok("Ani", "pw-ani"));
+		const d = (await livechatBotPull(ctx.env, key)) as { burstResetSec: number; graceSec: number };
+		expect(d).toMatchObject({ burstResetSec: 90, graceSec: 30 });
+		await saveSys(ctx.env, { sys_livechat_burst_reset_sec: 120, sys_livechat_grace_sec: 10 });
+		resetSysCache();
+		expect(await livechatBotPull(ctx.env, key)).toMatchObject({ burstResetSec: 120, graceSec: 10 });
+		await saveSys(ctx.env, { sys_livechat_burst_reset_sec: 5 }); // di luar batas -> dijepit ke minimum aman
+		resetSysCache();
+		expect(((await livechatBotPull(ctx.env, key)) as { burstResetSec: number }).burstResetSec).toBe(30);
 	});
 });
