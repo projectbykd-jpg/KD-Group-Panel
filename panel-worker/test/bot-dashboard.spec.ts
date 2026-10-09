@@ -67,7 +67,7 @@ describe("Dashboard Bot: jalur punya hitungan harian yang setara", () => {
 			tg: { postedToday: number; total: number; cap: number; gapMin: number; queue: number; lastAt: string };
 			daily7: { tg: number }[]; tgHistory: { id: number; title: string }[]; config: { tg_channel_enabled: boolean };
 		};
-		expect(s.tg).toMatchObject({ postedToday: 2, total: 3, cap: 100, gapMin: 10 });
+		expect(s.tg).toMatchObject({ postedToday: 2, total: 3, cap: 500, gapMin: 5 });
 		expect(s.tg.queue).toBe(1); // hanya yang belum dikirim & masih dalam umur maksimum
 		expect(s.tg.lastAt).toBe(wib(0, "11:00:00"));
 		expect(s.daily7[6].tg).toBe(2);

@@ -114,6 +114,26 @@ describe("posting otomatis ke channel", () => {
 		expect(again.message).toMatch(/jeda/i);
 		expect(sent).toHaveLength(1);
 	});
+	it("bawaan: tiap 5 menit tanpa terhambat jeda kaku (toleransi detak cron) dan batas harian praktis tanpa batas", async () => {
+		// posting terakhir 4 mnt 58 dtk lalu = detak cron berikutnya; harus POSTING, bukan menunggu 5 menit lagi
+		await article(30, { siteMinAgo: 120, tg: wib(4.97) });
+		await article(31, { siteMinAgo: 5 });
+		stub(() => ({}));
+		const r = await tgChannelRun(ctx.env);
+		expect(r.posted).toBe(1);
+		// tapi dua kali dalam satu detak tidak boleh: jeda baru saja dimulai
+		const again = await tgChannelRun(ctx.env);
+		expect(again.posted).toBe(0);
+		expect(again.message).toMatch(/jeda/i);
+	});
+	it("posting 2 menit lalu masih menunggu (jeda 5 menit belum lewat)", async () => {
+		await article(32, { siteMinAgo: 120, tg: wib(2) });
+		await article(33, { siteMinAgo: 5 });
+		stub(() => ({}));
+		const r = await tgChannelRun(ctx.env);
+		expect(r.posted).toBe(0);
+		expect(r.message).toMatch(/jeda/i);
+	});
 	it("nonaktif -> tidak mengirim; tombol KIRIM SEKARANG (force) tetap jalan", async () => {
 		await botCfgSet(ctx.env, { tg_channel_enabled: "0" });
 		await article(3);

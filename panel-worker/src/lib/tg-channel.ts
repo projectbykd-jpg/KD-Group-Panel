@@ -120,7 +120,9 @@ export async function tgChannelRun(env: Env, opts: { force?: boolean } = {}): Pr
 	if (!force) {
 		const last = await db.prepare(`SELECT MAX(tg_posted_at) AS m FROM news_article WHERE tg_posted_at LIKE '20%'`).first<{ m: string | null }>();
 		const lastMs = last?.m ? parseWib(last.m) : 0;
-		if (lastMs && Date.now() - lastMs < (await getSys(env, "sys_tgch_gap_min")) * 60_000) return { posted: 0, message: "Menunggu jeda antar posting." };
+		// Toleransi 90 dtk: cron berdetak tiap 5 menit dan jam posting tercatat beberapa detik SETELAH detak sebelumnya, jadi tanpa
+		// toleransi jeda 5 menit selalu "kurang sedikit" dan posting baru jalan di detak berikutnya (efektif 10 menit).
+		if (lastMs && Date.now() - lastMs < (await getSys(env, "sys_tgch_gap_min")) * 60_000 - 90_000) return { posted: 0, message: "Menunggu jeda antar posting." };
 	}
 	const done = await db.prepare(`SELECT COUNT(*) AS c FROM news_article WHERE substr(tg_posted_at,1,10) = ? AND tg_posted_at LIKE '20%'`).bind(wibToday()).first<{ c: number }>();
 	if (Number(done?.c ?? 0) >= (await getSys(env, "sys_tgch_daily_cap"))) return { posted: 0, message: "Batas posting channel hari ini tercapai." };
