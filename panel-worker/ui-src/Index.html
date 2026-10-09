@@ -1425,6 +1425,21 @@
               </div>
 
               <div class="cfg-group">
+                <div class="cfg-group-title flex items-center justify-between w-full"><span><i class="fa-brands fa-telegram text-cyan-300"></i>Channel Telegram</span><span id="botTgHint" class="text-[10px] text-slate-500 font-normal normal-case"></span></div>
+                <label class="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" id="botTgEnabled"> Auto-posting artikel baru ke channel Telegram</label>
+                <div class="grid sm:grid-cols-2 gap-3">
+                  <label class="cfg-field">Chat ID channel<input id="botTgChatId" class="cfg-input" placeholder="-1001234567890 atau @namakanal"></label>
+                  <label class="cfg-field">Link promosi channel<input id="botTgUrl" class="cfg-input" placeholder="https://t.me/+xxxxxxxx"></label>
+                </div>
+                <div class="flex items-center gap-3 flex-wrap">
+                  <button type="button" id="botTgTestBtn" onclick="botTgTest()" class="btn-secondary text-xs font-bold px-4 py-2.5 rounded-xl"><i class="fa-solid fa-stethoscope mr-1"></i>TES CHANNEL TELEGRAM</button>
+                  <button type="button" id="botTgSendBtn" onclick="botTgSendNow()" class="btn-secondary text-xs font-bold px-4 py-2.5 rounded-xl"><i class="fa-solid fa-paper-plane mr-1"></i>KIRIM 1 ARTIKEL SEKARANG</button>
+                  <span id="botTgStats" class="cfg-hint"></span>
+                </div>
+                <span class="cfg-hint">Token bot diisi di Admin &rsaquo; Integrasi &rsaquo; Channel Telegram (kosong = pakai token bot Notifikasi Galat). Bot harus admin channel dengan izin Post Messages. Jeda antar posting, batas harian, dan umur maksimum artikel diatur di Admin &rsaquo; Pengaturan Sistem &rsaquo; Channel Telegram. Link channel ini otomatis ikut di semua artikel Blogger/web berita, Facebook, dan Template FB.</span>
+              </div>
+
+              <div class="cfg-group">
                 <div class="cfg-group-title"><i class="fa-solid fa-rectangle-ad text-cyan-300"></i>Banner Promosi (Berita Terkini)</div>
                 <label class="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" id="botNewsBannerEnabled"> Tampilkan banner di sidebar Berita Terkini</label>
                 <label class="cfg-field">Gambar banner (URL)<input id="botNewsBannerImage" class="cfg-input" placeholder="https://..."></label>

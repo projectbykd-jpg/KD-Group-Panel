@@ -50,6 +50,10 @@ const TRANSIENT_ERROR_RE =
 // dipanggil berkali² (duplicate column diabaikan), tidak perlu skrip migrasi
 // manual terpisah.
 let newsCategoryColumnsEnsured = false;
+/** Hanya untuk tes: tiap tes memakai database Turso tiruan baru, jadi penanda "kolom sudah dicek" harus direset. */
+export const resetNewsColumnsGuard = (): void => {
+	newsCategoryColumnsEnsured = false;
+};
 export async function ensureNewsCategoryColumns(env: Env): Promise<void> {
 	if (newsCategoryColumnsEnsured) return;
 	const db = getTurso(env);
@@ -92,6 +96,9 @@ export async function ensureNewsCategoryColumns(env: Env): Promise<void> {
 		// diklaim) dari yang NYANGKUT permanen (klaim lama tapi tidak pernah
 		// selesai/gagal dengan benar, mis. proses mati mendadak di tengah jalan).
 		`ALTER TABLE news_article ADD COLUMN claimed_at TEXT NOT NULL DEFAULT ''`,
+		// tg_posted_at = kapan artikel diposting ke channel Telegram ('' = belum, 'error' = gagal permanen).
+		`ALTER TABLE news_article ADD COLUMN tg_posted_at TEXT NOT NULL DEFAULT ''`,
+		`CREATE INDEX IF NOT EXISTS ix_news_tg ON news_article(tg_posted_at, site_posted_at)`,
 		// Index untuk query SITUS PUBLIK (Berita Terkini): semuanya menyaring
 		// `site_posted_at != ''` lalu mengurutkan `site_posted_at DESC, id DESC`,
 		// dan versi per-kategori menambah `category=?`. Tanpa index ini tiap
@@ -950,13 +957,14 @@ function insertAnchorBacklink(html: string, cfg: Record<string, string>): string
 	return html;
 }
 
-function buildFbCaption(title: string, metaDescription: string, links: { blogger?: string; site?: string; store?: string }): string {
+function buildFbCaption(title: string, metaDescription: string, links: { blogger?: string; site?: string; store?: string; tg?: string }): string {
 	const lines = [`📰 ${title}`];
 	if (metaDescription) lines.push("", metaDescription);
 	lines.push("");
 	if (links.blogger) lines.push(`🔗 Baca di blog kami: ${links.blogger}`);
 	if (links.site) lines.push(`📰 Baca di web berita kami: ${links.site}`);
 	if (links.store) lines.push(`🛒 Toko aplikasi premium: ${links.store}`);
+	if (links.tg) lines.push(`${TG_PROMO_LINE}: ${links.tg}`);
 	return lines.join("\n").slice(0, 1900); // batas wajar caption FB
 }
 
@@ -968,7 +976,7 @@ export async function fbPostToPage(
 	const pageId = cfg.fb_page_id;
 	const token = cfg.fb_page_token;
 	if (!pageId || !token) return null; // belum disetel -> lewati diam-diam
-	const caption = buildFbCaption(post.title, post.metaDescription, { blogger: post.postUrl, site: post.siteUrl, store: post.storeUrl });
+	const caption = buildFbCaption(post.title, post.metaDescription, { blogger: post.postUrl, site: post.siteUrl, store: post.storeUrl, tg: tgPromoUrl(cfg) });
 	const primaryLink = post.postUrl || post.siteUrl || post.storeUrl || "";
 	const endpoint = post.imageUrl
 		? `https://graph.facebook.com/v21.0/${encodeURIComponent(pageId)}/photos`
@@ -1093,6 +1101,13 @@ export function parseFbTemplateReply(raw: string): { text: string; hashtags: str
 	return { text, hashtags: aiTags.slice(0, 8) };
 }
 
+/** Link promosi channel Telegram (BOT > Setting > Sosial & Promo). Kosong = tidak ada promosi Telegram. */
+export const tgPromoUrl = (cfg: Record<string, string>): string => {
+	const u = String(cfg.tg_channel_url || "").trim();
+	return /^https?:\/\//i.test(u) ? u : "";
+};
+const TG_PROMO_LINE = "✈️ Gabung Channel Telegram kami";
+
 /** Caption + hashtag utk template manual — link ditambahkan terpisah di bawah (bukan oleh AI). */
 async function geminiFbTemplateCaption(
 	env: Env,
@@ -1182,6 +1197,8 @@ export async function fbTemplateGenerate(
 		if (fbPageUrlTpl) parts.push(`📘 Follow Fanspage kami: ${fbPageUrlTpl}`);
 		const waChannelUrlTpl = (cfg.wa_channel_url || "").trim();
 		if (waChannelUrlTpl) parts.push(`💬 Gabung Saluran WhatsApp kami: ${waChannelUrlTpl}`);
+		const tgUrlTpl = tgPromoUrl(cfg);
+		if (tgUrlTpl) parts.push(`${TG_PROMO_LINE}: ${tgUrlTpl}`);
 		if (hashtags.length) parts.push(hashtags.join(" "));
 		const caption = parts.join("\n\n");
 		// Simpan hasilnya (bukan cuma tandai selesai) supaya bisa "dibuka lagi" dari Riwayat.
@@ -1340,6 +1357,14 @@ export async function newsProcessOne(
 			content +=
 				`\n<p style="font-size:14px;margin-top:10px">💬 Gabung Saluran WhatsApp kami: ` +
 				`<a href="${escAttr(waChannelUrl)}" rel="noopener" target="_blank"><strong>klik di sini</strong></a></p>`;
+		}
+		// Ajakan gabung Channel Telegram -- tombol biru khas Telegram; ikut tayang di Blogger & Berita Terkini (content yang sama).
+		const tgChannelUrl = tgPromoUrl(cfg);
+		if (tgChannelUrl) {
+			content +=
+				`\n<div style="margin:16px 0;padding:14px 16px;border:1px solid rgba(34,158,217,.45);border-radius:12px;background:rgba(34,158,217,.08)">` +
+				`<p style="margin:0 0 10px;font-size:14px">✈️ <strong>Update berita tercepat ada di Channel Telegram kami.</strong> Gabung sekarang, gratis, tanpa ketinggalan kabar terbaru.</p>` +
+				`<a href="${escAttr(tgChannelUrl)}" rel="noopener" target="_blank" style="display:inline-block;background:#229ED9;color:#fff;text-decoration:none;font-weight:700;font-size:14px;padding:9px 18px;border-radius:999px">Gabung Channel Telegram &raquo;</a></div>`;
 		}
 		// Promosi silang ke situs Blogger -- SELALU disisipkan (tidak digate
 		// postToBlogger) karena ini juga ikut tayang di artikel Berita Terkini
@@ -1864,6 +1889,25 @@ async function newsDaily7(env: Env): Promise<{ date: string; blogger: number; si
 	const mb = m(b), ms = m(st), mf = m(fb);
 	return days.map((date) => ({ date, blogger: mb.get(date) ?? 0, site: ms.get(date) ?? 0, fb: mf.get(date) ?? 0 }));
 }
+/** Ringkasan posting channel Telegram untuk panel BOT (jumlah hari ini, antrean, posting terakhir). */
+export async function tgChannelStats(env: Env): Promise<{ postedToday: number; queue: number; lastAt: string }> {
+	try {
+		const wib = (h: number) => new Date(Date.now() + 7 * 3600_000 - h * 3600_000).toISOString().slice(0, 19).replace("T", " ");
+		const r = await getTurso(env)
+			.prepare(
+				`SELECT SUM(CASE WHEN substr(tg_posted_at,1,10) = ? AND tg_posted_at LIKE '20%' THEN 1 ELSE 0 END) AS today,
+				        SUM(CASE WHEN tg_posted_at = '' AND site_posted_at != '' AND site_posted_at >= ? THEN 1 ELSE 0 END) AS queue,
+				        MAX(CASE WHEN tg_posted_at LIKE '20%' THEN tg_posted_at ELSE NULL END) AS last
+				 FROM news_article`,
+			)
+			.bind(todayKey(), wib(await getSys(env, "sys_tgch_max_age_h")))
+			.first<{ today: number | null; queue: number | null; last: string | null }>();
+		return { postedToday: Number(r?.today ?? 0), queue: Number(r?.queue ?? 0), lastAt: String(r?.last ?? "") };
+	} catch {
+		return { postedToday: 0, queue: 0, lastAt: "" };
+	}
+}
+
 async function siteCounts(env: Env): Promise<{ today: number; total: number }> {
 	const r = await getTurso(env)
 		.prepare(
@@ -1960,12 +2004,17 @@ export async function botNewsSnapshot(env: Env) {
 			fb_direct_daily_cap: Number(cfg.fb_direct_daily_cap || "50"),
 			fb_page_url: cfg.fb_page_url || "",
 			wa_channel_url: cfg.wa_channel_url || "",
+			tg_channel_enabled: String(cfg.tg_channel_enabled || "0") === "1",
+			tg_channel_id: cfg.tg_channel_id || "",
+			tg_channel_url: cfg.tg_channel_url || "",
+			tg_channel_last_error: cfg.tg_channel_last_error || "",
 			news_banner_enabled: String(cfg.news_banner_enabled || "0") === "1",
 			news_banner_image: cfg.news_banner_image || "",
 			news_banner_url: cfg.news_banner_url || "",
 			news_banner_text: cfg.news_banner_text || "",
 		},
 		postedToday: await postedToday(env),
+		tg: await tgChannelStats(env),
 		siteToday: site.today,
 		siteTotal: site.total,
 		fbTotal: fbTotal,
@@ -2164,6 +2213,8 @@ function fbFeedCaption(r: { title: string; excerpt: string; category: string }, 
 	if (fbPage) parts.push(`📘 Follow Fanspage kami: ${fbPage}`);
 	const wa = (cfg.wa_channel_url || "").trim();
 	if (wa) parts.push(`💬 Gabung Saluran WhatsApp kami: ${wa}`);
+	const tgUrl = tgPromoUrl(cfg);
+	if (tgUrl) parts.push(`${TG_PROMO_LINE}: ${tgUrl}`);
 	const cat = String(r.category || "").replace(/[^A-Za-z0-9]/g, "");
 	const tags = [...new Set([...(cat ? ["#" + cat.charAt(0).toUpperCase() + cat.slice(1)] : []), ...FB_TEMPLATE_EVERGREEN_HASHTAGS])].slice(0, 12);
 	if (tags.length) parts.push(tags.join(" "));
