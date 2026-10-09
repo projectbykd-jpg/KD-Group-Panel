@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { homeInsights } from "../src/api/dashboard";
 import { checkLogin } from "../src/api/auth";
 import { hashPassword } from "../src/lib/crypto";
+import { resetInsightCache } from "../src/lib/dash";
 import { resetSysCache } from "../src/lib/settings";
 import { dateKeyNow } from "../src/lib/time";
 import { fakeEnv } from "./helpers/fake-env";
@@ -16,7 +17,7 @@ const log = (ts: string, user: string, status: string) =>
 	ctx.db.prepare(`INSERT INTO activity_log (ts, username, action, status, detail, content) VALUES (?, ?, 'SEND RESULT', ?, '', '')`).run(ts, user, status);
 
 beforeEach(async () => {
-	ctx = fakeEnv(); resetSysCache();
+	ctx = fakeEnv(); resetSysCache(); resetInsightCache();
 	await addUser("Boss", "pw-boss", "ADMIN");
 	await addUser("Opr", "pw-opr", "OPERATOR");
 });
@@ -35,6 +36,37 @@ describe("Dashboard: wawasan per jam / top operator / jadwal", () => {
 		const o = (await homeInsights(ctx.env, await tok("Opr", "pw-opr"))) as { hourly: number[]; topUsers: unknown[] };
 		expect(o.hourly[9]).toBe(2); expect(o.hourly[14]).toBe(0); // hanya aktivitas Opr
 		expect(o.topUsers).toEqual([]); expect((o as unknown as { scope: string }).scope).toBe("own");
+	});
+	it("7 hari: tren harian, peta panas, kemarin jam yang sama, jenis aktivitas; operator tanpa kesehatan sistem", async () => {
+		const d = dateKeyNow();
+		const dayMs = Date.parse(d + "T00:00:00Z");
+		const key = (back: number) => new Date(dayMs - back * 86400_000).toISOString().slice(0, 10);
+		log(`${key(1)} 09:10:00`, "Opr", "BERHASIL"); log(`${key(1)} 09:20:00`, "Opr", "GAGAL");
+		log(`${key(6)} 23:59:00`, "Boss", "BERHASIL");
+		log(`${key(7)} 10:00:00`, "Boss", "BERHASIL"); // di luar 7 hari
+		log(`${d} 09:05:00`, "Opr", "BERHASIL");
+		const a = (await homeInsights(ctx.env, await tok("Boss", "pw-boss"))) as unknown as {
+			days: { date: string; n: number; f: number }[]; heat: number[][]; yHourly: number[]; actions: { action: string; n: number }[];
+			health: { openErrors: number; autoPost: boolean; activeSessions: number; maintenance: boolean; cronAgoMin: number | null } | null;
+		};
+		expect(a.days).toHaveLength(7);
+		expect(a.days[6].date).toBe(d); expect(a.days[0].date).toBe(key(6));
+		expect(a.days[5]).toMatchObject({ n: 2, f: 1 });
+		expect(a.days[0].n).toBe(1); // 23:59 hari ke-7 masuk; 10:00 hari ke-8 tidak
+		expect(a.heat[5][9]).toBe(2); expect(a.heat[0][23]).toBe(1); expect(a.heat[6][9]).toBeGreaterThanOrEqual(1);
+		expect(a.yHourly[9]).toBe(2);
+		expect(a.actions[0].action).toBe("SEND RESULT");
+		expect(a.health).toMatchObject({ openErrors: 0, autoPost: true, maintenance: false });
+		expect(a.health!.activeSessions).toBeGreaterThanOrEqual(1);
+		ctx.db.exec(`CREATE TABLE error_log (id INTEGER PRIMARY KEY, status TEXT)`);
+		ctx.db.exec(`INSERT INTO error_log (status) VALUES ('open'), ('open'), ('resolved')`);
+		resetInsightCache();
+		const a2 = (await homeInsights(ctx.env, await tok("Boss", "pw-boss"))) as unknown as { health: { openErrors: number } };
+		expect(a2.health.openErrors).toBe(2); // hanya yang berstatus open
+		resetInsightCache();
+		const o = (await homeInsights(ctx.env, await tok("Opr", "pw-opr"))) as unknown as { health: unknown; days: { n: number }[] };
+		expect(o.health).toBeNull();
+		expect(o.days[5].n).toBe(2); // milik Opr sendiri
 	});
 	it("wajib login", async () => {
 		await expect(homeInsights(ctx.env, "dg_tidak-valid")).rejects.toThrow();

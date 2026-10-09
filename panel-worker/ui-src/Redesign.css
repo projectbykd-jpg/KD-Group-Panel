@@ -1512,3 +1512,75 @@ th.ai-sel, td.ai-sel { width: 36px; padding-right: 0 !important; }
   table.stack-sm tbody td.ai-sel { grid-column: 1 / -1; width: auto !important; }
   .ai-selbar .ai-btn { flex: 1 1 auto; }
 }
+
+/* ===== Dashboard v3: KPI, pembanding kemarin, tren 7 hari, jenis aktivitas, peta jam sibuk, kesehatan sistem =====
+   Tanpa glow/blur; satu-satunya animasi = transisi tinggi batang (pendek, sudah ada). */
+.dash-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 2px 0 12px; }
+.dash-kpi { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius); background: var(--ui-surface-2); min-width: 0; }
+.dash-kpi .l { font-size: 11px; color: var(--ui-text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-kpi b { font-size: 22px; line-height: 1.15; font-weight: 700; color: var(--ui-text); font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.dash-kpi b.bad { color: var(--ui-danger); }
+.dash-delta { font-size: 11px; font-weight: 600; color: var(--ui-text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-delta.up { color: var(--ui-success); } .dash-delta.down { color: var(--ui-danger); }
+
+.dash-bars { background-image: linear-gradient(to bottom, var(--ui-line) 1px, transparent 1px); background-size: 100% 25%; background-position: 0 4px; }
+.dash-bar.future { opacity: .45; }
+.dash-bar .y { position: absolute; left: -1px; right: -1px; height: 0; border-top: 2px solid var(--ui-warning); z-index: 1; pointer-events: none; opacity: .85; }
+.dash-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; font-size: 11px; color: var(--ui-text-3); }
+.dash-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.dash-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+.dash-legend .ok { background: rgba(var(--ui-accent-rgb), .75); } .dash-legend .bad { background: var(--ui-danger); }
+.dash-legend .yday { height: 0; width: 14px; border-radius: 0; border-top: 2px solid var(--ui-warning); }
+.dash-legend .now { background: transparent; outline: 1px dashed var(--ui-line-strong); }
+
+.dash-trend { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; align-items: end; margin-top: 14px; }
+.dash-tcol { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
+.dash-tcol .bw { width: 100%; height: 130px; display: flex; flex-direction: column; justify-content: flex-end; border-bottom: 1px solid var(--ui-line); }
+.dash-tcol .bw > i { display: block; width: 100%; font-style: normal; }
+.dash-tcol .bw .ok { background: rgba(var(--ui-accent-rgb), .6); border-radius: 4px 4px 0 0; }
+.dash-tcol .bw .bad { background: var(--ui-danger); }
+.dash-tcol.today .bw .ok { background: var(--ui-accent); }
+.dash-tcol .v { font-size: 11.5px; font-weight: 700; color: var(--ui-text); font-variant-numeric: tabular-nums; }
+.dash-tcol .d { font-size: 11px; font-weight: 600; color: var(--ui-text-2); }
+.dash-tcol .dd { font-size: 10px; color: var(--ui-text-3); margin-top: -3px; }
+.dash-tcol.today .d { color: var(--ui-accent); }
+
+.dash-acts { display: flex; flex-direction: column; gap: 9px; margin-top: 14px; }
+.dash-act { display: grid; grid-template-columns: minmax(90px, 190px) minmax(0, 1fr) 38px 56px; gap: 10px; align-items: center; font-size: 12px; }
+.dash-act .n { color: var(--ui-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.dash-act .bar { height: 8px; border-radius: 99px; background: var(--ui-surface-3); overflow: hidden; }
+.dash-act .bar i { display: block; height: 100%; border-radius: 99px; background: rgba(var(--ui-accent-rgb), .8); transition: width .28s ease; }
+.dash-act .v { text-align: right; font-weight: 700; color: var(--ui-text); font-variant-numeric: tabular-nums; }
+.dash-act .f { font-size: 10.5px; font-weight: 700; color: var(--ui-danger); text-align: right; white-space: nowrap; }
+.dash-act .f.ok { color: var(--ui-text-3); font-weight: 500; }
+
+.dash-heat { display: grid; grid-template-columns: 58px repeat(24, minmax(0, 1fr)); gap: 3px; align-items: center; }
+.dash-heat .hx { font-size: 10px; color: var(--ui-text-3); text-align: center; font-variant-numeric: tabular-nums; height: 14px; }
+.dash-heat .hy { font-size: 11px; color: var(--ui-text-2); font-weight: 600; white-space: nowrap; }
+.dash-heat .hc { height: 22px; border-radius: 4px; background: var(--ui-surface-3); }
+.dash-heat .hc[data-l="1"], .dash-heat-legend i[data-l="1"] { background: rgba(var(--ui-accent-rgb), .22); }
+.dash-heat .hc[data-l="2"], .dash-heat-legend i[data-l="2"] { background: rgba(var(--ui-accent-rgb), .45); }
+.dash-heat .hc[data-l="3"], .dash-heat-legend i[data-l="3"] { background: rgba(var(--ui-accent-rgb), .7); }
+.dash-heat .hc[data-l="4"], .dash-heat-legend i[data-l="4"] { background: var(--ui-accent); }
+.dash-heat .hc.future { opacity: .4; }
+.dash-heat .hc.now { outline: 1px dashed var(--ui-text-2); outline-offset: 1px; }
+.dash-heat-legend { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--ui-text-3); }
+.dash-heat-legend i { display: inline-block; width: 16px; height: 10px; border-radius: 3px; background: var(--ui-surface-3); }
+
+.dash-health { display: flex; flex-direction: column; margin-top: 10px; }
+.dash-hrow { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--ui-line); font-size: 12.5px; }
+.dash-hrow:last-child { border-bottom: 0; }
+.dash-hrow .n { color: var(--ui-text-2); } .dash-hrow b { color: var(--ui-text); font-variant-numeric: tabular-nums; }
+.dash-hrow .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ui-text-3); }
+.dash-hrow .dot.ok { background: var(--ui-success); } .dash-hrow .dot.warn { background: var(--ui-warning); } .dash-hrow .dot.bad { background: var(--ui-danger); }
+.dash-hrow.link { cursor: pointer; } .dash-hrow.link:hover .n { color: var(--ui-text); }
+
+@media (max-width: 900px) {
+  .dash-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dash-act { grid-template-columns: minmax(70px, 120px) minmax(0, 1fr) 32px; } .dash-act .f { display: none; }
+}
+@media (max-width: 640px) {
+  .dash-heat { grid-template-columns: 44px repeat(24, minmax(0, 1fr)); gap: 2px; }
+  .dash-heat .hc { height: 16px; border-radius: 3px; }
+  .dash-tcol .bw { height: 100px; }
+}

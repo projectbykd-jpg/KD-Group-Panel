@@ -742,19 +742,87 @@
     function renderHomeInsights(d) {
       if (!d || !d.success) return;
       const sc = document.getElementById('homeHourlyScope'); if (sc) sc.textContent = d.scope === 'all' ? 'Total semua user' : 'Akun Anda';
-      const sig = JSON.stringify([d.scope, d.hourly, d.hourlyFailed, d.topUsers, d.schedule, d.closing, Math.floor((d.nowMinutes || 0) / 5)]);
+      const sig = JSON.stringify([d.scope, d.hourly, d.hourlyFailed, d.topUsers, d.schedule, d.closing, Math.floor((d.nowMinutes || 0) / 5), d.days, d.heat, d.yHourly, d.actions, d.health]);
       if (sig === homeInsightsSig) return; // tidak ada yang berubah -> jangan gambar ulang
       homeInsightsSig = sig;
       const nowH = Math.floor((d.nowMinutes || 0) / 60);
       const max = Math.max(1, ...d.hourly);
+      const yH = d.yHourly || Array(24).fill(0);
       const bars = document.getElementById('homeHourly');
+      const barMax = Math.max(1, ...d.hourly, ...yH);
       if (bars) bars.innerHTML = d.hourly.map((n, h) => {
-        const bad = d.hourlyFailed[h] || 0, ok = Math.max(0, n - bad);
-        const ph = n ? Math.max(6, Math.round(n * 100 / max)) : 0;           // tinggi total (%)
+        const bad = d.hourlyFailed[h] || 0;
+        const ph = n ? Math.max(6, Math.round(n * 100 / barMax)) : 0;        // tinggi total (%)
         const badPct = n ? Math.round(bad * 100 / n) : 0;
-        return `<div class="dash-bar ${n ? '' : 'empty'} ${h === nowH ? 'now' : ''}" title="${String(h).padStart(2, '0')}:00 — ${n} aktivitas${bad ? ', ' + bad + ' gagal' : ''}">
-          <i class="bad" style="height:${ph * badPct / 100}%"></i><i class="ok" style="height:${ph - ph * badPct / 100}%"></i></div>`;
+        const yp = yH[h] ? Math.max(4, Math.round(yH[h] * 100 / barMax)) : 0; // penanda kemarin
+        return `<div class="dash-bar ${n ? '' : 'empty'} ${h === nowH ? 'now' : ''} ${h > nowH ? 'future' : ''}" title="${String(h).padStart(2, '0')}:00 — ${n} aktivitas${bad ? ', ' + bad + ' gagal' : ''} · kemarin ${yH[h] || 0}">
+          ${yp ? `<s class="y" style="bottom:${yp}%"></s>` : ''}<i class="bad" style="height:${ph * badPct / 100}%"></i><i class="ok" style="height:${ph - ph * badPct / 100}%"></i></div>`;
       }).join('');
+      // Ringkasan KPI: hari ini vs kemarin SAMPAI JAM YANG SAMA (bukan kemarin sehari penuh -- itu menyesatkan)
+      const sumTo = (a, h) => a.slice(0, h + 1).reduce((x, y) => x + y, 0);
+      const tot = d.hourly.reduce((x, y) => x + y, 0), failed = d.hourlyFailed.reduce((x, y) => x + y, 0);
+      const yTo = sumTo(yH, nowH), tTo = sumTo(d.hourly, nowH);
+      let peak = 0; d.hourly.forEach((n, h) => { if (n > d.hourly[peak]) peak = h; });
+      const active = d.hourly.filter(n => n > 0).length;
+      let delta = '<span class="dash-delta flat">tanpa pembanding</span>';
+      if (yTo > 0) {
+        const pc = Math.round((tTo - yTo) * 100 / yTo);
+        delta = `<span class="dash-delta ${pc > 0 ? 'up' : pc < 0 ? 'down' : 'flat'}">${pc > 0 ? '▲ +' : pc < 0 ? '▼ ' : '● '}${pc}% vs kemarin</span>`;
+      }
+      const rate = tot ? Math.round(failed * 100 / tot) : 0;
+      const kp = document.getElementById('homeKpis');
+      if (kp) kp.innerHTML =
+        `<div class="dash-kpi"><span class="l">Aktivitas hari ini</span><b>${tot}</b>${delta}</div>` +
+        `<div class="dash-kpi"><span class="l">Gagal</span><b class="${failed ? 'bad' : ''}">${failed}</b><span class="dash-delta ${failed ? 'down' : 'up'}">${tot ? rate + '% dari total' : 'belum ada aktivitas'}</span></div>` +
+        `<div class="dash-kpi"><span class="l">Jam tersibuk</span><b>${tot ? String(peak).padStart(2, '0') + ':00' : '–'}</b><span class="dash-delta flat">${tot ? d.hourly[peak] + ' aktivitas' : '—'}</span></div>` +
+        `<div class="dash-kpi"><span class="l">Rata-rata / jam aktif</span><b>${active ? (tot / active).toFixed(1).replace('.', ',') : '–'}</b><span class="dash-delta flat">${active} jam berjalan</span></div>`;
+      // Tren 7 hari
+      const DN = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+      const days = d.days || [];
+      const dMax = Math.max(1, ...days.map(x => x.n));
+      const tr = document.getElementById('homeTrend');
+      if (tr) tr.innerHTML = days.map((x, i) => {
+        const dt = new Date(x.date + 'T00:00:00Z');
+        const h = x.n ? Math.max(5, Math.round(x.n * 100 / dMax)) : 0, bp = x.n ? Math.round(x.f * 100 / x.n) : 0;
+        return `<div class="dash-tcol ${i === days.length - 1 ? 'today' : ''}" title="${x.date} — ${x.n} aktivitas${x.f ? ', ' + x.f + ' gagal' : ''}">
+          <span class="v">${x.n}</span><div class="bw"><i class="bad" style="height:${h * bp / 100}%"></i><i class="ok" style="height:${h - h * bp / 100}%"></i></div>
+          <span class="d">${DN[dt.getUTCDay()]}</span><span class="dd">${String(dt.getUTCDate()).padStart(2, '0')}</span></div>`;
+      }).join('');
+      const ts = document.getElementById('homeTrendSum');
+      if (ts) { const s7 = days.reduce((a, x) => a + x.n, 0); ts.textContent = s7 ? s7 + ' aktivitas · rata-rata ' + Math.round(s7 / Math.max(1, days.filter(x => x.n).length)) + ' per hari aktif' : 'Belum ada data.'; }
+      // Jenis aktivitas
+      const acts = d.actions || [], aMax = Math.max(1, ...acts.map(x => x.n));
+      const ab = document.getElementById('homeActions');
+      if (ab) ab.innerHTML = acts.map(x => `<div class="dash-act"><span class="n" title="${escapeHtml(x.action)}">${escapeHtml(x.action)}</span>
+          <div class="bar"><i style="width:${Math.max(3, Math.round(x.n * 100 / aMax))}%"></i></div><span class="v">${x.n}</span>${x.f ? `<span class="f" title="${x.f} gagal">${x.f} gagal</span>` : '<span class="f ok">—</span>'}</div>`).join('') || '<div class="home-activity-empty">Belum ada aktivitas hari ini.</div>';
+      // Peta panas 7 hari x 24 jam
+      const heat = d.heat || [], hMax = Math.max(1, ...heat.map(r => Math.max(...r)));
+      const hb = document.getElementById('homeHeat');
+      if (hb) {
+        let html = '<div class="hx"></div>' + Array.from({ length: 24 }, (_, h) => `<div class="hx">${h % 3 === 0 ? String(h).padStart(2, '0') : ''}</div>`).join('');
+        heat.forEach((row, di) => {
+          const dt = new Date((days[di] || {}).date + 'T00:00:00Z');
+          html += `<div class="hy">${DN[dt.getUTCDay()]} ${String(dt.getUTCDate()).padStart(2, '0')}</div>` + row.map((n, h) => {
+            const lv = n ? Math.max(1, Math.ceil(4 * n / hMax)) : 0, isNow = di === heat.length - 1 && h === nowH, fut = di === heat.length - 1 && h > nowH;
+            return `<div class="hc ${isNow ? 'now' : ''} ${fut ? 'future' : ''}" data-l="${lv}" title="${DN[dt.getUTCDay()]} ${String(dt.getUTCDate()).padStart(2, '0')} · ${String(h).padStart(2, '0')}:00 — ${n} aktivitas"></div>`;
+          }).join('');
+        });
+        hb.innerHTML = html;
+      }
+      // Kesehatan sistem (admin)
+      const hc = document.getElementById('homeHealthCard'), hl = document.getElementById('homeHealth');
+      const hz = d.health;
+      if (hc) hc.hidden = !hz;
+      if (hz && hl) {
+        const row = (st, label, val, extra) => `<div class="dash-hrow ${extra ? 'link' : ''}" ${extra ? `onclick="${extra}" role="button" tabindex="0"` : ''}><span class="dot ${st}"></span><span class="n">${label}</span><b>${val}</b></div>`;
+        const cr = hz.cronAgoMin;
+        hl.innerHTML =
+          row(cr == null ? 'warn' : cr <= 5 ? 'ok' : cr <= 15 ? 'warn' : 'bad', 'Cron terakhir jalan', cr == null ? 'belum ada' : (cr === 0 ? 'baru saja' : cr + ' mnt lalu')) +
+          row(hz.autoPost ? 'ok' : 'warn', 'Auto Posting', hz.autoPost ? 'AKTIF' : 'MATI') +
+          row(hz.openErrors ? 'bad' : 'ok', 'Error terbuka', hz.openErrors ? hz.openErrors + ' — lihat' : 'tidak ada', "switchPage('admin');switchAdminPanel('errors')") +
+          row('ok', 'User login aktif', hz.activeSessions) +
+          row(hz.maintenance ? 'warn' : 'ok', 'Mode maintenance', hz.maintenance ? 'AKTIF' : 'mati');
+      }
       // Jadwal: sesi + kata penutup, urut jam; yang sudah lewat = selesai, pertama yang belum = berikutnya
       const items = (d.schedule || []).map(x => ({ jam: x.jam, nama: x.nama, kind: 'slot', total: x.total }))
         .concat((d.closing || []).map(j => ({ jam: j, nama: 'Kata-kata penutup', kind: 'close' })))
