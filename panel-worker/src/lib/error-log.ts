@@ -16,6 +16,13 @@ import { tsNow } from "./time";
 
 export type ErrSource = "api" | "cron" | "browser" | "toto" | "auto-input" | "lainnya";
 export type ErrStatus = "open" | "resolved" | "ignored";
+/** blocking = muncul saat user menjalankan aksi (API/tampilan) -> prioritas perbaikan; background = proses terjadwal di latar. */
+export type ErrImpact = "blocking" | "background";
+export const ERR_IMPACTS: readonly ErrImpact[] = ["blocking", "background"];
+/** Bawaan dampak per sumber: API & browser dialami user langsung; cron/Toto/auto-input berjalan di latar. */
+export function defaultImpact(source: string): ErrImpact {
+	return source === "api" || source === "browser" ? "blocking" : "background";
+}
 export const ERR_SOURCES: readonly ErrSource[] = ["api", "cron", "browser", "toto", "auto-input", "lainnya"];
 export const ERR_STATUSES: readonly ErrStatus[] = ["open", "resolved", "ignored"];
 
@@ -27,6 +34,7 @@ export interface ErrInput {
 	username?: string;
 	site?: string;
 	level?: "error" | "warn";
+	impact?: ErrImpact; // kosong = bawaan menurut sumber
 }
 
 export interface ErrRow {
@@ -44,8 +52,12 @@ export interface ErrRow {
 	first_at: string;
 	last_at: string;
 	status: string;
+	impact: string; // blocking | background (baris lama tanpa penanda diturunkan dari sumbernya)
+	users_seen: string; // nama user terdampak dipisah koma
+	users: number; // jumlah user berbeda yang terdampak
 }
 
+const USERS_CAP = 400; // panjang maksimum daftar user per baris
 const MSG_MAX = 400;
 const DETAIL_MAX = 1800;
 
@@ -136,6 +148,10 @@ async function ensureTable(env: Env): Promise<void> {
 			status TEXT NOT NULL DEFAULT 'open'
 		)`,
 	).run();
+	// Tabel produksi sudah ada tanpa kolom ini: CREATE TABLE IF NOT EXISTS tidak menambah kolom, jadi ALTER (abaikan bila sudah ada).
+	for (const col of [`impact TEXT NOT NULL DEFAULT ''`, `users_seen TEXT NOT NULL DEFAULT ''`]) {
+		await env.DB.prepare(`ALTER TABLE error_log ADD COLUMN ${col}`).run().catch(() => {});
+	}
 	await env.DB.prepare(`CREATE INDEX IF NOT EXISTS ix_error_log_last ON error_log (last_at)`).run();
 	ready.add(env.DB);
 }
@@ -217,16 +233,19 @@ export async function recordError(env: Env, input: ErrInput, opts: { force?: boo
 		await ensureTable(env);
 		let alertKind = "";
 		let skip: RecordResult["alert"] = "";
-		const st = await alertState(env, force).catch(() => "jeda" as const);
+		const impact: ErrImpact = ERR_IMPACTS.includes(input.impact as ErrImpact) ? (input.impact as ErrImpact) : defaultImpact(source);
+		// Telegram hanya untuk galat yang MENGHAMBAT user; yang di latar cukup tampil di menu (tidak membanjiri chat).
+		const st = impact === "blocking" ? await alertState(env, force).catch(() => "jeda" as const) : ("latar" as const);
 		if (st === "ok") {
 			const prev = await env.DB.prepare(`SELECT status FROM error_log WHERE fp = ?`).bind(fp).first<{ status: string }>();
 			if (!prev) alertKind = "baru";
 			else if (prev.status === "resolved") alertKind = "muncul lagi";
-		} else skip = st;
+		} else if (st !== "latar") skip = st;
 		const ts = tsNow();
+		const who = scrub(input.username ?? "", 60).replace(/[,\s]+/g, "_");
 		await env.DB.prepare(
-			`INSERT INTO error_log (fp, source, level, message, detail, loc, username, site, count, reopened, first_at, last_at, status)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, 'open')
+			`INSERT INTO error_log (fp, source, level, message, detail, loc, username, site, count, reopened, first_at, last_at, status, impact, users_seen)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, 'open', ?, ?)
 			 ON CONFLICT(fp) DO UPDATE SET
 				count = count + 1,
 				last_at = excluded.last_at,
@@ -234,7 +253,14 @@ export async function recordError(env: Env, input: ErrInput, opts: { force?: boo
 				username = CASE WHEN excluded.username != '' THEN excluded.username ELSE username END,
 				site = CASE WHEN excluded.site != '' THEN excluded.site ELSE site END,
 				reopened = reopened + CASE WHEN status = 'resolved' THEN 1 ELSE 0 END,
-				status = CASE WHEN status = 'resolved' THEN 'open' ELSE status END`,
+				status = CASE WHEN status = 'resolved' THEN 'open' ELSE status END,
+				impact = CASE WHEN impact = '' THEN excluded.impact ELSE impact END,
+				users_seen = CASE
+					WHEN excluded.users_seen = '' THEN users_seen
+					WHEN instr(',' || users_seen || ',', ',' || excluded.users_seen || ',') > 0 THEN users_seen
+					WHEN users_seen = '' THEN excluded.users_seen
+					WHEN length(users_seen) >= ${USERS_CAP} THEN users_seen
+					ELSE users_seen || ',' || excluded.users_seen END`,
 		)
 			.bind(
 				fp,
@@ -247,6 +273,8 @@ export async function recordError(env: Env, input: ErrInput, opts: { force?: boo
 				scrub(input.site ?? "", 60),
 				ts,
 				ts,
+				impact,
+				who,
 			)
 			.run();
 		let result: RecordResult = { alert: "" };
@@ -271,7 +299,7 @@ export async function recordTestError(env: Env): Promise<RecordResult> {
 	} catch {
 		/* dicatat saja */
 	}
-	return recordError(env, { source: "lainnya", loc: "uji-galat", level: "warn", message: "UJI galat palsu dari admin — aman dihapus", detail: "Dibuat oleh tombol Uji Galat Palsu di Admin > Error & Bug." }, { force: true });
+	return recordError(env, { source: "lainnya", loc: "uji-galat", level: "warn", impact: "blocking", message: "UJI galat palsu dari admin — aman dihapus", detail: "Dibuat oleh tombol Uji Galat Palsu di Admin > Error & Bug." }, { force: true });
 }
 
 async function capRows(env: Env): Promise<void> {
@@ -285,11 +313,13 @@ async function capRows(env: Env): Promise<void> {
 
 export interface ErrList {
 	rows: ErrRow[];
-	counts: { open: number; resolved: number; ignored: number; total: number };
+	counts: { open: number; resolved: number; ignored: number; total: number; blocking: number };
 	retentionDays: number;
 }
 
-export async function listErrors(env: Env, opts: { status?: string; source?: string; limit?: number } = {}): Promise<ErrList> {
+const BLOCKING_SQL = `(impact = 'blocking' OR (impact = '' AND source IN ('api','browser')))`;
+
+export async function listErrors(env: Env, opts: { status?: string; source?: string; impact?: string; limit?: number } = {}): Promise<ErrList> {
 	await ensureTable(env);
 	const where: string[] = [];
 	const args: unknown[] = [];
@@ -301,22 +331,30 @@ export async function listErrors(env: Env, opts: { status?: string; source?: str
 		where.push("source = ?");
 		args.push(opts.source);
 	}
+	if (opts.impact === "blocking") where.push(BLOCKING_SQL);
+	else if (opts.impact === "background") where.push(`NOT ${BLOCKING_SQL}`);
 	const limit = Math.min(500, Math.max(1, Math.floor(opts.limit ?? 300)));
 	const rows = await env.DB.prepare(
-		`SELECT id, fp, source, level, message, detail, loc, username, site, count, reopened, first_at, last_at, status
+		`SELECT id, fp, source, level, message, detail, loc, username, site, count, reopened, first_at, last_at, status, impact, users_seen
 		 FROM error_log ${where.length ? "WHERE " + where.join(" AND ") : ""}
-		 ORDER BY (status='open') DESC, last_at DESC LIMIT ?`,
+		 ORDER BY (status='open') DESC, ${BLOCKING_SQL} DESC, last_at DESC LIMIT ?`,
 	)
 		.bind(...args, limit)
 		.all<ErrRow>();
-	const c = await env.DB.prepare(`SELECT status, COUNT(*) n FROM error_log GROUP BY status`).all<{ status: string; n: number }>();
-	const counts = { open: 0, resolved: 0, ignored: 0, total: 0 };
+	const c = await env.DB.prepare(`SELECT status, COUNT(*) n, SUM(CASE WHEN ${BLOCKING_SQL} THEN 1 ELSE 0 END) b FROM error_log GROUP BY status`).all<{ status: string; n: number; b: number }>();
+	const counts = { open: 0, resolved: 0, ignored: 0, total: 0, blocking: 0 };
 	for (const r of c.results ?? []) {
 		const n = Number(r.n) || 0;
 		if (r.status === "open" || r.status === "resolved" || r.status === "ignored") counts[r.status] = n;
 		counts.total += n;
+		if (r.status === "open") counts.blocking = Number(r.b) || 0;
 	}
-	return { rows: rows.results ?? [], counts, retentionDays: await getSys(env, "sys_errorlog_days") };
+	const out = (rows.results ?? []).map((r) => {
+		const names = String(r.users_seen || "").split(",").filter(Boolean);
+		const impact = r.impact === "blocking" || r.impact === "background" ? r.impact : defaultImpact(r.source);
+		return { ...r, impact, users: names.length || (r.username ? 1 : 0) };
+	});
+	return { rows: out, counts, retentionDays: await getSys(env, "sys_errorlog_days") };
 }
 
 function cleanIds(ids: unknown): number[] {

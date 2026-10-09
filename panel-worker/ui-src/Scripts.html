@@ -5677,7 +5677,7 @@
 
     // ================= ADMIN > ERROR & BUG =================
     const ERR_SRC = { api: 'API', cron: 'CRON', browser: 'BROWSER', toto: 'TOTO MACAU', 'auto-input': 'AUTO PREDIKSI', lainnya: 'LAIN' };
-    const errState = { rows: [], counts: { open: 0, resolved: 0, ignored: 0, total: 0 }, status: 'open', source: '', sel: new Set(), days: 14, loading: false };
+    const errState = { rows: [], counts: { open: 0, resolved: 0, ignored: 0, total: 0, blocking: 0 }, status: 'open', source: '', impact: '', sel: new Set(), days: 14, loading: false };
     function errLoad(force) {
       if (errState.loading) return;
       errState.loading = true;
@@ -5693,18 +5693,20 @@
       }).withFailureHandler(e => {
         errState.loading = false;
         if (meta) meta.textContent = 'Gagal memuat: ' + ((e && e.message) || e);
-      }).adminErrorList(currentSessionToken, { status: errState.status === 'all' ? '' : errState.status, source: errState.source });
+      }).adminErrorList(currentSessionToken, { status: errState.status === 'all' ? '' : errState.status, source: errState.source, impact: errState.impact });
     }
     function errSetStatus(s) { errState.status = s; errState.sel.clear(); errLoad(true); }
+    function errSetImpact(s) { errState.impact = s; errState.sel.clear(); errLoad(true); }
     function errSetSource(s) { errState.source = s; errState.sel.clear(); errLoad(true); }
     function errPaint() {
       const c = errState.counts;
       const badge = document.getElementById('errTabBadge');
-      if (badge) { badge.hidden = !c.open; badge.textContent = c.open > 99 ? '99+' : String(c.open); badge.classList.toggle('bad', c.open > 0); }
+      if (badge) { const bn = c.blocking || 0; badge.hidden = !bn; badge.textContent = bn > 99 ? '99+' : String(bn); badge.classList.toggle('bad', bn > 0); }
       const chips = document.getElementById('errChips');
       if (chips) {
         const chip = (k, label, n, bad) => `<button type="button" class="ai-chip${errState.status === k ? ' active' : ''}${bad && n ? ' bad' : ''}" onclick="errSetStatus('${k}')">${label} <b>${n}</b></button>`;
-        chips.innerHTML = chip('open', 'Terbuka', c.open, true) + chip('resolved', 'Selesai', c.resolved) + chip('ignored', 'Diabaikan', c.ignored) + chip('all', 'Semua', c.total);
+        const bl = c.blocking ? ` <span class="ai-pill warn" title="Galat terbuka yang menghambat user">${c.blocking} menghambat</span>` : '';
+        chips.innerHTML = chip('open', 'Terbuka', c.open, true) + chip('resolved', 'Selesai', c.resolved) + chip('ignored', 'Diabaikan', c.ignored) + chip('all', 'Semua', c.total) + bl;
       }
       const meta = document.getElementById('errMeta');
       if (meta) meta.textContent = errState.rows.length + ' catatan ditampilkan · disimpan ' + errState.days + ' hari';
@@ -5716,6 +5718,9 @@
         list.innerHTML = errState.rows.map(r => {
           const src = ERR_SRC[r.source] || String(r.source || '').toUpperCase();
           const st = r.status === 'open' ? '' : ` <span class="ai-pill ${r.status === 'resolved' ? 'ok' : ''}">${r.status === 'resolved' ? 'SELESAI' : 'DIABAIKAN'}</span>`;
+          const blk = r.impact === 'blocking';
+          const imp = blk ? '<span class="ai-pill warn" title="Muncul saat user menjalankan aksi: prioritas perbaikan">MENGHAMBAT</span> ' : '<span class="ai-pill" title="Terjadi di proses latar belakang, tidak langsung dialami user">LATAR</span> ';
+          const usr = r.users > 0 ? ` <span class="ai-badge" title="Jumlah user berbeda yang terdampak">${r.users} user</span>` : '';
           const re = r.reopened ? ` <span class="ai-pill warn" title="Ditandai selesai tetapi muncul lagi">MUNCUL LAGI ×${r.reopened}</span>` : '';
           const btns = (r.status === 'open'
             ? `<button class="ai-btn" onclick="errSet([${r.id}],'resolved')"><i class="fa-solid fa-check"></i>Selesai</button><button class="ai-btn" onclick="errSet([${r.id}],'ignored')"><i class="fa-solid fa-eye-slash"></i>Abaikan</button>`
@@ -5723,13 +5728,14 @@
             + `<button class="ai-btn danger" onclick="errDelete([${r.id}])"><i class="fa-solid fa-trash"></i>Hapus</button>`;
           return `<details class="ai-fold" data-eid="${r.id}">
             <summary><input type="checkbox" class="ai-chk" ${errState.sel.has(r.id) ? 'checked' : ''} onclick="event.stopPropagation()" onchange="errToggle(${r.id},this.checked)" aria-label="Pilih">
-              <span class="ai-pill ${r.level === 'warn' ? 'warn' : ''}">${escapeHtml(src)}</span>
+              ${imp}<span class="ai-pill ${r.level === 'warn' ? 'warn' : ''}">${escapeHtml(src)}</span>
               <span style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.message)}</span>
-              <span class="ai-badge ${r.status === 'open' ? 'bad' : ''}" title="Jumlah kejadian">${r.count}×</span></summary>
+              <span class="ai-badge ${r.status === 'open' ? 'bad' : ''}" title="Jumlah kejadian">${r.count}×</span>${usr}</summary>
             <div class="ai-help" style="display:flex;flex-direction:column;gap:6px">
               <div>${st}${re}</div>
               <div><b>Pesan:</b> ${escapeHtml(r.message)}</div>
               <div><b>Lokasi:</b> ${escapeHtml(r.loc || '-')}${r.site ? ' · website ' + escapeHtml(r.site) : ''}${r.username ? ' · user ' + escapeHtml(r.username) : ''}</div>
+              <div><b>Dampak:</b> ${blk ? 'menghambat user' : 'proses latar belakang'}${r.users > 0 ? ' · ' + r.users + ' user terdampak' + (r.users_seen ? ' (' + escapeHtml(String(r.users_seen).split(',').slice(0, 8).join(', ')) + (r.users > 8 ? ', …' : '') + ')' : '') : ''}</div>
               <div><b>Pertama:</b> ${escapeHtml(r.first_at)} · <b>Terakhir:</b> ${escapeHtml(r.last_at)} · <b>Jumlah:</b> ${r.count}×</div>
               ${r.detail ? `<pre style="white-space:pre-wrap;word-break:break-word;font-size:10.5px;max-height:220px;overflow:auto;margin:0;padding:8px;border-radius:8px;background:var(--ui-surface-2)">${escapeHtml(r.detail)}</pre>` : ''}
               <div class="ai-selbar">${btns}</div>
@@ -5782,19 +5788,21 @@
     }
     // Teks laporan untuk ditempel ke Claude: yang dipilih, kalau tidak ada = semua galat TERBUKA yang tampil.
     function errReportText(rows, openTotal) {
-      const head = ['LAPORAN ERROR & BUG — KD-Group Panel', 'Dibuat: ' + new Date().toLocaleString('id-ID') + ' (waktu browser)', 'Ditampilkan ' + rows.length + ' dari ' + openTotal + ' galat terbuka. Format: [no] (sumber) lokasi — jumlah kejadian', ''];
+      const head = ['LAPORAN ERROR & BUG — KD-Group Panel', 'Dibuat: ' + new Date().toLocaleString('id-ID') + ' (waktu browser)', 'Ditampilkan ' + rows.length + ' dari ' + openTotal + ' galat terbuka. Urut prioritas: yang MENGHAMBAT user dulu. Format: [no] dampak (sumber) lokasi — jumlah kejadian — user terdampak', ''];
       const body = rows.map((r, i) => [
-        `[${i + 1}] (${r.source}) ${r.loc || '-'} — ${r.count}× — pertama ${r.first_at}, terakhir ${r.last_at}${r.site ? ' — website ' + r.site : ''}${r.username ? ' — user ' + r.username : ''}${r.reopened ? ' — MUNCUL LAGI setelah ditandai selesai ×' + r.reopened : ''}`,
+        `[${i + 1}] ${r.impact === 'blocking' ? 'MENGHAMBAT' : 'LATAR'} (${r.source}) ${r.loc || '-'} — ${r.count}×${r.users ? ' — ' + r.users + ' user terdampak' : ''} — pertama ${r.first_at}, terakhir ${r.last_at}${r.site ? ' — website ' + r.site : ''}${r.username ? ' — user ' + r.username : ''}${r.reopened ? ' — MUNCUL LAGI setelah ditandai selesai ×' + r.reopened : ''}`,
         'Pesan: ' + r.message,
         r.detail ? 'Detail:\n' + r.detail : '', ''
       ].filter(x => x !== '').join('\n') + '\n');
       return head.concat(body).join('\n').slice(0, 30000);
     }
-    function errCopyReport() {
-      const picked = errState.rows.filter(r => errState.sel.has(r.id));
-      const rows = picked.length ? picked : errState.rows.filter(r => r.status === 'open');
-      if (!rows.length) { toast('Tidak ada galat terbuka untuk disalin'); return; }
-      const text = errReportText(rows.slice(0, 40), picked.length ? picked.length : errState.counts.open);
+    // onlyBlocking = hanya galat terbuka yang menghambat user, diurutkan dari yang paling banyak mengenai user/kejadian.
+    function errCopyReport(onlyBlocking) {
+      const picked = onlyBlocking ? [] : errState.rows.filter(r => errState.sel.has(r.id));
+      let rows = picked.length ? picked : errState.rows.filter(r => r.status === 'open' && (!onlyBlocking || r.impact === 'blocking'));
+      if (onlyBlocking) rows = rows.slice().sort((a, b) => (b.users - a.users) || (b.count - a.count));
+      if (!rows.length) { toast(onlyBlocking ? 'Tidak ada galat terbuka yang menghambat user. Bagus.' : 'Tidak ada galat terbuka untuk disalin'); return; }
+      const text = errReportText(rows.slice(0, 40), picked.length ? picked.length : (onlyBlocking ? rows.length : errState.counts.open));
       const fallback = () => {
         const ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;left:-9999px;top:0';
         document.body.appendChild(ta); ta.select();

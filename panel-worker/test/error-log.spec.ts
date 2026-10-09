@@ -349,3 +349,67 @@ describe("pengaman notifikasi Telegram: grup naik jadi supergroup & kegagalan te
 		expect(activity()).toHaveLength(0);
 	});
 });
+
+describe("dampak galat: menghambat user vs latar belakang", () => {
+	const sent: string[] = [];
+	beforeEach(async () => {
+		sent.length = 0;
+		vi.stubGlobal("fetch", async (_u: string, init: { body: URLSearchParams }) => {
+			sent.push(init.body.toString());
+			return new Response("{}", { status: 200 });
+		});
+		await saveIntegrations(ctx.env, { int_alert_tg_token: "123456789:AAEhBOweik6ad9r_QXMENQjcrEZhGbbpR_H", int_alert_tg_chat: "123456789" });
+		resetIntegrationsCache();
+	});
+	afterEach(() => vi.unstubAllGlobals());
+
+	it("bawaan menurut sumber; yang menghambat tampil lebih dulu walau lebih lama", async () => {
+		await recordError(ctx.env, { source: "api", loc: "a", message: "galat api lama D1_ERROR" });
+		await recordError(ctx.env, { source: "cron", loc: "c", message: "galat cron terbaru" });
+		await recordError(ctx.env, { source: "browser", loc: "b", message: "galat browser" });
+		const l = await listErrors(ctx.env, {});
+		expect(l.rows.map((r) => r.impact)).toEqual(["blocking", "blocking", "background"]);
+		expect(l.rows[2].source).toBe("cron");
+		expect(l.counts.blocking).toBe(2);
+		expect((await listErrors(ctx.env, { impact: "blocking" })).rows).toHaveLength(2);
+		expect((await listErrors(ctx.env, { impact: "background" })).rows.map((r) => r.source)).toEqual(["cron"]);
+	});
+	it("Telegram hanya untuk yang menghambat", async () => {
+		const bg = await recordError(ctx.env, { source: "cron", loc: "c", message: "cron mati" });
+		expect(bg.alert).toBe("");
+		expect(sent).toHaveLength(0);
+		const bl = await recordError(ctx.env, { source: "api", loc: "a", message: "api mati" });
+		expect(bl.alert).toBe("terkirim");
+		expect(sent).toHaveLength(1);
+	});
+	it("user terdampak dihitung unik, tanpa duplikat & tanpa merusak nama mirip", async () => {
+		for (const u of ["budi", "budi", "bud", "sari", ""]) {
+			resetErrorThrottle();
+			await recordError(ctx.env, { source: "browser", loc: "p", message: "render gagal", username: u });
+		}
+		const r = (await listErrors(ctx.env, {})).rows[0];
+		expect(r.count).toBe(5);
+		expect(r.users).toBe(3); // budi, bud, sari ("bud" bukan bagian dari "budi")
+		expect(r.users_seen).toBe("budi,bud,sari");
+	});
+	it("baris lama tanpa penanda diturunkan dari sumbernya; daftar user dibatasi", async () => {
+		await rec("pemicu buat tabel");
+		ctx.db.prepare(`INSERT INTO error_log (fp, source, message, first_at, last_at, username) VALUES ('old1','toto','lama','2026-10-01 00:00:00','2026-10-01 00:00:00','x')`).run();
+		const l = await listErrors(ctx.env, {});
+		const old = l.rows.find((r) => r.fp === "old1")!;
+		expect(old).toMatchObject({ impact: "background", users: 1 });
+		for (let i = 0; i < 80; i++) {
+			resetErrorThrottle();
+			await recordError(ctx.env, { source: "api", loc: "z", message: "banyak user", username: "pengguna" + i });
+		}
+		const big = (await listErrors(ctx.env, {})).rows.find((r) => r.loc === "z")!;
+		expect(big.users_seen.length).toBeLessThan(460);
+	});
+	it("API admin meneruskan filter dampak", async () => {
+		await recordError(ctx.env, { source: "cron", loc: "c", message: "cron" });
+		const boss = await addUser("Boss", "ADMIN");
+		const r = await adminErrorList(ctx.env, boss, { impact: "background" });
+		expect(r.rows).toHaveLength(1);
+		expect((await adminErrorList(ctx.env, boss, { impact: "blocking" })).rows).toHaveLength(0);
+	});
+});

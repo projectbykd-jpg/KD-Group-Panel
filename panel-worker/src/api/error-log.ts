@@ -7,7 +7,7 @@ import { deleteErrors, deliverAlert, listErrors, recordError, recordTestError, s
 export async function adminErrorList(env: Env, token: string, options: unknown) {
 	await requireSession(env, token, { admin: true, ignoreMaintenance: true });
 	const o = (options && typeof options === "object" ? options : {}) as Record<string, unknown>;
-	const out = await listErrors(env, { status: String(o.status ?? ""), source: String(o.source ?? "") });
+	const out = await listErrors(env, { status: String(o.status ?? ""), source: String(o.source ?? ""), impact: String(o.impact ?? "") });
 	return { success: true, ...out };
 }
 
