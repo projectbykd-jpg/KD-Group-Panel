@@ -4380,7 +4380,7 @@
       if (d) {
         const bad = (d.rows || []).filter(r => r.status === 'CONFLICT' || r.status === 'FAILED').length;
         const trgAge = d.dispatchAt ? Math.round((Date.now() - Date.parse(String(d.dispatchAt).replace(' ', 'T') + '+07:00')) / 60000) : null;
-        const trgBad = d.mode > 0 && (trgAge === null || trgAge > 45);
+        const trgBad = totoTrgBad(d, trgAge);
         if (d.running) set('toto', '<i class="fa-solid fa-circle-notch fa-spin"></i>', 'ok');
         else if (bad) set('toto', String(bad), 'bad');
         else if (trgBad) set('toto', '!', 'bad');
@@ -4660,6 +4660,14 @@
         .withFailureHandler(err => { if (btn) { btn.disabled = false; btn.style.opacity = ''; } toast((err && err.message) || 'Gagal memeriksa'); })
         .autoInputTotoRun(currentSessionToken);
     }
+    // Pemicu hanya BOLEH dianggap macet bila memang seharusnya aktif: jendela draw sudah berjalan >5 menit, ada baris menunggu, atau sapuan rutin dihidupkan.
+    // Di luar jendela (sapuan rutin mati) pemicu sengaja diam, jadi tidak ada peringatan palsu.
+    function totoTrgBad(d, trgAge) {
+      if (!d || d.mode <= 0) return false;
+      const w = d.window;
+      const should = !w || w.hot || w.idle > 0 || (w.active && w.activeForMin >= 6);
+      return should && (trgAge === null || trgAge > 45);
+    }
     function autoInputTotoPaint() {
       const box = document.getElementById('aiTotoBox');
       if (!box) return;
@@ -4691,8 +4699,10 @@
       const evLine = e => `<span class="text-slate-500 whitespace-nowrap">${esc(String(e.ts || '').slice(5, 19))}</span> <span class="${evCol[e.level] || 'text-slate-300'}">${e.website ? '<b class="text-cyan-300">' + esc(e.website) + '</b> · ' : ''}${esc(e.msg)}</span>`;
       const evRows = evs.slice(0, 40).map(e => `<div class="ai-ev">${evLine(e)}</div>`).join('') || '<div class="text-slate-500">Belum ada kegiatan tercatat. Tekan CEK &amp; ISI SEKARANG atau tunggu jadwal otomatis.</div>';
       const trgAge = d.dispatchAt ? Math.round((Date.now() - Date.parse(String(d.dispatchAt).replace(' ', 'T') + '+07:00')) / 60000) : null;
-      const trgBad = d.mode > 0 && (trgAge === null || trgAge > 45);
-      const trgTxt = trgAge === null ? 'Pemicu cron belum pernah memicu' : 'Pemicu cron terakhir ' + esc(String(d.dispatchAt).slice(5, 19)) + ' (' + (trgAge < 1 ? '<1' : trgAge) + ' menit lalu)';
+      const trgBad = totoTrgBad(d, trgAge);
+      const wn = d.window;
+      const trgWin = !wn || d.mode <= 0 ? '' : wn.active ? ' · jendela draw aktif, ' + wn.endsInMin + ' menit lagi' : wn.hot ? ' · aktif: ada baris menunggu' : !wn.expectActive ? ' · siaga, aktif lagi ' + esc(wn.nextAt) + ' WIB (' + esc(wn.nextName) + ', ' + wn.nextInMin + ' menit lagi)' : '';
+      const trgTxt = (trgAge === null ? 'Pemicu cron belum pernah memicu' : 'Pemicu cron terakhir ' + esc(String(d.dispatchAt).slice(5, 19)) + ' (' + (trgAge < 1 ? '<1' : trgAge) + ' menit lalu)') + trgWin;
       const modePill = d.mode === 2 ? '<span class="ai-pill ok">Mode 2 · isi &amp; koreksi otomatis</span>' : d.mode === 1 ? '<span class="ai-pill warn">Mode 1 · hanya baca &amp; catat</span>' : '<span class="ai-pill">Mati</span>';
       const runPill = d.running ? '<span class="ai-pill ok"><i class="fa-solid fa-circle-notch fa-spin"></i> Sedang berjalan</span>' : '<span class="ai-pill">Siaga' + (d.lastAt ? ' · terakhir ' + esc(String(d.lastAt).slice(5, 16)) : '') + '</span>';
       const nowLine = evs.length ? evLine(evs[0]) : 'Belum ada kegiatan.';
