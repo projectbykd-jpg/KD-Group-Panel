@@ -27,6 +27,8 @@ import {
 	adminSetAutoPost,
 	pruneActivityLogCron,
 } from "./api/admin";
+import { adminErrorDelete, adminErrorList, adminErrorSet, clientErrorReport } from "./api/error-log";
+import { cronFail, isUnexpectedError, pruneErrorLog, recordError } from "./lib/error-log";
 import { logTotoEvent, totoDispatchTick, totoMacauRun } from "./lib/toto-macau";
 import {
 	autoInputClearJob,
@@ -167,7 +169,8 @@ async function dailyPrune(env: Env): Promise<number | "skip"> {
 		/* lanjut */
 	}
 	await pruneExpiredSessions(env).catch(() => {});
-	await pruneAutoPrediksiHistory(env).catch((e) => console.error("prune auto prediksi error", e)); // job & catatan Toto Macau: simpan N hari (bawaan 7)
+	await pruneAutoPrediksiHistory(env).catch(cronFail(env, "prune auto prediksi")); // job & catatan Toto Macau: simpan N hari (bawaan 7)
+	await pruneErrorLog(env).catch(() => {}); // log Error & Bug: simpan N hari (sys_errorlog_days)
 	return pruneActivityLogCron(env).catch(() => 0);
 }
 
@@ -203,6 +206,10 @@ const ROUTES: Record<string, Handler> = {
 	adminResetUserLock: (env, b) => adminResetUserLock(env, s(b.token), s(b.targetUsername)),
 	adminListActiveSessions: (env, b) => adminListActiveSessions(env, s(b.token)),
 	adminGetSystemSettings: (env, b) => adminGetSystemSettings(env, s(b.token)),
+	adminErrorList: (env, b) => adminErrorList(env, s(b.token), b.options),
+	adminErrorSet: (env, b) => adminErrorSet(env, s(b.token), b.ids, b.status),
+	adminErrorDelete: (env, b) => adminErrorDelete(env, s(b.token), b.ids, b.scope),
+	clientErrorReport: (env, b) => clientErrorReport(env, s(b.token), b.report),
 	adminSaveSystemSettings: (env, b) => adminSaveSystemSettings(env, s(b.token), b.values),
 	adminGetMasterData: (env, b) => adminGetMasterData(env, s(b.token)),
 	adminSaveMasterData: (env, b) => adminSaveMasterData(env, s(b.token), s(b.key), b.value),
@@ -414,6 +421,21 @@ export default {
 				// dulu tidak ada log sama sekali di sini, jadi 500 apapun (termasuk
 				// yang cuma "Sesi tidak valid") tidak bisa dibedakan dari tail biasa.
 				console.error("API error [" + action + "]", e instanceof Error ? e.message : e);
+				// Menu Admin > Error & Bug: hanya galat tak terduga (bukan pesan validasi/izin biasa); di latar belakang supaya respons tidak tertunda.
+				if (action !== "clientErrorReport" && isUnexpectedError(e)) {
+					ctx.waitUntil(
+						(async () => {
+							const rec = await loadSession(env, s(body.token)).catch(() => null);
+							await recordError(env, {
+								source: "api",
+								loc: action,
+								message: e instanceof Error ? e.message : String(e),
+								detail: e instanceof Error ? e.stack : "",
+								username: rec?.username ?? "",
+							});
+						})().catch(() => {}),
+					);
+				}
 				return json({ success: false, message: e instanceof Error ? e.message : String(e) }, 500);
 			}
 		}
@@ -742,26 +764,26 @@ export default {
 			// sekali per cold-start) supaya tidak perlu jalankan skrip migrasi manual
 			// dan tidak menambah beban di jalur request user. No-op setelah ada.
 			await ensurePerfIndexes(env).catch((e) => console.error("ensure index error", e));
-			await runAutoPostRouter(env).catch((e) => console.error("auto-post router error", e));
-			await dailyPrune(env).catch((e) => console.error("prune error", e));
+			await runAutoPostRouter(env).catch(cronFail(env, "auto-post router"));
+			await dailyPrune(env).catch(cronFail(env, "prune harian"));
 			// Sekali/hari (guard sendiri di dalam fungsinya) -- buang antrean berita
 			// yang belum diproses & lebih lama dari kemarin jam 22:00 WIB. TIDAK
 			// PERNAH menyentuh artikel yang sudah tayang (lihat komentar di fungsinya).
-			await newsPruneQueueDaily(env).catch((e) => console.error("news queue prune error", e));
+			await newsPruneQueueDaily(env).catch(cronFail(env, "prune antrean berita"));
 		} else {
 			// Percobaan ulang otomatis Auto Prediksi (job gagal -> coba lagi tiap ±2 menit). Maks 1 job/tick; kalau jalan, pump Invest
 			// menunggu tick berikutnya supaya tidak berebut batas 50 subrequest per invocation.
-			const retried = await autoInputRetryTick(env).catch((e) => {
-				console.error("auto-input retry error", e);
+			const retried = await autoInputRetryTick(env).catch(async (e) => {
+				await cronFail(env, "auto-input retry")(e);
 				return false;
 			});
 			// Auto Check Toto Macau/5D: cron ini hanya MEMICU workflow GitHub Actions (1 panggilan GitHub); prosesnya di Actions. Bila memicu, pump Invest menunggu tick berikutnya.
 			const totoDispatched = retried ? false : await totoDispatchTick(env, () => dispatchTotoMacau(env)).catch(async (e) => {
-						console.error("toto dispatch tick error", e);
+						await cronFail(env, "toto dispatch tick")(e);
 						await logTotoEvent(env, "", "info", "ERR", "Pemicu cron galat: " + (e instanceof Error ? e.message : String(e)).slice(0, 200)); // terlihat di LOG KEGIATAN, tidak diam-diam
 						return false;
 					});
-			if (!retried && !totoDispatched) await investPump(env).catch((e) => console.error("invest pump error", e));
+			if (!retried && !totoDispatched) await investPump(env).catch(cronFail(env, "invest pump"));
 		}
 	},
 } satisfies ExportedHandler<Env>;

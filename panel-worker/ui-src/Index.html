@@ -646,6 +646,7 @@
             <button class="admin-tab" data-admin-tab="datamaster" onclick="switchAdminPanel('datamaster')"><i class="fa-solid fa-database"></i>Data Master</button>
             <button class="admin-tab" data-admin-tab="integrasi" onclick="switchAdminPanel('integrasi')"><i class="fa-solid fa-plug-circle-bolt"></i>Integrasi</button>
             <button class="admin-tab" data-admin-tab="maintenance" onclick="switchAdminPanel('maintenance')"><i class="fa-solid fa-screwdriver-wrench"></i>Maintenance &amp; Log</button>
+            <button class="admin-tab" data-admin-tab="errors" onclick="switchAdminPanel('errors')"><i class="fa-solid fa-bug"></i>Error &amp; Bug<span id="errTabBadge" class="ai-badge" hidden></span></button>
           </div>
           <select class="admin-tab-select" id="adminTabSelect" aria-label="Pilih panel admin" onchange="switchAdminPanel(this.value)">
             <option value="users">Kelola Users &amp; Akses Menu</option>
@@ -656,6 +657,7 @@
             <option value="datamaster">Data Master (Jadwal, Shio, Pasaran)</option>
             <option value="integrasi">Integrasi (GitHub, LinkTree, URL)</option>
             <option value="maintenance">Maintenance &amp; Retensi Log</option>
+            <option value="errors">Error &amp; Bug (log galat otomatis)</option>
           </select>
 
           <div class="admin-panel" data-admin-panel="lapops">
@@ -775,6 +777,34 @@
               <div id="backupActivityStatus" class="text-[10px] text-slate-500">Klik BERSIHKAN SEKARANG untuk memangkas log lama saat ini juga.</div>
               <button id="logPruneBtn" onclick="runActivityBackupNow()" class="glass-inner px-4 py-3 rounded-2xl text-[10px] font-extrabold mt-auto"><i class="fa-solid fa-broom mr-2"></i>BERSIHKAN SEKARANG</button>
             </div>
+          </div>
+          </div>
+
+          <div class="admin-panel" data-admin-panel="errors">
+          <div class="mini-card flex flex-col gap-3">
+            <div>
+              <div class="font-extrabold text-rose-200"><i class="fa-solid fa-bug mr-2"></i>Error &amp; Bug</div>
+              <div class="text-xs text-slate-400 mt-1">Semua galat yang tertangkap otomatis dikumpulkan di sini: galat server (API &amp; cron), galat tampilan di browser user, dan galat Auto Check Toto Macau. Galat yang sama digabung jadi satu baris dengan hitungan. Klik <b>SALIN LAPORAN</b> lalu tempel ke Claude &mdash; tidak perlu screenshot satu per satu. Password, token, dan cookie dibuang otomatis sebelum disimpan.</div>
+            </div>
+            <div id="errChips" class="ai-chips"></div>
+            <div class="ai-toolbar">
+              <div class="ai-toolbar-left">
+                <select id="errSource" class="glass-inner rounded-xl px-3 py-2 text-xs" aria-label="Filter sumber" onchange="errSetSource(this.value)">
+                  <option value="">Semua sumber</option>
+                  <option value="api">API (server)</option>
+                  <option value="cron">Cron (terjadwal)</option>
+                  <option value="browser">Browser (tampilan)</option>
+                  <option value="toto">Auto Check Toto Macau</option>
+                </select>
+                <span id="errMeta" class="ai-meta">Memuat…</span>
+              </div>
+              <div class="ai-toolbar-right">
+                <button class="ai-btn" onclick="errLoad(true)"><i class="fa-solid fa-rotate"></i>Refresh</button>
+                <button class="ai-btn primary" onclick="errCopyReport()"><i class="fa-solid fa-copy"></i>Salin Laporan</button>
+              </div>
+            </div>
+            <div id="errSelBar" class="ai-selbar" hidden></div>
+            <div id="errList" class="flex flex-col gap-2"></div>
           </div>
           </div>
 

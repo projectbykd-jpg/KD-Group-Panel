@@ -24,6 +24,7 @@ import { getSessions, type AdminSession } from "./auto-input";
 import { adminReq, htmlText, type Fetcher } from "./auto-input-run";
 import { openPanelZ, parsePanelZRows, type PanelZHandle } from "../senders/panelz";
 import { logActivity } from "./activity";
+import { recordError } from "./error-log";
 
 export interface TotoGame {
 	game: "m17" | "m51";
@@ -281,6 +282,8 @@ export async function logTotoEvent(env: Env, website: string, kind: string, leve
 	} catch {
 		/* log kegiatan tidak boleh menggagalkan proses */
 	}
+	// Galat Auto Check juga masuk menu Admin > Error & Bug (satu tempat untuk semua galat).
+	if (level === "ERR") await recordError(env, { source: "toto", loc: website || kind, site: website, message: msg });
 }
 export async function listTotoEvents(env: Env, websites: string[], limit = 60): Promise<{ events: TotoEvent[]; running: boolean; lastAt: string }> {
 	await ensureTables(env);
@@ -712,11 +715,11 @@ const releaseLease = (env: Env, website: string, more: boolean): LogStmt =>
 const HOT_MIN = 360; // baris yang menunggu (belum dibuat Panel-Z / belum terkirim) dipantau rapat selama 6 jam sejak pertama tercatat
 
 /** Website yang punya baris menunggu/gagal dalam 6 jam terakhir -> dicek tiap 3 menit sampai beres (hanya bermakna di mode 2). */
-async function hotWebsites(env: Env, mode: number): Promise<Set<string>> {
+async function hotWebsites(env: Env, mode: number, nowMs: number = Date.now()): Promise<Set<string>> {
 	if (mode < 2) return new Set();
 	const res = await getTurso(env)
 		.prepare(`SELECT DISTINCT website FROM toto_macau_log WHERE period > 0 AND status IN ('MISSING','PENDING','SENDING','FAILED') AND row_at >= ?`)
-		.bind(tsPlusMinutes(-HOT_MIN))
+		.bind(new Date(nowMs + 7 * 3600_000 - HOT_MIN * 60_000).toISOString().slice(0, 19).replace("T", " "))
 		.all<{ website: string }>();
 	return new Set((res.results ?? []).map((r) => String(r.website)));
 }
@@ -740,7 +743,7 @@ export async function totoDispatchTick(env: Env, dispatch: () => Promise<void>, 
 	const last = Number(row?.value || 0);
 	if (nowMs - last < 3 * 60_000 - 20_000) return false;
 	await ensureTables(env);
-	const hot = (await hotWebsites(env, mode)).size > 0;
+	const hot = (await hotWebsites(env, mode, nowMs)).size > 0;
 	const interval = (hot ? 3 : passIntervalMin(nowMs)) * 60_000;
 	if (nowMs - last < interval - 20_000) return false;
 	await env.DB.prepare(`INSERT INTO settings (key, value) VALUES ('toto_dispatch_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).bind(String(nowMs)).run();
@@ -779,7 +782,7 @@ export async function totoMacauRun(env: Env, opts: { only?: string[]; exclude?: 
 	const marks = await db.prepare(`SELECT website, updated_at, status, detail FROM toto_macau_log WHERE game = 'pass' AND period = 0`).all<{ website: string; updated_at: string; status: string; detail: string }>();
 	const markMap = new Map((marks.results ?? []).map((m) => [String(m.website), { at: String(m.updated_at), running: m.status === 'RUN', more: m.detail === 'MORE' }]));
 	const last = new Map([...markMap].map(([w, m]) => [w, m.at]));
-	const hot = await hotWebsites(env, mode);
+	const hot = await hotWebsites(env, mode, nowMs);
 	const baseInterval = passIntervalMin(nowMs);
 	const due = [...byWebsite.keys()]
 		.filter((w) => {
