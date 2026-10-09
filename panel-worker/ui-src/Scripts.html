@@ -4666,7 +4666,11 @@
       if (!d || d.mode <= 0) return false;
       const w = d.window;
       const should = !w || w.hot || w.idle > 0 || (w.active && w.activeForMin >= 6);
-      return should && (trgAge === null || trgAge > 45);
+      // Hanya sapuan rutin (di luar jendela draw, tanpa baris menunggu) yang boleh jarang: batas wajar = 1,5x jedanya, bukan 45 menit tetap
+      // (dulu jeda 60/120 menit membuat peringatan palsu hampir tiap jam).
+      const sweepOnly = !!w && !w.active && !w.hot && w.idle > 0;
+      const limit = sweepOnly ? Math.max(45, Math.round(w.idle * 1.5) + 5) : 45;
+      return should && (trgAge === null || trgAge > limit);
     }
     function autoInputTotoPaint() {
       const box = document.getElementById('aiTotoBox');
@@ -4701,7 +4705,7 @@
       const trgAge = d.dispatchAt ? Math.round((Date.now() - Date.parse(String(d.dispatchAt).replace(' ', 'T') + '+07:00')) / 60000) : null;
       const trgBad = totoTrgBad(d, trgAge);
       const wn = d.window;
-      const trgWin = !wn || d.mode <= 0 ? '' : wn.active ? ' · jendela draw aktif, ' + wn.endsInMin + ' menit lagi' : wn.hot ? ' · aktif: ada baris menunggu' : !wn.expectActive ? ' · siaga, aktif lagi ' + esc(wn.nextAt) + ' WIB (' + esc(wn.nextName) + ', ' + wn.nextInMin + ' menit lagi)' : '';
+      const trgWin = !wn || d.mode <= 0 ? '' : wn.active ? ' · jendela draw aktif, ' + wn.endsInMin + ' menit lagi' : wn.hot ? ' · aktif: ada baris menunggu' : !wn.expectActive ? ' · siaga, aktif lagi ' + esc(wn.nextAt) + ' WIB (' + esc(wn.nextName) + ', ' + wn.nextInMin + ' menit lagi)' : wn.idle > 0 ? ' · sapuan rutin tiap ' + wn.idle + ' menit di luar jam draw (Pengaturan Sistem)' : '';
       const trgTxt = (trgAge === null ? 'Pemicu cron belum pernah memicu' : 'Pemicu cron terakhir ' + esc(String(d.dispatchAt).slice(5, 19)) + ' (' + (trgAge < 1 ? '<1' : trgAge) + ' menit lalu)') + trgWin;
       const modePill = d.mode === 2 ? '<span class="ai-pill ok">Mode 2 · isi &amp; koreksi otomatis</span>' : d.mode === 1 ? '<span class="ai-pill warn">Mode 1 · hanya baca &amp; catat</span>' : '<span class="ai-pill">Mati</span>';
       const runPill = d.running ? '<span class="ai-pill ok"><i class="fa-solid fa-circle-notch fa-spin"></i> Sedang berjalan</span>' : '<span class="ai-pill">Siaga' + (d.lastAt ? ' · terakhir ' + esc(String(d.lastAt).slice(5, 16)) : '') + '</span>';
