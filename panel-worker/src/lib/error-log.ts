@@ -149,40 +149,50 @@ export function resetErrorThrottle(): void {
 }
 
 /** Notifikasi Telegram hanya bila Token + Chat ID diisi admin dan jeda minimum sudah lewat (anti-banjir). */
-async function alertEligible(env: Env): Promise<boolean> {
+async function alertState(env: Env, force: boolean): Promise<"ok" | "belum-diatur" | "jeda"> {
 	await loadIntegrations(env);
 	const c = alertTgCfg();
-	if (!c.token || !c.chatId) return false;
+	if (!c.token || !c.chatId) return "belum-diatur";
+	if (force) return "ok"; // uji galat palsu: abaikan jeda minimum supaya hasilnya pasti
 	const row = await env.DB.prepare(`SELECT value FROM settings WHERE key = 'errlog_alert_at'`).first<{ value: string }>();
-	return Date.now() - Number(row?.value || 0) >= (await getSys(env, "sys_errorlog_alert_gap_min")) * 60_000;
+	return Date.now() - Number(row?.value || 0) >= (await getSys(env, "sys_errorlog_alert_gap_min")) * 60_000 ? "ok" : "jeda";
 }
-async function sendAlert(env: Env, kind: string, e: { source: string; loc: string; message: string }): Promise<void> {
+async function sendAlert(env: Env, kind: string, e: { source: string; loc: string; message: string }): Promise<string> {
 	// tanda dulu, baru kirim: dua galat bersamaan tidak jadi dua pesan
 	await env.DB.prepare(`INSERT INTO settings (key, value) VALUES ('errlog_alert_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).bind(String(Date.now())).run();
-	await sendTelegram(`⚠️ Error ${kind} — KD-Group Panel\n(${e.source}) ${e.loc || "-"}\n${e.message.slice(0, 300)}\n\nBuka Admin › Error & Bug untuk detail.`, alertTgCfg());
+	return sendTelegram(`⚠️ Error ${kind} — KD-Group Panel\n(${e.source}) ${e.loc || "-"}\n${e.message.slice(0, 300)}\n\nBuka Admin › Error & Bug untuk detail.`, alertTgCfg());
 }
 
-/** Catat satu galat. Tidak pernah melempar. */
-export async function recordError(env: Env, input: ErrInput): Promise<void> {
+export interface RecordResult {
+	/** "" = tidak ada notifikasi (galat berulang / bukan baru); selain itu hasil percobaan notifikasi Telegram */
+	alert: "" | "terkirim" | "belum-diatur" | "jeda" | "gagal";
+	detail?: string;
+}
+
+/** Catat satu galat. Tidak pernah melempar. `force` (hanya uji galat palsu) mengabaikan throttle & jeda notifikasi. */
+export async function recordError(env: Env, input: ErrInput, opts: { force?: boolean } = {}): Promise<RecordResult> {
+	const force = !!opts.force;
 	try {
 		const message = scrub(input.message).trim() || "(tanpa pesan)";
 		const detail = scrub(input.detail ?? "", DETAIL_MAX);
-		if (isNoise(message, detail)) return;
+		if (isNoise(message, detail)) return { alert: "" };
 		const source = ERR_SOURCES.includes(input.source) ? input.source : "lainnya";
 		const loc = scrub(input.loc ?? "", 120);
 		const fp = fingerprint(source, loc, message);
 		const now = Date.now();
 		const prev = lastWrite.get(fp);
-		if (prev && now - prev < THROTTLE_MS) return;
+		if (!force && prev && now - prev < THROTTLE_MS) return { alert: "" };
 		lastWrite.set(fp, now);
 		if (lastWrite.size > 500) lastWrite.clear();
 		await ensureTable(env);
 		let alertKind = "";
-		if (await alertEligible(env).catch(() => false)) {
+		let skip: RecordResult["alert"] = "";
+		const st = await alertState(env, force).catch(() => "jeda" as const);
+		if (st === "ok") {
 			const prev = await env.DB.prepare(`SELECT status FROM error_log WHERE fp = ?`).bind(fp).first<{ status: string }>();
 			if (!prev) alertKind = "baru";
 			else if (prev.status === "resolved") alertKind = "muncul lagi";
-		}
+		} else skip = st;
 		const ts = tsNow();
 		await env.DB.prepare(
 			`INSERT INTO error_log (fp, source, level, message, detail, loc, username, site, count, reopened, first_at, last_at, status)
@@ -209,12 +219,29 @@ export async function recordError(env: Env, input: ErrInput): Promise<void> {
 				ts,
 			)
 			.run();
-		if (alertKind) await sendAlert(env, alertKind, { source, loc, message });
+		let result: RecordResult = { alert: "" };
+		if (alertKind) {
+			const r = await sendAlert(env, alertKind, { source, loc, message });
+			result = r === "Terkirim" ? { alert: "terkirim" } : { alert: "gagal", detail: r };
+		} else if (skip) result = { alert: skip };
 		// batas baris: dicek tiap 25 tulisan (bukan tiap galat) supaya hemat
 		if (++writes % 25 === 0) await capRows(env);
+		return result;
 	} catch {
 		/* pencatat galat tidak boleh menimbulkan galat baru */
+		return { alert: "" };
 	}
+}
+
+/** Tombol "Uji galat palsu": satu galat uji BARU tiap ditekan (yang lama dihapus) -> rantai catat + notifikasi Telegram teruji penuh. */
+export async function recordTestError(env: Env): Promise<RecordResult> {
+	try {
+		await ensureTable(env);
+		await env.DB.prepare(`DELETE FROM error_log WHERE loc = 'uji-galat'`).run();
+	} catch {
+		/* dicatat saja */
+	}
+	return recordError(env, { source: "lainnya", loc: "uji-galat", level: "warn", message: "UJI galat palsu dari admin — aman dihapus", detail: "Dibuat oleh tombol Uji Galat Palsu di Admin > Error & Bug." }, { force: true });
 }
 
 async function capRows(env: Env): Promise<void> {
