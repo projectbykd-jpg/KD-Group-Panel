@@ -69,6 +69,8 @@ jobs:
             r=$(curl -sS -m 20 "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" --data-urlencode "chat_id=${TG_CHAT}" --data-urlencode "text=✅ Penjaga KD-Group Panel aktif. Status sekarang: ${problems:-sehat}" || true)
             echo "$r" | grep -q '"ok":true' && echo "Pesan uji terkirim." || {
               echo "::error::Telegram menolak: $(echo "$r" | head -c 200)"
+              me=$(curl -sS -m 15 "https://api.telegram.org/bot${TG_TOKEN}/getMe" || true)
+              echo "::error::Token ini milik bot: @$(echo "$me" | grep -o '"username":"[^"]*"' | head -1 | cut -d'"' -f4) (harus bot yang ada di grup KD-Group, mis. KD-Helper). Chat ID terbaca: ${TG_CHAT:0:6}... panjang ${#TG_CHAT} karakter (grup supergroup = 14 karakter, mis. -1003723948512)."
               case "$r" in
                 *"chat not found"*) echo "::error::Chat ID salah / bot belum ada di grup itu / token milik bot lain. Chat ID grup harus berbentuk -100xxxxxxxxxx (pakai tanda minus), dan token harus milik bot yang sudah masuk grup.";;
                 *Unauthorized*) echo "::error::Token bot salah atau sudah di-revoke (BotFather).";;
