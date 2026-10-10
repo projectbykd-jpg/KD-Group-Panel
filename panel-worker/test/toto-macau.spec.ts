@@ -651,6 +651,40 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 		expect(old.status).toBe("SKIPPED");
 		expect(old.detail).toMatch(/Panel-Z hanya menyimpan sampai 2026-10-0\d/);
 	});
+	it("hari paling ujung rentang: Panel-Z masih menyimpan -00 tanggal itu tetapi -13 sudah dibuang -> DILEWATI; baris hari lain yang belum dibuat tetap MENUNGGU", async () => {
+		await setMode(2);
+		await saveSys(env, { sys_totomacau_lookback_days: 3 });
+		resetSysCache();
+		addUser("Op");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("Op");
+		zRows.push({ id: 3, market: "TOTOMACAU-00", date: "2026-10-06", value: "5555" }); // -00 tanggal 06 (ujung rentang) masih ada
+		const withEdge = [["06-10-2026 13:10:00", "14100", "9911", "Yes"], ...m17] as [string, string, string, string][];
+		const f = async (url: string) => new Response(url.includes("sar=m17") ? adminPage("Toto Macau", withEdge) : adminPage("Toto Macao 5D", m51), { status: 200 });
+		await run({ fetchFn: f });
+		const st = await byMarketDate();
+		expect(st["TOTOMACAU-13 2026-10-06"]).toBe("SKIPPED");
+		expect(st["TOTOMACAU-16 2026-10-08"]).toBe("MISSING"); // bukan ujung rentang: tetap menunggu (perilaku lama)
+	});
+	it("baris menunggu yang tanggalnya sudah di luar rentang periksa ditutup DILEWATI; yang masih dalam rentang tetap menunggu; yang gagal tidak disentuh", async () => {
+		await setMode(2);
+		addUser("Op");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("Op");
+		await listTotoLog(env, ["X"]);
+		const ins = (period: number, status: string, rowAt: string) =>
+			turso.current!.raw.prepare(`INSERT INTO toto_macau_log (website, game, period, slot_key, status, row_at, created_at, updated_at) VALUES ('HUGOTOGEL','m17',?,'k',?,?,?,?)`).run(period, status, rowAt, tsPlusMinutes(-60), tsPlusMinutes(-60));
+		ins(9001, "MISSING", "2026-09-20 22:08:37"); // jauh di luar rentang
+		ins(9002, "PENDING", "2026-09-20 13:00:00");
+		ins(9003, "FAILED", "2026-09-20 16:00:00"); // gagal: tetap terlihat
+		ins(9004, "MISSING", "2026-10-09 22:00:00"); // dalam rentang: tetap menunggu
+		await run();
+		const st = Object.fromEntries((await listTotoLog(env, ["HUGOTOGEL"])).map((r) => [r.period, r.status]));
+		expect(st[9001]).toBe("SKIPPED");
+		expect(st[9002]).toBe("SKIPPED");
+		expect(st[9003]).toBe("FAILED");
+		expect(st[9004]).toBe("MISSING");
+	});
 	it("jatah panggilan terbatas: backlog besar dikerjakan TERBARU dulu, dan Aktivitas hanya ditulis SATU kali per putaran (bukan per baris)", async () => {
 		await addUser("tester");
 		addPanelZ("HUGOTOGEL");
