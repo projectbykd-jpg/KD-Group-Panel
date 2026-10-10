@@ -28,3 +28,24 @@ describe("rute Worker vs aset statis", () => {
 		expect(workerFirst()).toContain("/public/news-feed.xml");
 	});
 });
+
+describe("kesehatan & penjaga", () => {
+	it("/health?deep=1 memeriksa D1 + KV dan menjawab 503 saat gagal", async () => {
+		const { deepHealth } = await import("../src/lib/health");
+		const { fakeEnv } = await import("./helpers/fake-env");
+		const env = fakeEnv().env;
+		const ok = await deepHealth(env);
+		expect(ok.ok).toBe(true);
+		expect(Object.keys(ok.checks).sort()).toEqual(["d1", "kv"]);
+		const broken = { ...env, DB: { prepare: () => { throw new Error("D1 down"); } } } as unknown as typeof env;
+		const bad = await deepHealth(broken);
+		expect(bad.ok).toBe(false);
+		expect(bad.checks.d1.error).toContain("D1 down");
+	});
+
+	it("workflow watchdog ada, tiap 5 menit, memakai /health?deep=1", () => {
+		const wf = readFileSync(join(process.cwd(), "..", ".github", "workflows", "watchdog.yml"), "utf8");
+		expect(wf).toContain("*/5 * * * *");
+		expect(wf).toContain("/health?deep=1");
+	});
+});

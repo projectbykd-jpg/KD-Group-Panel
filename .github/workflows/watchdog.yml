@@ -1,0 +1,83 @@
+name: Penjaga panel (watchdog)
+
+# Worker TIDAK bisa melaporkan kematiannya sendiri: kalau Cloudflare menolak request (kuota habis / Worker crash / D1 mati),
+# kode panel tidak jalan sama sekali -> notifikasi Error & Bug di dalam panel ikut bisu. Workflow ini berjalan DI LUAR Cloudflare:
+# tiap 5 menit memeriksa /health?deep=1 (D1 + KV) dan /api (jalur login/dashboard), lalu mengirim Telegram bila gagal.
+#  - Telegram hanya bila secret TG_ALERT_TOKEN + TG_ALERT_CHAT diisi (Settings > Secrets and variables > Actions).
+#  - Tanpa secret itu run tetap MERAH saat panel bermasalah -> GitHub mengirim email kegagalan ke pemilik repo.
+#  - Anti-banjir: pesan "MATI" dikirim saat baru gagal, lalu pengingat tiap ±1 jam; pesan "PULIH" saat kembali normal.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: watchdog
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      BASE: https://panel-worker.projectbykd.workers.dev
+      TG_TOKEN: ${{ secrets.TG_ALERT_TOKEN }}
+      TG_CHAT: ${{ secrets.TG_ALERT_CHAT }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Periksa panel
+        id: probe
+        run: |
+          problems=""
+          # 1) kesehatan dalam: D1 + KV (batas 20 dtk; 2 percobaan supaya kedip sesaat tidak dianggap mati)
+          ok=0
+          for i in 1 2; do
+            code=$(curl -sS -m 20 -o /tmp/h.json -w '%{http_code}' "$BASE/health?deep=1" || echo 000)
+            if [ "$code" = "200" ] && grep -q '"ok":true' /tmp/h.json; then ok=1; break; fi
+            sleep 8
+          done
+          if [ "$ok" != "1" ]; then
+            problems="Kesehatan dalam gagal (HTTP $code): $(head -c 250 /tmp/h.json 2>/dev/null | tr -d '\n')"
+          fi
+          # 2) jalur /api: aksi palsu HARUS dijawab JSON "Aksi tidak dikenal" (404). Jawaban lain = Worker/Cloudflare bermasalah.
+          body=$(curl -sS -m 20 -X POST -H 'content-type: application/json' -d '{"action":"__watchdog__"}' "$BASE/api" || true)
+          if ! echo "$body" | grep -q 'Aksi tidak dikenal'; then
+            problems="$problems | /api tidak menjawab normal: $(echo "$body" | head -c 200 | tr -d '\n')"
+          fi
+          echo "problems=$problems" >> "$GITHUB_OUTPUT"
+          echo "Hasil: ${problems:-sehat}"
+
+      - name: Kirim Telegram bila status berubah
+        env:
+          PROBLEMS: ${{ steps.probe.outputs.problems }}
+        run: |
+          problems="$PROBLEMS"
+          prev=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow watchdog.yml --status completed --limit 1 --json conclusion -q '.[0].conclusion' 2>/dev/null || echo "")
+          send() {
+            [ -n "$TG_TOKEN" ] && [ -n "$TG_CHAT" ] || { echo "Secret Telegram belum diisi -> hanya run merah/email."; return 0; }
+            curl -sS -m 20 "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" --data-urlencode "chat_id=${TG_CHAT}" --data-urlencode "text=$1" >/dev/null || true
+          }
+          now=$(date -u +%M)
+          if [ -n "$problems" ]; then
+            if [ "$prev" != "failure" ] || [ "$now" -lt 5 ]; then
+              send "🔴 KD-Group Panel TIDAK NORMAL
+          ${problems}
+
+          Cek: $BASE/health?deep=1
+          (Kuota Cloudflare harian reset 07:00 WIB. Detail: Cloudflare Dashboard > Workers > panel-worker.)"
+            fi
+          elif [ "$prev" = "failure" ]; then
+            send "🟢 KD-Group Panel PULIH — /health dan /api kembali normal."
+          fi
+
+      - name: Tandai merah bila bermasalah
+        if: steps.probe.outputs.problems != ''
+        env:
+          PROBLEMS: ${{ steps.probe.outputs.problems }}
+        run: |
+          echo "::error::Panel bermasalah: $PROBLEMS"
+          exit 1

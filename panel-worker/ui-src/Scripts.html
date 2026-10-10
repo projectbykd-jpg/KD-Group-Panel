@@ -53,6 +53,43 @@
       try { const r = ev.reason; reportClientError('Promise ditolak: ' + ((r && r.message) || r), r && r.stack); } catch (e) {}
     });
     window.addEventListener('kd:client-error', ev => { try { const d = ev.detail || {}; reportClientError(d.message, d.stack, d.loc); } catch (e) {} });
+    // ===== Status server nyata (bukan lencana palsu) =====
+    // shim /api memancarkan 'kd:api-health'. Gagal berturut-turut -> pil merah + alasan + cek ulang otomatis lewat /health?deep=1.
+    let srvHealthTimer = null;
+    function paintServerPill(ok, why) {
+      const pill = document.getElementById('homeServerPill'), txt = document.getElementById('homeServerText');
+      if (!pill || !txt) return;
+      pill.classList.toggle('bad', !ok);
+      txt.textContent = ok ? 'Panel online' : 'Server bermasalah';
+      pill.title = ok ? 'Status koneksi ke server (klik untuk cek ulang)' : String(why || 'Server tidak menjawab') + ' — klik untuk cek ulang';
+      let bar = document.getElementById('srvDownBar');
+      if (ok) { if (bar) bar.remove(); return; }
+      if (!bar) {
+        bar = document.createElement('div'); bar.id = 'srvDownBar';
+        bar.style.cssText = 'position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:2147483000;max-width:min(680px,94vw);background:#3b0d12;color:#fecaca;border:1px solid #f87171;border-radius:12px;padding:10px 14px;font:600 12px/1.45 system-ui,sans-serif;cursor:pointer';
+        bar.onclick = () => checkServerHealth(true);
+        document.body.appendChild(bar);
+      }
+      bar.textContent = '⚠ Server tidak menjawab dengan benar — data di layar bisa kosong/lama. ' + String(why || '') + ' (klik untuk cek ulang)';
+    }
+    function checkServerHealth(manual) {
+      clearTimeout(srvHealthTimer); srvHealthTimer = null;
+      fetch('/health?deep=1', { cache: 'no-store' })
+        .then(r => r.text().then(t => ({ r, t })))
+        .then(({ r, t }) => {
+          let j = null; try { j = JSON.parse(t); } catch (e) {}
+          if (r.ok && j && j.ok) { paintServerPill(true); if (manual) { try { loadHomeDashboard(true); } catch (e) {} } return; }
+          const bad = j && j.checks ? Object.keys(j.checks).filter(k => !j.checks[k].ok).map(k => k + ': ' + (j.checks[k].error || 'gagal')).join('; ') : ('HTTP ' + r.status + ' ' + String(t || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').slice(0, 120));
+          paintServerPill(false, bad);
+          srvHealthTimer = setTimeout(() => checkServerHealth(false), 20000);
+        })
+        .catch(() => { paintServerPill(false, navigator.onLine === false ? 'Tidak ada koneksi internet.' : 'Tidak dapat menghubungi server.'); srvHealthTimer = setTimeout(() => checkServerHealth(false), 20000); });
+    }
+    window.addEventListener('kd:api-health', ev => {
+      const d = ev.detail || {};
+      if (d.ok) { if (document.getElementById('srvDownBar') || document.getElementById('homeServerPill')?.classList.contains('bad')) paintServerPill(true); return; }
+      if (d.streak >= 2) { paintServerPill(false, d.why); if (!srvHealthTimer) srvHealthTimer = setTimeout(() => checkServerHealth(false), 20000); }
+    });
     let globalPredictionsData = [];
     let globalClosingPrediction = null;
     // Data hasil 1x panggilan getBootstrapData saat panel dibuka. Dipakai sekali lalu

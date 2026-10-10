@@ -154,6 +154,21 @@ const shim = `<script>
   var API = "/api";
   var ARG_MAP = ${JSON.stringify(ARG_MAP)};
   var SESSION_EXEMPT = { checkLogin: 1, resumeSession: 1, getBootstrapData: 1, logout: 1, logoutSession: 1 };
+  // Terjemahkan jawaban galat non-JSON jadi kalimat yang bisa ditindaklanjuti.
+  function describeHttp(status, text) {
+    var snip = String(text || "").replace(/<[^>]*>/g, " ").replace(/\\s+/g, " ").trim().slice(0, 160);
+    var code = (snip.match(/(?:error code:?|error)\\s*(\\d{4})/i) || [])[1];
+    var hint = code === "1015" || code === "1027" || status === 429 ? " (kuota/laju Cloudflare terlampaui)"
+      : code === "1102" || code === "1101" ? " (Worker gagal/kehabisan sumber daya)"
+      : status >= 500 ? " (server bermasalah)" : "";
+    return "Server membalas galat HTTP " + status + (code ? " kode " + code : "") + hint + (snip ? ": " + snip : ".");
+  }
+  // Penanda status server di dashboard: hanya hijau kalau /api benar-benar menjawab.
+  var failStreak = 0;
+  function reportHealth(ok, why) {
+    failStreak = ok ? 0 : failStreak + 1;
+    try { window.dispatchEvent(new CustomEvent("kd:api-health", { detail: { ok: ok, streak: failStreak, why: why } })); } catch (e) {}
+  }
   function call(fn, args, onOk, onErr) {
     var body = { action: fn };
     var names = ARG_MAP[fn];
@@ -174,11 +189,20 @@ const shim = `<script>
       body: JSON.stringify(body),
       signal: ctrl ? ctrl.signal : undefined,
     })
-      .then(function (r) { return r.text(); })
-      .then(function (t) {
+      .then(function (r) { return r.text().then(function (t) { return { status: r.status, text: t }; }); })
+      .then(function (res) {
         if (timer) clearTimeout(timer);
-        var data;
-        try { data = t ? JSON.parse(t) : null; } catch (e) { data = t; }
+        var t = res.text, data, parsed = true;
+        try { data = t ? JSON.parse(t) : null; } catch (e) { parsed = false; data = t; }
+        // Jawaban BUKAN JSON (halaman galat Cloudflare: kuota habis / Worker crash / 5xx) dulu diteruskan ke
+        // fungsi tampilan sebagai teks -> dashboard tampil "0" seolah normal. Sekarang dihitung GAGAL, jujur.
+        if (!parsed || (data === null && res.status >= 400)) {
+          var why = describeHttp(res.status, t);
+          reportHealth(false, why);
+          (onErr || function () {})(new Error(why));
+          return;
+        }
+        reportHealth(true, "");
         // Sesi ditolak server -> beri tahu panel sekali (lihat listener
         // 'kd:session-expired' di Scripts.html). Endpoint login/bootstrap
         // punya penanganan sendiri, jadi dikecualikan.
@@ -202,6 +226,7 @@ const shim = `<script>
         var msg = e && e.name === "AbortError"
           ? "Server tidak merespons (lebih dari 3 menit). Coba lagi."
           : (navigator.onLine === false ? "Tidak ada koneksi internet." : "Tidak dapat menghubungi server. Periksa koneksi lalu coba lagi.");
+        reportHealth(false, msg);
         (onErr || function () {})(new Error(msg));
       });
   }
