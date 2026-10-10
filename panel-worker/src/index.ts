@@ -12,6 +12,7 @@ import { loadSession, migrateKvSessionsOnce, pruneExpiredSessions } from "./lib/
 import { getTurso } from "./lib/turso";
 import { constEq } from "./lib/crypto";
 import { checkLogin, logout, resumeSession } from "./api/auth";
+import { deepHealth } from "./lib/health";
 import { getBootstrapData, getDashboard, homeInsights } from "./api/dashboard";
 import { logClientActivity } from "./api/activity";
 import { retryFailedSystem, sendToPanelZOnly, smartAutoSendFast } from "./api/send";
@@ -448,6 +449,10 @@ export default {
 		}
 
 		if (url.pathname === "/health") {
+			if (url.searchParams.get("deep")) {
+				const h = await deepHealth(env);
+				return new Response(JSON.stringify(h), { status: h.ok ? 200 : 503, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+			}
 			return new Response("panel-worker OK", { headers: { "content-type": "text/plain" } });
 		}
 

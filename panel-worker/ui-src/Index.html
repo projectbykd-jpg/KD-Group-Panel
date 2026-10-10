@@ -298,7 +298,7 @@
             </div>
           </div>
           <div class="dashboard-hero-side">
-            <span class="dashboard-status-pill"><span class="dashboard-live-dot"></span>Panel online</span>
+            <span class="dashboard-status-pill" id="homeServerPill" title="Status koneksi ke server (klik untuk cek ulang)" onclick="checkServerHealth(true)" style="cursor:pointer"><span class="dashboard-live-dot" id="homeServerDot"></span><span id="homeServerText">Panel online</span></span>
             <span id="homeMaintPill" class="dashboard-status-pill warn" hidden><i class="fa-solid fa-screwdriver-wrench"></i>Mode maintenance</span>
             <!-- Angka ini dipakai JS (homeMiniSends/homeMiniToday); tampil di kartu statistik di bawah, jadi disembunyikan di sini. -->
             <div class="dashboard-mini-grid" hidden>

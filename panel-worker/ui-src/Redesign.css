@@ -1139,6 +1139,8 @@ thead th:last-child, tbody td:last-child { padding-right: 14px !important; }
 .dash-eyebrow { font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ui-text-3); margin-bottom: 4px; }
 .dashboard-hero { padding-bottom: 2px !important; }
 .dashboard-hero-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.dashboard-status-pill.bad { color: #f87171 !important; border-color: rgba(248,113,113,.45) !important; background: rgba(248,113,113,.09) !important; }
+.dashboard-status-pill.bad .dashboard-live-dot { background: #f87171 !important; }
 .dashboard-status-pill.warn { color: #f59e0b !important; border-color: rgba(245,158,11,.4) !important; background: rgba(245,158,11,.08) !important; }
 .dashboard-chip.is-next { color: var(--ui-accent) !important; border-color: rgba(var(--ui-accent-rgb), .4) !important; }
 .dashboard-chip.is-next i { color: var(--ui-accent) !important; }
