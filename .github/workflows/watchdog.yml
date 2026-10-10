@@ -30,8 +30,8 @@ jobs:
     timeout-minutes: 3
     env:
       BASE: https://panel-worker.projectbykd.workers.dev
-      TG_TOKEN: ${{ secrets.TG_ALERT_TOKEN }}
-      TG_CHAT: ${{ secrets.TG_ALERT_CHAT }}
+      RAW_TG_TOKEN: ${{ secrets.TG_ALERT_TOKEN }}
+      RAW_TG_CHAT: ${{ secrets.TG_ALERT_CHAT }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Periksa panel
@@ -60,11 +60,21 @@ jobs:
         env:
           PROBLEMS: ${{ steps.probe.outputs.problems }}
         run: |
+          # buang spasi/baris baru yang sering ikut saat paste secret
+          TG_TOKEN=$(printf '%s' "$RAW_TG_TOKEN" | tr -d ' \r\n\t')
+          TG_CHAT=$(printf '%s' "$RAW_TG_CHAT" | tr -d ' \r\n\t')
           problems="$PROBLEMS"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.kirim_tes }}" = "true" ]; then
             if [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ]; then echo "::error::Secret TG_ALERT_TOKEN / TG_ALERT_CHAT belum terbaca."; exit 1; fi
             r=$(curl -sS -m 20 "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" --data-urlencode "chat_id=${TG_CHAT}" --data-urlencode "text=✅ Penjaga KD-Group Panel aktif. Status sekarang: ${problems:-sehat}" || true)
-            echo "$r" | grep -q '"ok":true' && echo "Pesan uji terkirim." || { echo "::error::Telegram menolak: $(echo "$r" | head -c 200)"; exit 1; }
+            echo "$r" | grep -q '"ok":true' && echo "Pesan uji terkirim." || {
+              echo "::error::Telegram menolak: $(echo "$r" | head -c 200)"
+              case "$r" in
+                *"chat not found"*) echo "::error::Chat ID salah / bot belum ada di grup itu / token milik bot lain. Chat ID grup harus berbentuk -100xxxxxxxxxx (pakai tanda minus), dan token harus milik bot yang sudah masuk grup.";;
+                *Unauthorized*) echo "::error::Token bot salah atau sudah di-revoke (BotFather).";;
+              esac
+              exit 1
+            }
           fi
           prev=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow watchdog.yml --status completed --limit 1 --json conclusion -q '.[0].conclusion' 2>/dev/null || echo "")
           send() {
