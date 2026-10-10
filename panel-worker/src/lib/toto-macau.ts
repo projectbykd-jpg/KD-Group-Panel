@@ -485,6 +485,13 @@ async function reconcileWebsite(
 	const dismissed = new Set((dis.results ?? []).map((r) => `${r.game}|${r.period}`));
 	const today = dayOf(deps.nowMs);
 	const since = dayOf(deps.nowMs, deps.lookback);
+	// Baris yang masih "menunggu" tetapi tanggalnya sudah di luar rentang periksa (mis. rentang dipersempit di Pengaturan Sistem, atau Panel-Z sudah
+	// membuang baris lamanya) tidak akan pernah diproses lagi: tutup sebagai DILEWATI, jangan dibiarkan "MENUNGGU BARIS" sampai terhapus 7 hari kemudian.
+	budget.used++;
+	await db
+		.prepare(`UPDATE toto_macau_log SET status = 'SKIPPED', detail = ?, updated_at = ? WHERE website = ? AND period > 0 AND status IN ('MISSING','PENDING') AND substr(row_at, 1, 10) < ?`)
+		.bind(`Dilewati: tanggal di luar rentang periksa (${deps.lookback} hari terakhir) — tidak akan diisi lagi`, tsNow(), website, since)
+		.run();
 	const adminRows: AdminRow[] = [];
 	let reader = cands[0].username;
 
@@ -608,6 +615,13 @@ async function reconcileWebsite(
 				continue;
 			}
 			const dates = zRows.filter((z) => z.market === a.market).map((z) => z.date).sort();
+			// Hari paling ujung rentang periksa: Panel-Z biasanya sudah membuang baris pasaran ini (mis. -13…-22) sementara baris lain tanggal itu (mis. -00) masih ada,
+			// jadi batas "terlama" global di atas tidak menangkapnya -> tanpa ini muncul "N menunggu baris" tiap malam untuk baris yang tak akan pernah ada.
+			if (a.date <= since && dates.length && a.date < dates[0]) {
+				await upsertLog(env, { ...base, status: "SKIPPED", detail: `Dilewati: ${a.market} ${a.date} di batas rentang periksa dan Panel-Z sudah tidak menyimpannya (terlama untuk pasaran ini ${dates[0]})` }, buf);
+				buf.push(evStmt(env, website, "info", "INFO", `${a.market} ${a.date}: sudah dibuang Panel-Z (terlama ${dates[0]}) — dilewati`));
+				continue;
+			}
 			const have = dates.length ? `${dates[0]} s/d ${dates[dates.length - 1]}` : "tidak ada";
 			await upsertLog(env, { ...base, status: "MISSING", detail: `Baris ${a.market} tanggal ${a.date} belum ada di Panel-Z (Panel-Z membuat baris tiap hari pukul 00:25) — diisi otomatis begitu baris muncul. Tanggal terbaca untuk pasaran ini: ${have}; total ${zRows.length} baris Toto Macau terbaca` }, buf);
 			sum.missing++;
