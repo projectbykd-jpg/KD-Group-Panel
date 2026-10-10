@@ -9,7 +9,12 @@ name: Penjaga panel (watchdog)
 on:
   schedule:
     - cron: "*/5 * * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      kirim_tes:
+        description: "Kirim pesan uji ke Telegram (memastikan secret benar)"
+        type: boolean
+        default: true
 
 permissions:
   actions: read
@@ -56,6 +61,11 @@ jobs:
           PROBLEMS: ${{ steps.probe.outputs.problems }}
         run: |
           problems="$PROBLEMS"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.kirim_tes }}" = "true" ]; then
+            if [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ]; then echo "::error::Secret TG_ALERT_TOKEN / TG_ALERT_CHAT belum terbaca."; exit 1; fi
+            r=$(curl -sS -m 20 "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" --data-urlencode "chat_id=${TG_CHAT}" --data-urlencode "text=✅ Penjaga KD-Group Panel aktif. Status sekarang: ${problems:-sehat}" || true)
+            echo "$r" | grep -q '"ok":true' && echo "Pesan uji terkirim." || { echo "::error::Telegram menolak: $(echo "$r" | head -c 200)"; exit 1; }
+          fi
           prev=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow watchdog.yml --status completed --limit 1 --json conclusion -q '.[0].conclusion' 2>/dev/null || echo "")
           send() {
             [ -n "$TG_TOKEN" ] && [ -n "$TG_CHAT" ] || { echo "Secret Telegram belum diisi -> hanya run merah/email."; return 0; }
