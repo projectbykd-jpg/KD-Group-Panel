@@ -30,22 +30,52 @@ describe("rute Worker vs aset statis", () => {
 });
 
 describe("kesehatan & penjaga", () => {
-	it("/health?deep=1 memeriksa D1 + KV dan menjawab 503 saat gagal", async () => {
+	const wibTs = (ms: number) => new Date(ms + 7 * 3600_000).toISOString().slice(0, 19).replace("T", " ") + " | cron=* * * * *";
+	const now = Date.parse("2026-10-11T00:30:00Z");
+
+	it("cronAgeMin membaca detak WIB", async () => {
+		const { cronAgeMin } = await import("../src/lib/health");
+		expect(cronAgeMin(wibTs(now - 3 * 60_000), now)).toBe(3);
+		expect(cronAgeMin("", now)).toBeNull();
+	});
+
+	it("/health?deep=1: D1 + KV + cron sehat; Turso dilewati bila tidak dikonfigurasi", async () => {
 		const { deepHealth } = await import("../src/lib/health");
 		const { fakeEnv } = await import("./helpers/fake-env");
-		const env = fakeEnv().env;
-		const ok = await deepHealth(env);
-		expect(ok.ok).toBe(true);
-		expect(Object.keys(ok.checks).sort()).toEqual(["d1", "kv"]);
+		const { env, db } = fakeEnv();
+		db.prepare(`INSERT INTO settings (key, value) VALUES ('cron_heartbeat', ?)`).run(wibTs(now - 60_000));
+		const h = await deepHealth(env, now);
+		expect(h.ok).toBe(true);
+		expect(Object.keys(h.checks).sort()).toEqual(["cron", "d1", "kv", "turso"]);
+		expect(h.checks.turso.note).toBe("tidak dikonfigurasi");
+		expect(h.warnings).toEqual([]);
+	});
+
+	it("cron berhenti / belum pernah jalan = GAGAL; D1 mati = GAGAL", async () => {
+		const { deepHealth } = await import("../src/lib/health");
+		const { fakeEnv } = await import("./helpers/fake-env");
+		const { env, db } = fakeEnv();
+		expect((await deepHealth(env, now)).checks.cron.error).toContain("belum pernah");
+		db.prepare(`INSERT INTO settings (key, value) VALUES ('cron_heartbeat', ?)`).run(wibTs(now - 25 * 60_000));
+		const stale = await deepHealth(env, now);
+		expect(stale.ok).toBe(false);
+		expect(stale.checks.cron.error).toContain("25 menit");
 		const broken = { ...env, DB: { prepare: () => { throw new Error("D1 down"); } } } as unknown as typeof env;
-		const bad = await deepHealth(broken);
+		const bad = await deepHealth(broken, now);
 		expect(bad.ok).toBe(false);
 		expect(bad.checks.d1.error).toContain("D1 down");
 	});
 
-	it("workflow watchdog ada, tiap 5 menit, memakai /health?deep=1", () => {
+	it("workflow watchdog: tiap 5 menit, /health?deep=1, peringatan, kuota Cloudflare", () => {
 		const wf = readFileSync(join(process.cwd(), "..", ".github", "workflows", "watchdog.yml"), "utf8");
+		const sh = readFileSync(join(process.cwd(), "..", ".github", "scripts", "watchdog.sh"), "utf8");
 		expect(wf).toContain("*/5 * * * *");
-		expect(wf).toContain("/health?deep=1");
+		expect(wf).toContain("bash .github/scripts/watchdog.sh");
+		expect(wf).toContain("TG_ALERT_TOKEN");
+		expect(sh).toContain("/health?deep=1");
+		expect(sh).toContain(".warnings");
+		expect(sh).toContain("Aksi tidak dikenal"); // jalur /api
+		expect(sh).toContain("workersInvocationsAdaptive"); // kuota request Worker
+		expect(sh).toContain("d1AnalyticsAdaptiveGroups"); // kuota D1
 	});
 });
