@@ -24,6 +24,8 @@ vi.mock("../src/lib/turso", () => {
 
 import { autoInputGetState } from "../src/api/auto-input";
 import { checkLogin } from "../src/api/auth";
+import { livechatListSessions, livechatListTemplates } from "../src/api/livechat";
+import { resetLivechatTablesFlag } from "../src/lib/livechat-bot";
 import { resetAutoInputTablesFlag } from "../src/lib/auto-input";
 import { hashPassword } from "../src/lib/crypto";
 import { fakeD1, fakeEnv } from "./helpers/fake-env";
@@ -66,5 +68,21 @@ describe("anggaran subrequest menu Auto Prediksi (isolate dingin)", () => {
 		const r = (await autoInputGetState(env, tok)) as unknown as { jobs: { detail: string }[] };
 		expect(r.jobs).toHaveLength(5);
 		expect(Math.max(...r.jobs.map((j) => j.detail.length))).toBeLessThanOrEqual(700);
+	});
+
+	it("menu Sesi Chat di isolate dingin: skema dibuat sekali walau dua permintaan paralel; respons tidak membawa pesan raksasa", async () => {
+		const tok = await token();
+		await livechatListSessions(env, tok); // buat skema
+		const ins = turso.current!.d1.prepare(`INSERT INTO livechat_session (session_key, owner, last_message, last_seen_at) VALUES (?, 'op', ?, 'x')`);
+		for (let i = 0; i < 3; i++) await ins.bind("s" + i, "m".repeat(2000)).run();
+		resetLivechatTablesFlag(); // isolate DINGIN pada database yang sudah lengkap
+		turso.calls = 0;
+		turso.log.length = 0;
+		const [a, b] = (await Promise.all([livechatListSessions(env, tok), livechatListTemplates(env, tok)])) as unknown as [{ success: boolean; sessions: { last_message: string }[] }, { success: boolean }];
+		expect(a.success && b.success).toBe(true);
+		if (turso.calls > 6) console.log(turso.log.join("\n"));
+		expect(turso.calls).toBeLessThanOrEqual(6); // batch skema + 1 query kolom + sesi + template aktif + template (dulu 8 perintah skema x2 + query)
+		expect(a.sessions).toHaveLength(3);
+		expect(Math.max(...a.sessions.map((x) => x.last_message.length))).toBeLessThanOrEqual(300);
 	});
 });

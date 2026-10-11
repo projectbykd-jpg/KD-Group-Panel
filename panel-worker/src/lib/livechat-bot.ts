@@ -29,13 +29,37 @@
 //   - livechat_log      : jejak setiap balasan otomatis yang terkirim.
 import { getTurso } from "./turso";
 import { tsNow } from "./time";
+import { ensureColumns } from "./turso-schema";
 
 let tablesEnsured = false;
-async function ensureTables(env: Env): Promise<void> {
-	if (tablesEnsured) return;
+let ensuring: Promise<void> | null = null;
+/** Hanya untuk test. */
+export function resetLivechatTablesFlag(): void {
+	tablesEnsured = false;
+	ensuring = null;
+}
+/** Satu pembuatan skema bersama + SATU batch CREATE + SATU query kolom (ALTER hanya bila kolom belum ada).
+ *  Dulu: 3 CREATE + 5 ALTER yang SELALU gagal "duplicate column" dijalankan satu-satu di tiap isolate dingin, dan dua request
+ *  paralel (polling sesi + sinkron userscript) masing-masing mengulang semuanya -> boros subrequest (batas 50) dan menu Sesi Chat error. */
+function ensureTables(env: Env): Promise<void> {
+	if (tablesEnsured) return Promise.resolve();
+	if (!ensuring) {
+		ensuring = ensureTablesOnce(env).then(
+			() => {
+				tablesEnsured = true;
+			},
+			(e) => {
+				ensuring = null; // gagal -> request berikutnya boleh mencoba lagi
+				throw e;
+			},
+		);
+	}
+	return ensuring;
+}
+async function ensureTablesOnce(env: Env): Promise<void> {
 	const db = getTurso(env);
-	for (const stmt of [
-		`CREATE TABLE IF NOT EXISTS livechat_session (
+	await db.batch([
+		db.prepare(`CREATE TABLE IF NOT EXISTS livechat_session (
 			session_key TEXT PRIMARY KEY,
 			queue_code TEXT NOT NULL DEFAULT '',
 			customer_name TEXT NOT NULL DEFAULT '',
@@ -45,45 +69,34 @@ async function ensureTables(env: Env): Promise<void> {
 			bot_enabled INTEGER NOT NULL DEFAULT 0,
 			last_seen_at TEXT NOT NULL DEFAULT '',
 			bot_updated_at TEXT NOT NULL DEFAULT ''
-		)`,
-		`CREATE TABLE IF NOT EXISTS livechat_template (
+		)`),
+		db.prepare(`CREATE TABLE IF NOT EXISTS livechat_template (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			reply_text TEXT NOT NULL DEFAULT '',
 			active INTEGER NOT NULL DEFAULT 1,
 			sort_order INTEGER NOT NULL DEFAULT 0,
 			updated_at TEXT NOT NULL DEFAULT ''
-		)`,
-		`CREATE TABLE IF NOT EXISTS livechat_log (
+		)`),
+		db.prepare(`CREATE TABLE IF NOT EXISTS livechat_log (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			session_key TEXT NOT NULL DEFAULT '',
 			customer_message TEXT NOT NULL DEFAULT '',
 			matched_template_id INTEGER,
 			reply_text TEXT NOT NULL DEFAULT '',
 			sent_at TEXT NOT NULL DEFAULT ''
-		)`,
-	]) {
-		await db.prepare(stmt).run();
-	}
-	// livechat_session sempat dibuat versi lama (arsitektur userscript, sebelum
-	// pivot ke login langsung) -- CREATE TABLE IF NOT EXISTS di atas TIDAK
-	// mengubah tabel yang sudah ada, jadi kolom baru (queue_code, last_seen_at)
-	// harus ditambah lewat ALTER lazy ini supaya query lama yang sempat
-	// ke-deploy sebelum migrasi ini tidak lagi gagal dengan "no such column".
-	for (const stmt of [
-		`ALTER TABLE livechat_session ADD COLUMN queue_code TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE livechat_session ADD COLUMN last_seen_at TEXT NOT NULL DEFAULT ''`,
-		// Pemisahan per pengguna panel: '' = data lama (kunci bot bersama), selain itu username (huruf kecil).
-		`ALTER TABLE livechat_session ADD COLUMN owner TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE livechat_template ADD COLUMN owner TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE livechat_log ADD COLUMN owner TEXT NOT NULL DEFAULT ''`,
-	]) {
-		try {
-			await db.prepare(stmt).run();
-		} catch {
-			/* kolom sudah ada -- aman diabaikan */
-		}
-	}
-	tablesEnsured = true;
+		)`),
+	] as never);
+	// Tabel versi lama belum punya kolom baru (CREATE IF NOT EXISTS tidak mengubah tabel yang sudah ada).
+	await ensureColumns(db, {
+		livechat_session: [
+			["queue_code", "TEXT NOT NULL DEFAULT ''"],
+			["last_seen_at", "TEXT NOT NULL DEFAULT ''"],
+			// Pemisahan per pengguna panel: '' = data lama (kunci bot bersama), selain itu username (huruf kecil).
+			["owner", "TEXT NOT NULL DEFAULT ''"],
+		],
+		livechat_template: [["owner", "TEXT NOT NULL DEFAULT ''"]],
+		livechat_log: [["owner", "TEXT NOT NULL DEFAULT ''"]],
+	});
 }
 
 export interface LivechatSessionRow {
@@ -123,7 +136,7 @@ const inList = (owners: string[]): string => owners.map(() => "?").join(",");
 export async function listSessions(env: Env, owners: string[]): Promise<LivechatSessionRow[]> {
 	await ensureTables(env);
 	const r = await getTurso(env)
-		.prepare(`SELECT * FROM livechat_session WHERE owner IN (${inList(owners)}) ORDER BY bot_enabled DESC, last_seen_at DESC LIMIT 200`)
+		.prepare(`SELECT session_key, owner, queue_code, customer_name, divisi, substr(last_message, 1, 300) AS last_message, last_sender, bot_enabled, last_seen_at, bot_updated_at FROM livechat_session WHERE owner IN (${inList(owners)}) ORDER BY bot_enabled DESC, last_seen_at DESC LIMIT 200`)
 		.bind(...owners)
 		.all<LivechatSessionRow>();
 	return r.results;
@@ -271,7 +284,7 @@ export async function logAutoReply(env: Env, owner: string, sessionKey: string, 
 export async function recentLogs(env: Env, owners: string[], limit = 100): Promise<Array<Record<string, unknown>>> {
 	await ensureTables(env);
 	const r = await getTurso(env)
-		.prepare(`SELECT * FROM livechat_log WHERE owner IN (${inList(owners)}) ORDER BY id DESC LIMIT ?`)
+		.prepare(`SELECT id, session_key, substr(customer_message, 1, 300) AS customer_message, matched_template_id, substr(reply_text, 1, 300) AS reply_text, sent_at FROM livechat_log WHERE owner IN (${inList(owners)}) ORDER BY id DESC LIMIT ?`)
 		.bind(...owners, Math.min(500, Math.max(1, limit)))
 		.all();
 	return r.results;
