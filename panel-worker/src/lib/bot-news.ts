@@ -50,12 +50,25 @@ const TRANSIENT_ERROR_RE =
 // dipanggil berkali² (duplicate column diabaikan), tidak perlu skrip migrasi
 // manual terpisah.
 let newsCategoryColumnsEnsured = false;
+let newsColumnsEnsuring: Promise<void> | null = null;
 /** Hanya untuk tes: tiap tes memakai database Turso tiruan baru, jadi penanda "kolom sudah dicek" harus direset. */
 export const resetNewsColumnsGuard = (): void => {
 	newsCategoryColumnsEnsured = false;
+	newsColumnsEnsuring = null;
 };
-export async function ensureNewsCategoryColumns(env: Env): Promise<void> {
-	if (newsCategoryColumnsEnsured) return;
+/** Satu pengecekan bersama: pemanggil paralel (dashboard BOT memakai Promise.all) tidak masing-masing mengulang seluruh pengecekan
+ *  di isolate dingin (subrequest dikali N -> "Too many subrequests"). */
+export function ensureNewsCategoryColumns(env: Env): Promise<void> {
+	if (newsCategoryColumnsEnsured) return Promise.resolve();
+	if (!newsColumnsEnsuring) {
+		newsColumnsEnsuring = ensureNewsCategoryColumnsOnce(env).catch((e) => {
+			newsColumnsEnsuring = null; // gagal -> boleh dicoba lagi
+			throw e;
+		});
+	}
+	return newsColumnsEnsuring;
+}
+async function ensureNewsCategoryColumnsOnce(env: Env): Promise<void> {
 	const db = getTurso(env);
 	// Satu pragma_table_info per tabel (dulu 7 ALTER yang hampir selalu gagal "duplicate column" -- 7 round-trip sia-sia tiap cold start).
 	const colsOf = async (t: string): Promise<Set<string>> => {

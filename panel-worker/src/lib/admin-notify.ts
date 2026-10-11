@@ -12,6 +12,8 @@ import { getSys } from "./settings";
 import { alertTgCfg, loadIntegrations } from "./integrations";
 import { deliverAlert } from "./error-log";
 import { getTurso } from "./turso";
+import { ensureColumns } from "./turso-schema";
+import { ensureAutoInputTables } from "./auto-input";
 import { tsNow, tsPlusMinutes } from "./time";
 import { TOTO_MAX_ATTEMPTS } from "./toto-macau";
 import { finalFailureSql, RETRY_WINDOW_MIN } from "./auto-input";
@@ -227,14 +229,11 @@ export function resetNotifyScanGuard(): void {
 }
 async function ensureScanCols(env: Env): Promise<void> {
 	if (scanCols) return;
-	const db = getTurso(env);
-	for (const t of ["auto_input_job", "toto_macau_log"]) {
-		try {
-			await db.prepare(`ALTER TABLE ${t} ADD COLUMN tg_sent INTEGER NOT NULL DEFAULT 0`).run();
-		} catch (e) {
-			const m = e instanceof Error ? e.message : String(e);
-			if (!/duplicate column|no such table/i.test(m)) throw e;
-		}
+	// auto_input_job.tg_sent sudah dijamin ensureAutoInputTables; di sini toto_macau_log (SATU query kolom, ALTER hanya bila perlu).
+	try {
+		await ensureColumns(getTurso(env), { toto_macau_log: [["tg_sent", "INTEGER NOT NULL DEFAULT 0"]] });
+	} catch (e) {
+		if (!/no such table/i.test(e instanceof Error ? e.message : String(e))) throw e;
 	}
 	scanCols = true;
 }
@@ -243,6 +242,7 @@ export async function scanFinalFailures(env: Env): Promise<number> {
 	const wantAi = await notifyEnabled(env, "autoinput");
 	const wantToto = await notifyEnabled(env, "toto");
 	if (!wantAi && !wantToto) return 0;
+	await ensureAutoInputTables(env);
 	await ensureScanCols(env);
 	const db = getTurso(env);
 	const since = tsPlusMinutes(-6 * 60); // hanya kejadian baru; riwayat lama tidak membanjiri saat fitur pertama aktif

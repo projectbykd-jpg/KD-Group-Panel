@@ -41,7 +41,11 @@ async function withTransientRetry<T>(fn: () => Promise<T>): Promise<T> {
 				msg.includes("too many requests") ||
 				msg.includes("rate limit") ||
 				msg.includes("http status 429") ||
-				msg.includes("http status 503");
+				msg.includes("http status 503") ||
+				// respons Turso terpotong di tengah jalan (jaringan putus): JSON tidak lengkap -> aman diulang (baca) / diulang (tulis idempoten)
+				msg.includes("unterminated string in json") ||
+				msg.includes("unexpected end of json") ||
+				msg.includes("unexpected end of data");
 			if (!retryable || attempt === 2) throw e;
 			await new Promise((resolve) => setTimeout(resolve, [150, 400, 900][attempt]));
 		}

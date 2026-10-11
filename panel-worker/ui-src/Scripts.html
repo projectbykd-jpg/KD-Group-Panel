@@ -631,7 +631,10 @@
       syncSidebarAfterLogin();
       restoreDraft();
       resetSessionTimer();
-      switchPage(botOnly ? 'bot-dashboard' : 'home');
+      // Hanya navigasi pada penerapan PERTAMA. Bootstrap yang lambat memanggil fungsi ini lagi (profil server menggantikan cache);
+      // dulu itu melempar operator yang sudah membuka menu lain kembali ke Home.
+      if (!window.__kdNavigatedOnce || botOnly !== !!window.__kdNavBot) switchPage(botOnly ? 'bot-dashboard' : 'home');
+      window.__kdNavigatedOnce = true; window.__kdNavBot = botOnly;
       applyProfileUI();
       syncSidebarAfterLogin();
 
@@ -906,6 +909,12 @@
       loadHomeInsights();
       google.script.run
         .withSuccessHandler(data => {
+          if (apiFailed(data)) { // {success:false} dulu digambar sebagai 'belum ada aktivitas' dengan angka 0 seolah normal
+            const listEl = document.getElementById('homeActivityList');
+            if (listEl) listEl.innerHTML = '<div class="home-activity-empty text-rose-300"><i class="fa-solid fa-triangle-exclamation"></i> ' + escapeHtml(apiMessage(data, 'Gagal memuat aktivitas dashboard.')) + '</div>';
+            if (syncEl) syncEl.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i>Sync gagal';
+            return;
+          }
           window._homeDashboardLoadedAt = Date.now();
           renderHomeDashboard(data || {});
         })
@@ -1038,9 +1047,28 @@
       try { stopPgaPendingPolling(); } catch (e) {}
       if (wdListedTimer) { clearInterval(wdListedTimer); wdListedTimer = null; }
       clearInterval(autoInputTimer); autoInputTimer = null;
+      try { clearTimeout(aiTotoTimer); } catch (e) {}
       try { stopLivechatPolling(); } catch (e) {}
       if (lapJobsTicker) { clearInterval(lapJobsTicker); lapJobsTicker = null; }
       currentPage = 'home';
+    }
+
+    // Semua data per-akun di layar & cache HARUS dibuang saat logout / sesi berakhir. Dulu hanya sebagian: akun berikutnya
+    // di browser yang sama (dalam 12-30 dtk) melihat PHPSESSID + cookie Invest, aktivitas, dan kartu dashboard akun sebelumnya.
+    function resetPerUserUiState() {
+      pageDataCache.activity = null;
+      Object.keys(pageFetchedAt).forEach(k => { pageFetchedAt[k] = 0; });
+      window._homeDashboardLoadedAt = 0;
+      window.__kdNavigatedOnce = false; // login berikutnya harus membuka Home lagi
+      homeInsightsSig = '';
+      botAiData = null; botAiFetchedAt = 0;
+      headerSummaryLoadedOnce = false;
+      ['investBaseUrl', 'investPhpsessid', 'investKoderedis', 'investCookieExtra', 'investPasaranRaw'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+      });
+      try { INVEST_NUM_FIELDS.forEach(k => { const el = document.getElementById('invest_' + k); if (el) el.value = ''; }); } catch (e) {}
+      window.dispatchEvent(new CustomEvent('kd:user-reset')); // widget lain (Asisten KD) ikut membersihkan riwayatnya
     }
 
     function handleLogout() {
@@ -1054,10 +1082,7 @@
       stopInvestPolling();
       stopAllPagePollers();
       lapResetForLogout();
-      pageDataCache.activity = null;
-      pageFetchedAt.activity = 0; pageFetchedAt.prediction = 0;
-      botAiData = null; botAiFetchedAt = 0;
-      headerSummaryLoadedOnce = false;
+      resetPerUserUiState();
       clearTimeout(inactivityTimer);
       document.getElementById('user').value = '';
       document.getElementById('pass').value = '';
@@ -1101,7 +1126,7 @@
       stopAllPagePollers();
       lapResetForLogout();
       clearTimeout(inactivityTimer);
-      headerSummaryLoadedOnce = false;
+      resetPerUserUiState();
       document.getElementById('pass').value = '';
       openLoginScreen(msg);
     });
@@ -3342,7 +3367,8 @@
       const selectedUi = getPredictionRowUi(Object.assign({kind:'closing'}, selectedState), 'closing-send-btn');
       const exampleText = String(closing.exampleText || 'Prediksi Togel Gacor HUGOTOGEL 04 August 2026\n\nPrediksi di atas hanyalah sekedar prediksi angka di hari ini. Tepat atau tidaknya tergantung hoki anda bosku');
 
-      const slotButtons = ['06:15','16:00'].map(slot => {
+      // Tab dari daftar slot yang dikirim server (Admin > Data Master 'Kata-kata Penutup' bisa 1-4 jam), bukan jam tertanam.
+      const slotButtons = validSlots.map(slot => {
         const state = getClosingSlotState(closing, slot);
         const selected = slot === selectedClosingSlot ? ' selected' : '';
         return `<button class="closing-slot-tab${selected}" onclick="selectClosingSlot('${slot}')">
@@ -3514,8 +3540,8 @@
             showActionPopup('ERROR', 'Tidak Ada Respons', 'Server tidak mengembalikan hasil.', 'fa-triangle-exclamation');
             return;
           }
-          if (result.blocked && (!result.websiteResults || !result.websiteResults.length)) {
-            showActionPopup('ERROR', 'Pengiriman Diblokir', result.message || 'Pengiriman tidak dapat diproses.', 'fa-ban');
+          if ((result.blocked || apiFailed(result)) && (!result.websiteResults || !result.websiteResults.length)) {
+            showActionPopup('ERROR', 'Pengiriman Diblokir', apiMessage(result, 'Pengiriman tidak dapat diproses.'), 'fa-ban');
             return;
           }
           showPredictionSendResult(result);
@@ -3598,8 +3624,8 @@
             showActionPopup('ERROR', 'Tidak Ada Respons', 'Server tidak mengembalikan hasil.', 'fa-triangle-exclamation');
             return;
           }
-          if (result.blocked && (!result.websiteResults || !result.websiteResults.length)) {
-            showActionPopup('ERROR', 'Pengiriman Diblokir', result.message || 'Pengiriman tidak dapat diproses.', 'fa-ban');
+          if ((result.blocked || apiFailed(result)) && (!result.websiteResults || !result.websiteResults.length)) {
+            showActionPopup('ERROR', 'Pengiriman Diblokir', apiMessage(result, 'Pengiriman tidak dapat diproses.'), 'fa-ban');
             return;
           }
           showPredictionSendResult(result);
@@ -4288,11 +4314,11 @@
             return;
           }
 
-          if (result.blocked && (!result.websiteResults || !result.websiteResults.length)) {
+          if ((result.blocked || apiFailed(result)) && (!result.websiteResults || !result.websiteResults.length)) {
             showActionPopup(
               'ERROR',
               'Pengiriman Diblokir',
-              result.message || 'Pengiriman tidak dapat diproses.',
+              apiMessage(result, 'Pengiriman tidak dapat diproses.'),
               'fa-ban'
             );
             return;
@@ -4381,6 +4407,10 @@
       autoInputTimer = setInterval(() => {
         if (currentPage !== 'auto-input') { clearInterval(autoInputTimer); return; }
         if (document.hidden) return;
+        // 6 dtk hanya saat ada job antre/berjalan (progres); selain itu 20 dtk -- tiap poll = 1 request Worker + beberapa query Turso.
+        const busy = ((autoInputState && autoInputState.jobs) || []).some(j => j.status === 'RUNNING' || j.status === 'QUEUED');
+        if (!busy && Date.now() - (window.__aiPollAt || 0) < 20000) return;
+        window.__aiPollAt = Date.now();
         // Jangan menimpa kolom yang sedang diketik.
         const ae = document.activeElement;
         if (ae && /^(INPUT|SELECT)$/.test(ae.tagName) && ae.type !== 'checkbox' && document.getElementById('auto-input-page').contains(ae)) return;
@@ -4704,7 +4734,7 @@
       if (!box) return;
       const fast = (aiTotoData && aiTotoData.running) || Date.now() < aiTotoBurstUntil;
       aiTotoTimer = setTimeout(() => {
-        if (!document.getElementById('aiTotoBox')) return; // pindah menu -> berhenti
+        if (!document.getElementById('aiTotoBox') || currentPage !== 'auto-input' || !currentUser) return; // pindah menu / logout -> berhenti (box-nya tetap ada, hanya disembunyikan)
         const ae = document.activeElement;
         // tab tersembunyi atau pilihan Urutkan BARU dibuka (<8 dtk): jangan menggambar ulang. Fokus yang tertinggal di pilihan itu tidak boleh menghentikan pembaruan selamanya.
         if (document.hidden || (ae && ae.tagName === 'SELECT' && box.contains(ae) && Date.now() - aiSortFocusAt < 8000)) { autoInputTotoSchedule(); return; }
@@ -5906,7 +5936,14 @@
       if (!lastSessionsSignature) body.innerHTML = '<tr><td colspan="7" class="table-loading-cell"><i class="fa-solid fa-circle-notch"></i>Memuat...</td></tr>';
 
       google.script.run
-        .withSuccessHandler(data => renderActiveSessions(data))
+        .withSuccessHandler(data => {
+          if (apiFailed(data)) { // dulu tampil 'undefined user online' + 'Tidak ada user yang sedang login'
+            if (meta) meta.textContent = 'Gagal memuat sesi aktif: ' + apiMessage(data);
+            body.innerHTML = '<tr><td colspan="7" class="p-3 text-center text-rose-300 py-6">Gagal memuat sesi aktif: ' + escapeHtml(apiMessage(data)) + '</td></tr>';
+            return;
+          }
+          renderActiveSessions(data);
+        })
         .withFailureHandler(err => {
           if (meta) meta.textContent = 'Gagal memuat sesi aktif: ' + ((err && err.message) || err);
           body.innerHTML = '<tr><td colspan="7" class="p-3 text-center text-rose-300 py-6">Gagal memuat sesi aktif. Coba refresh.</td></tr>';
@@ -7644,6 +7681,7 @@ Tindakan ini tidak dapat dibatalkan.`,
       showActionPopup('LOADING', 'Memicu GitHub Actions', (count?('Target '+count+' artikel'):'Proses semua')+' ke '+targetLabel+' -- tidak kena limit subrequest Cloudflare, hasilnya masuk 1-2 menit lagi...', 'fa-brands fa-github');
       google.script.run.withSuccessHandler(r=>{
         closeActionPopup();
+        if (apiFailed(r)) { showActionPopup('ERROR', 'Gagal Memicu', apiMessage(r), 'fa-triangle-exclamation'); return; } // dulu tetap menampilkan bar 'Dipicu' palsu
         toast((r&&r.message)||'Dipicu! Cek progress di bawah.');
         botGithubProgressShow('Dipicu, menunggu GitHub mulai...', 8);
         botGithubPollStatus();

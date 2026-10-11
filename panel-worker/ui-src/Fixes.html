@@ -274,6 +274,13 @@
   try { var st = localStorage.getItem(KEY); if (st === 'docked') state = 'docked'; } catch (e) {}
   try { hist = JSON.parse(sessionStorage.getItem(HKEY) || '[]').slice(-20); } catch (e) { hist = []; }
 
+  // Akun berganti di tab yang sama: riwayat obrolan akun sebelumnya tidak boleh terlihat / ikut terkirim sebagai konteks.
+  window.addEventListener('kd:user-reset', function () {
+    hist = [];
+    try { sessionStorage.removeItem(HKEY); } catch (e) {}
+    try { render(); } catch (e) {}
+  });
+
   var SUGGEST = ['Cara kirim result ke semua sistem?', 'Cara tarik data Lap Admin?', 'Kenapa tombol Kirim gagal?', 'Cara tambah user baru (admin)?', 'Apa itu Auto Prediksi?'];
 
   function setState(s) {
