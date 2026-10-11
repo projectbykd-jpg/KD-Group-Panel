@@ -153,7 +153,7 @@ describe("daftar Panel-Z per halaman", () => {
 		const before = urls.length;
 		expect(await h.push("242908", "6360")).toBe("Berhasil dikirim");
 		const html = await h.reload(["242908"]);
-		expect(urls.slice(before).filter((u) => u.includes("hal=result"))).toEqual(["GET https://pz.test/dashboard.php?hal=result&no=2"]);
+		expect(urls.slice(before).filter((u) => u.includes("hal=result"))).toEqual(["GET https://pz.test/dashboard.php?hal=result&no=2", "GET https://pz.test/dashboard.php?hal=result&no=3"]); // + halaman berikutnya: daftar bisa bergeser saat Panel-Z membuat baris baru
 		expect(parsePanelZRows(html).find((r) => r.id === "242908")).toMatchObject({ value: "6360", filled: true });
 		vi.unstubAllGlobals();
 	});
@@ -400,6 +400,46 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 		await run();
 		expect(zRows.find((r) => r.id === 71)!.value).toBe("7036"); // baris kosong akhirnya terisi
 		expect((await byMarketDate())["TOTOMACAU-00 2026-10-08"]).toBe("SENT");
+	});
+	it("baca ulang: baris bergeser (id tidak ada di halaman) tetap dikenali lewat pasaran+tanggal -> SENT, bukan 'belum tampil'", async () => {
+		await addUser("tester");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("tester");
+		await setMode(2);
+		const shifted = async (): Promise<PanelZHandle | string> => {
+			const h = (await panel()) as PanelZHandle;
+			return { ...h, reload: async () => zHtml(zRows.map((r) => ({ ...r, id: Number(r.id) + 100000 }))) };
+		};
+		await run({ panel: shifted });
+		expect((await byMarketDate())["TOTOMACAU-00 2026-10-08"]).toBe("SENT");
+	});
+	it("angka tidak tampil: keterangan menyebut isi baris sesudah dikirim (bahan diagnosis), bukan cuma 'cek manual'", async () => {
+		await addUser("tester");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("tester");
+		await setMode(2);
+		panelOpts.noApply = true;
+		await run();
+		const row = (await listTotoLog(env, ["HUGOTOGEL"])).find((r) => r.market === "TOTOMACAU-00" && r.rowAt.startsWith("2026-10-08"))!;
+		expect(row.status).toBe("FAILED");
+		expect(row.detail).toMatch(/baris \d+ berisi kosong/);
+	});
+	it("gagal yang sudah dilaporkan & dicoba ulang tiap jam: tidak dihitung 'gagal' lagi (tidak jadi alarm berulang), tetap dicoba", async () => {
+		await addUser("tester");
+		addPanelZ("HUGOTOGEL");
+		await enableWithSession("tester");
+		await setMode(2);
+		panelOpts.failPush = true;
+		for (let i = 0; i < 3; i++) await run();
+		const held = await run();
+		expect(held.failed).toBe(0); // masa tahan: diam, bukan "1 gagal" tiap putaran
+		turso.current!.raw.prepare(`UPDATE toto_macau_log SET updated_at = ? WHERE status = 'FAILED' AND period > 0`).run(tsPlusMinutes(-120));
+		pushed.length = 0;
+		const again = await run();
+		expect(again.failed).toBe(0);
+		expect(again.stillFailed ?? 0).toBeGreaterThan(0);
+		const ev = (await listTotoEvents(env, ["HUGOTOGEL"], 50)).events.find((e) => e.kind === "end")!;
+		expect(ev.msg).toMatch(/masih gagal \(sudah dilaporkan/);
 	});
 	it("pemicu cron: memicu workflow sesuai jeda, tidak dobel, dipercepat bila ada baris menunggu, mati bila mode 0", async () => {
 		await setMode(2);
