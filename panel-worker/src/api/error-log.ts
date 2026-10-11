@@ -3,6 +3,7 @@ import { requireSession } from "./auth";
 import { logActivity } from "../lib/activity";
 import { alertTgCfg, loadIntegrations } from "../lib/integrations";
 import { deleteErrors, deliverAlert, listErrors, recordError, recordTestError, setErrorStatus } from "../lib/error-log";
+import { sendDailyReportNow, tanggalIndo } from "../lib/admin-notify";
 
 export async function adminErrorList(env: Env, token: string, options: unknown) {
 	await requireSession(env, token, { admin: true, ignoreMaintenance: true });
@@ -74,4 +75,17 @@ export async function clientErrorReport(env: Env, token: string, report: unknown
 		username: s.username,
 	});
 	return { success: true };
+}
+
+/** Tombol KIRIM LAPORAN HARIAN: kirim ulang laporan harian (bawaan kemarin) ke Telegram admin sekarang juga. */
+export async function adminDailyReportSend(env: Env, token: string, day: unknown) {
+	const s = await requireSession(env, token, { admin: true, ignoreMaintenance: true });
+	const r = await sendDailyReportNow(env, typeof day === "string" ? day : undefined);
+	if (r.result === "belum-diatur") return { success: false, message: "Isi Token bot & Chat ID di Admin › Integrasi › Notifikasi Galat (Telegram) dulu." };
+	if (r.result !== "Terkirim") {
+		await loadIntegrations(env);
+		return { success: false, message: "Gagal kirim: " + r.result.replace(alertTgCfg().token || "\u0000", "***") };
+	}
+	await logActivity(env, s.username, "KIRIM LAPORAN HARIAN", `Laporan ${r.day} dikirim ulang ke Telegram admin.`, "BERHASIL", "");
+	return { success: true, message: `Laporan harian ${tanggalIndo(r.day)} terkirim ke Telegram.` };
 }

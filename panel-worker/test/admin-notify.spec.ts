@@ -21,6 +21,9 @@ import { resetIntegrationsCache, saveIntegrations } from "../src/lib/integration
 import { resetSysCache, saveSys } from "../src/lib/settings";
 import { autoPostFailText } from "../src/api/prediction";
 import { fakeEnv, fakeTurso } from "./helpers/fake-env";
+import { adminDailyReportSend } from "../src/api/error-log";
+import { checkLogin } from "../src/api/auth";
+import { hashPassword } from "../src/lib/crypto";
 
 const TOKEN = "123456789:AAEhBOweik6ad9r_QXMENQjcrEZhGbbpR_H";
 let ctx: ReturnType<typeof fakeEnv>;
@@ -291,5 +294,30 @@ describe("Auto Posting prediksi gagal final", () => {
 		);
 		expect(t).toBe("PREDIKSI 1 2026-10-11: gagal setelah 3x percobaan — FOLA (Tele Error: chat not found)");
 		expect(autoPostFailText(undefined, "PRED-2", "2026-10-11", 3)).toContain("PRED-2 2026-10-11");
+	});
+});
+
+describe("tombol Kirim Laporan Harian (Admin › Error & Bug)", () => {
+	const login = async (u: string, role: string) => {
+		ctx.db.prepare(`INSERT INTO users (username, username_lc, password_hash, role, status) VALUES (?, ?, ?, ?, 'AKTIF')`).run(u, u.toLowerCase(), await hashPassword("pw-" + u), role);
+		return ((await checkLogin(ctx.env, u, "pw-" + u, "")) as { sessionToken: string }).sessionToken;
+	};
+	it("admin: laporan kemarin langsung terkirim (tanpa menunggu jam 07 / antrean); operator ditolak; belum diatur -> petunjuk", async () => {
+		const boss = await login("Boss", "ADMIN");
+		expect((await adminDailyReportSend(ctx.env, boss, "")).success).toBe(false); // belum diatur
+		await configure();
+		await ensureAutoInputTables(ctx.env);
+		await ensureNewsCategoryColumns(ctx.env);
+		const r = await adminDailyReportSend(ctx.env, boss, "");
+		expect(r.success).toBe(true);
+		const msg = sent.at(-1)!;
+		expect(msg).toContain("📊 <b>Laporan harian</b>");
+		expect(msg).toContain("Dikirim ulang dari panel");
+		expect(msg).toContain("📰 <b>BOT News</b>");
+		// tidak mengganggu laporan otomatis: antrean laporan hari ini tetap kosong
+		const hasQueue = ctx.db.prepare(`SELECT 1 FROM sqlite_master WHERE name = 'admin_notify'`).get();
+		expect(hasQueue ? queue().filter((q) => q.kind === "daily") : []).toHaveLength(0);
+		const op = await login("Ani", "OPERATOR");
+		await expect(adminDailyReportSend(ctx.env, op, "")).rejects.toThrow();
 	});
 });
