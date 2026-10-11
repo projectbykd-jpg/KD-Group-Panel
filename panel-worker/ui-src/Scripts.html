@@ -5810,6 +5810,13 @@
         errState.status = 'open'; errLoad(true);
       }).withFailureHandler(e => { if (btn) btn.disabled = false; toast('Gagal: ' + ((e && e.message) || e)); }).adminErrorSelfTest(currentSessionToken);
     }
+    function errDailySend(btn) {
+      if (btn) btn.disabled = true;
+      google.script.run.withSuccessHandler(r => {
+        if (btn) btn.disabled = false;
+        toast((r && r.message) || 'Selesai');
+      }).withFailureHandler(e => { if (btn) btn.disabled = false; toast('Gagal: ' + ((e && e.message) || e)); }).adminDailyReportSend(currentSessionToken, '');
+    }
     function errSelAll() { errState.rows.forEach(r => errState.sel.add(r.id)); errPaint(); }
     function errToggle(id, on) { if (on) errState.sel.add(id); else errState.sel.delete(id); errSelBar(); }
     function errSet(ids, status) {

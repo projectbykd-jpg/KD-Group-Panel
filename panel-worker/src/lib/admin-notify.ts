@@ -400,6 +400,18 @@ export async function queueDailyReport(env: Env, nowMs = Date.now()): Promise<bo
 	return enqueueNotify(env, "daily", key, { html: await buildDailyReport(env, yesterday(date)) });
 }
 
+/** Tombol admin "Kirim Laporan Harian": kirim LANGSUNG laporan satu tanggal (bawaan kemarin), tanpa antrean & tanpa
+ *  menunggu jam laporan. Tidak mengubah jadwal laporan otomatis. Mengembalikan hasil Telegram ("Terkirim" / galat). */
+export async function sendDailyReportNow(env: Env, day?: string, nowMs = Date.now()): Promise<{ result: string; day: string }> {
+	const d = day && /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : yesterday(wibNow(nowMs).date);
+	await loadIntegrations(env);
+	const c = alertTgCfg();
+	if (!c.token || !c.chatId) return { result: "belum-diatur", day: d };
+	const html = (await buildDailyReport(env, d)) + "\n\n<i>Dikirim ulang dari panel.</i>";
+	const { result } = await deliverAlert(env, html, false, true);
+	return { result, day: d };
+}
+
 /** Satu tick cron 5 menit: pindai kegagalan final, antre laporan harian, lalu kirim antrean. */
 export async function adminNotifyTick(env: Env): Promise<number> {
 	await scanFinalFailures(env).catch(() => 0);
