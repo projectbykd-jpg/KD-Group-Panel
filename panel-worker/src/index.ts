@@ -13,6 +13,7 @@ import { getTurso } from "./lib/turso";
 import { constEq } from "./lib/crypto";
 import { checkLogin, logout, resumeSession } from "./api/auth";
 import { deepHealth } from "./lib/health";
+import { adminNotifyTick, pruneAdminNotify } from "./lib/admin-notify";
 import { getBootstrapData, getDashboard, homeInsights } from "./api/dashboard";
 import { logClientActivity } from "./api/activity";
 import { retryFailedSystem, sendToPanelZOnly, smartAutoSendFast } from "./api/send";
@@ -175,6 +176,7 @@ async function dailyPrune(env: Env): Promise<number | "skip"> {
 	await pruneExpiredSessions(env).catch(() => {});
 	await pruneAutoPrediksiHistory(env).catch(cronFail(env, "prune auto prediksi")); // job & catatan Toto Macau: simpan N hari (bawaan 7)
 	await pruneErrorLog(env).catch(() => {}); // log Error & Bug: simpan N hari (sys_errorlog_days)
+	await pruneAdminNotify(env).catch(() => {}); // antrean notifikasi admin: buang yang terkirim > 14 hari
 	return pruneActivityLogCron(env).catch(() => 0);
 }
 
@@ -784,6 +786,8 @@ export default {
 			await newsPruneQueueDaily(env).catch(cronFail(env, "prune antrean berita"));
 			// Auto Posting channel Telegram (nonaktif = 1 query konfigurasi saja; jeda/batas harian diatur di Admin > Pengaturan Sistem).
 			await tgChannelRun(env).catch(cronFail(env, "posting channel telegram"));
+			// Notifikasi admin ke Telegram: pindai kegagalan final (Auto Prediksi, Toto Macau), laporan harian, lalu kirim antrean.
+			await adminNotifyTick(env).catch(cronFail(env, "notifikasi admin"));
 		} else {
 			// Percobaan ulang otomatis Auto Prediksi (job gagal -> coba lagi tiap ±2 menit). Maks 1 job/tick; kalau jalan, pump Invest
 			// menunggu tick berikutnya supaya tidak berebut batas 50 subrequest per invocation.

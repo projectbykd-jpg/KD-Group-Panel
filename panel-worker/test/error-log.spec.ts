@@ -215,7 +215,7 @@ describe("notifikasi Telegram galat baru", () => {
 		expect(sent).toHaveLength(0);
 		expect(rows()).toHaveLength(1);
 	});
-	it("galat BARU dikirim; pengulangan & galat lain dalam jeda minimum tidak (anti banjir)", async () => {
+	it("galat BARU dikirim; pengulangan tidak; galat lain dalam jeda minimum DITAHAN di antrean (bukan dibuang)", async () => {
 		await setup();
 		await rec("galat pertama D1_ERROR");
 		expect(sent).toHaveLength(1);
@@ -223,9 +223,11 @@ describe("notifikasi Telegram galat baru", () => {
 		expect(decodeURIComponent(sent[0].body.replace(/\+/g, " "))).toMatch(/Error baru.*\n\(api\) aksiX\ngalat pertama/s);
 		resetErrorThrottle();
 		await rec("galat pertama D1_ERROR"); // pengulangan: bukan baru
-		await rec("galat kedua lain sama sekali"); // baru tapi masih dalam jeda 60 menit
+		await rec("galat kedua lain sama sekali"); // baru tapi masih dalam jeda minimum
 		expect(sent).toHaveLength(1);
 		expect(rows()).toHaveLength(2); // tetap tercatat di menu
+		const q = ctx.db.prepare(`SELECT kind, text, sent_at FROM admin_notify`).all() as { kind: string; text: string; sent_at: string }[];
+		expect(q).toEqual([{ kind: "err", text: expect.stringContaining("galat kedua lain sama sekali"), sent_at: "" }]); // dikirim sebagai ringkasan saat jeda lewat
 	});
 	it("muncul lagi setelah ditandai Selesai -> dikirim lagi (setelah jeda)", async () => {
 		await setup();

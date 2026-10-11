@@ -13,6 +13,7 @@ import { alertTgCfg, loadIntegrations, saveIntegrations } from "./integrations";
 import { logActivity } from "./activity";
 import { sendTelegram } from "../senders/telegram";
 import { tsNow } from "./time";
+import { enqueueNotify, notifyEnabled } from "./admin-notify";
 
 export type ErrSource = "api" | "cron" | "browser" | "toto" | "auto-input" | "lainnya";
 export type ErrStatus = "open" | "resolved" | "ignored";
@@ -234,13 +235,15 @@ export async function recordError(env: Env, input: ErrInput, opts: { force?: boo
 		let alertKind = "";
 		let skip: RecordResult["alert"] = "";
 		const impact: ErrImpact = ERR_IMPACTS.includes(input.impact as ErrImpact) ? (input.impact as ErrImpact) : defaultImpact(source);
-		// Telegram hanya untuk galat yang MENGHAMBAT user; yang di latar cukup tampil di menu (tidak membanjiri chat).
+		// Galat MENGHAMBAT user: dikirim langsung (hormati jeda minimum). Galat LATAR: masuk antrean notifikasi admin
+		// (lib/admin-notify, dikirim tiap tick cron 5 menit). Galat baru yang tertahan jeda TIDAK dibuang: ikut antrean ringkasan.
 		const st = impact === "blocking" ? await alertState(env, force).catch(() => "jeda" as const) : ("latar" as const);
-		if (st === "ok") {
+		if (st === "ok" || st === "jeda" || st === "latar") {
 			const prev = await env.DB.prepare(`SELECT status FROM error_log WHERE fp = ?`).bind(fp).first<{ status: string }>();
 			if (!prev) alertKind = "baru";
 			else if (prev.status === "resolved") alertKind = "muncul lagi";
-		} else if (st !== "latar") skip = st;
+		}
+		if (st === "belum-diatur") skip = st;
 		const ts = tsNow();
 		const who = scrub(input.username ?? "", 60).replace(/[,\s]+/g, "_");
 		await env.DB.prepare(
@@ -278,9 +281,19 @@ export async function recordError(env: Env, input: ErrInput, opts: { force?: boo
 			)
 			.run();
 		let result: RecordResult = { alert: "" };
-		if (alertKind) {
+		const line = `[${alertKind}] (${source}) ${loc || "-"}: ${message.slice(0, 300)}`;
+		// kunci unik per KEJADIAN (baru / muncul lagi), bukan per detik: dua kejadian dalam detik yang sama tidak boleh saling menimpa
+		const nkey = `err:${fp}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+		if (alertKind && st === "ok" && (force || (await notifyEnabled(env, "err")))) {
 			const r = await sendAlert(env, alertKind, { source, loc, message });
 			result = r === "Terkirim" ? { alert: "terkirim" } : { alert: "gagal", detail: r };
+		} else if (alertKind && st === "jeda") {
+			await enqueueNotify(env, "err", nkey, line); // dikirim sebagai ringkasan begitu jeda lewat
+			result = { alert: "jeda" };
+		} else if (alertKind && st === "latar") {
+			// hanya bila Telegram admin sudah diatur -- jangan menumpuk antrean lama yang membanjiri chat saat baru dipasang
+			await loadIntegrations(env);
+			if (alertTgCfg().token && alertTgCfg().chatId) await enqueueNotify(env, "err-bg", nkey, line);
 		} else if (skip) result = { alert: skip };
 		// batas baris: dicek tiap 25 tulisan (bukan tiap galat) supaya hemat
 		if (++writes % 25 === 0) await capRows(env);
