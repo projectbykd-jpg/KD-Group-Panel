@@ -14,6 +14,7 @@ import { deliverAlert } from "./error-log";
 import { getTurso } from "./turso";
 import { tsNow, tsPlusMinutes } from "./time";
 import { TOTO_MAX_ATTEMPTS } from "./toto-macau";
+import { finalFailureSql, RETRY_WINDOW_MIN } from "./auto-input";
 
 export type NotifyKind = "err" | "err-bg" | "autopost" | "autoinput" | "toto" | "channel" | "daily";
 
@@ -92,25 +93,31 @@ export function cleanReason(r: string): string {
 		.replace(/^\s*\[Percobaan ulang \d+\/\d+\]\s*/i, "")
 		.replace(/\s*\((?:dicoba lagi otomatis[^)]*|percobaan otomatis habis[^)]*)\)\s*$/i, "")
 		.replace(/\s*\(judul '[^']*' tidak ada\)/i, "")
+		.replace(/\s*Diterima: HTTP[\s\S]*$/i, "") // cuplikan diagnosa per website: tetap di panel, tidak di Telegram (agar bisa digabung)
 		.trim() || "gagal (tanpa keterangan)";
 }
 
 /** Masukkan kejadian ke antrean (sekali per kunci). Tidak pernah melempar. Mengembalikan true bila baru masuk. */
 export async function enqueueNotify(env: Env, kind: NotifyKind, key: string, item: string | NotifyItem): Promise<boolean> {
+	return (await enqueueNotifyResult(env, kind, key, item)) === "queued";
+}
+/** Seperti enqueueNotify, tetapi membedakan 'sengaja dilewati' (kategori mati / belum diatur / sudah ada) dari 'error'
+ *  (database gagal) -- pemindai hanya menandai kejadian 'sudah dikabarkan' bila BUKAN error, supaya kabarnya tidak hilang. */
+export async function enqueueNotifyResult(env: Env, kind: NotifyKind, key: string, item: string | NotifyItem): Promise<"queued" | "skipped" | "error"> {
 	try {
-		if (!(await notifyEnabled(env, kind))) return false;
+		if (!(await notifyEnabled(env, kind))) return "skipped";
 		// Telegram admin belum diatur -> jangan menumpuk (kalau tidak, begitu Token diisi grup dibanjiri kejadian berhari-hari);
 		// kejadiannya tetap terlihat di panel (Error & Bug, Auto Prediksi, Riwayat).
 		await loadIntegrations(env);
 		const c = alertTgCfg();
-		if (!c.token || !c.chatId) return false;
+		if (!c.token || !c.chatId) return "skipped";
 		await ensureTable(env);
 		const r = await env.DB.prepare(`INSERT OR IGNORE INTO admin_notify (nkey, kind, text, created_at) VALUES (?, ?, ?, ?)`)
 			.bind(String(key).slice(0, 300), kind, encodeItem(item), tsNow())
 			.run();
-		return (r.meta?.changes ?? 0) > 0;
+		return (r.meta?.changes ?? 0) > 0 ? "queued" : "skipped";
 	} catch {
-		return false;
+		return "error";
 	}
 }
 
@@ -243,15 +250,16 @@ export async function scanFinalFailures(env: Env): Promise<number> {
 	if (wantAi) {
 		const max = await getSys(env, "sys_auto_input_retry_max");
 		const r = await db
-			.prepare(`SELECT id, website, market, stage, detail, attempts FROM auto_input_job WHERE status = 'FAILED' AND hidden = 0 AND attempts >= ? AND tg_sent = 0 AND updated_at >= ? ORDER BY id ASC LIMIT 20`)
-			.bind(max, since)
+			.prepare(`SELECT id, website, market, stage, detail, attempts FROM auto_input_job WHERE status = 'FAILED' AND hidden = 0 AND ${finalFailureSql()} AND tg_sent = 0 AND updated_at >= ? ORDER BY id ASC LIMIT 20`)
+			.bind(max, tsPlusMinutes(-RETRY_WINDOW_MIN), since)
 			.all<Record<string, unknown>>()
 			.catch(() => ({ results: [] as Record<string, unknown>[] }));
 		const ids: number[] = [];
 		for (const j of r.results ?? []) {
 			const item = { r: cleanReason(String(j.detail || "")), m: String(j.market || "-"), s: String(j.website || "-") };
-			if (await enqueueNotify(env, "autoinput", `ai:${j.id}`, item)) n++;
-			ids.push(Number(j.id));
+			const res = await enqueueNotifyResult(env, "autoinput", `ai:${j.id}`, item);
+			if (res === "queued") n++;
+			if (res !== "error") ids.push(Number(j.id)); // database gagal -> jangan tandai, coba lagi tick berikutnya
 		}
 		if (ids.length) await db.prepare(`UPDATE auto_input_job SET tg_sent = 1 WHERE id IN (${ids.map(() => "?").join(",")})`).bind(...ids).run();
 	}
@@ -270,8 +278,9 @@ export async function scanFinalFailures(env: Env): Promise<number> {
 				m: `${market} ${String(t.row_at || "").slice(5, 16)}`.trim(),
 				s: `${t.website}${t.number ? " (admin " + t.number + ")" : ""}`,
 			};
-			if (await enqueueNotify(env, "toto", `toto:${t.id}:${t.status}`, item)) n++;
-			ids.push(Number(t.id));
+			const res = await enqueueNotifyResult(env, "toto", `toto:${t.id}:${t.status}`, item);
+			if (res === "queued") n++;
+			if (res !== "error") ids.push(Number(t.id));
 		}
 		if (ids.length) await db.prepare(`UPDATE toto_macau_log SET tg_sent = 1 WHERE id IN (${ids.map(() => "?").join(",")})`).bind(...ids).run();
 	}

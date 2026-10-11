@@ -464,7 +464,8 @@ export async function runAutoInput(opts: {
 
 		// 2. halaman Nomor Keluar + validasi
 		const angkaPath = `admin_angka13.php?psr=${code}`;
-		const angkaHtml = await adminReq(f, sess, angkaPath);
+		const angkaMeta = { status: 0, trail: [] as string[] };
+		const angkaHtml = await adminReq(f, sess, angkaPath, {}, angkaMeta);
 		let page: AngkaPage | null = null;
 		let used = plan.prizes;
 		let skipKirim = false;
@@ -478,7 +479,25 @@ export async function runAutoInput(opts: {
 				period = String(top.period);
 			}
 		}
-		if (!skipKirim) page = parseAngkaPage(angkaHtml, plan);
+		if (!skipKirim) {
+			try {
+				page = parseAngkaPage(angkaHtml, plan);
+			} catch (e) {
+				// Sesi SUDAH terbukti hidup (sidebar "Agent (...)" terbaca di atas), jadi "tidak dikenali" di sini BUKAN sesi habis.
+				// Dulu isi halaman dibuang -> pesan selalu generik dan penyebab (mis. pasaran ini diinput di halaman lain) tidak
+				// pernah terlihat. Sekarang simpan apa yang benar-benar diterima untuk diagnosa.
+				if (e instanceof Stop && /tidak dikenali/i.test(e.message)) {
+					const title = (angkaHtml.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
+					const pool = home.match(new RegExp(`id=["']param${code}["'][^>]*value=["']([^"']*)`, "i"))?.[1] ?? home.match(new RegExp(`value=["']([^"']*)["'][^>]*id=["']param${code}["']`, "i"))?.[1] ?? "-";
+					throw new Stop(
+						`Halaman Nomor Keluar ${plan.market} tidak berisi form input (sesi login OK) — kemungkinan pasaran ini diinput di halaman lain atau belum waktunya; matikan pasaran ini di Auto Prediksi bila selalu gagal. ` +
+							`Diterima: HTTP ${angkaMeta.status} [${angkaMeta.trail.join(" ")}] psr=${code} pool=${pool} judul "${title}" isi "${htmlText(angkaHtml).slice(0, 240)}"`,
+						"cek",
+					);
+				}
+				throw e;
+			}
+		}
 		const pagePeriod = skipKirim ? Number(period) : page!.period;
 		if (page) {
 			period = String(page.period);

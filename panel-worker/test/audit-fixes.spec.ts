@@ -54,6 +54,22 @@ describe("perbaikan hasil audit", () => {
 		expect(sites).not.toContain("HUGO");
 	});
 
+	it("kode website yang sudah dipakai tidak bisa ditimpa (rename / tambah) -- kredensial website lain aman", async () => {
+		const boss = await tok("Boss", "pw-boss");
+		await adminSaveSite(ctx.env, boss, { website: "HUGO", telegramToken: "hugo-token" });
+		await adminSaveSite(ctx.env, boss, { website: "FOLA", telegramToken: "fola-token" });
+		const r1 = (await adminSaveSite(ctx.env, boss, { website: "FOLA", originalWebsite: "HUGO", telegramToken: "x" })) as { success: boolean; message?: string };
+		expect(r1.success).toBe(false);
+		expect(r1.message).toContain("sudah dipakai");
+		const r2 = (await adminSaveSite(ctx.env, boss, { website: "FOLA", telegramToken: "" })) as { success: boolean };
+		expect(r2.success).toBe(false);
+		const rows2 = rows(`SELECT website FROM site_accounts ORDER BY website`);
+		expect(rows2.map((x) => x.website)).toEqual(["FOLA", "HUGO"]);
+		// edit biasa (kode sama) tetap bisa
+		const r3 = (await adminSaveSite(ctx.env, boss, { website: "FOLA", originalWebsite: "FOLA", telegramToken: "baru" })) as { success: boolean };
+		expect(r3.success).not.toBe(false);
+	});
+
 	it("WD Listed: baris website lain dibuang & baris milik website lain tidak bisa direbut lewat ref_no", async () => {
 		const mk = (website: string, ref: string, user = "u1") => ({ website, idTrans: "t", tanggal: "x", idUser: user, jumlah: 1000, statusText: "PGA Pending", pgaRefNo: ref, vendorName: "v" });
 		expect(await wdListedAdd(ctx.env, "ani", [mk("HUGO", "REF-A")], ["HUGO"])).toBe(1);

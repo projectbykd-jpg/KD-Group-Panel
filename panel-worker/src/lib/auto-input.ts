@@ -20,6 +20,19 @@ import { PREDICTION_SITE_NAMES } from "./prediction";
 export const RUNNING_TTL_MIN = 5;
 /** Percobaan ulang otomatis hanya untuk job yang baru (job lama sudah tidak relevan: periode sudah lewat). */
 export const RETRY_WINDOW_MIN = 60;
+/** Gagal di tahap Hitung yang TIDAK boleh dicoba ulang otomatis: tombol Hitung mungkin sudah ditekan (Hitung dikirim tapi
+ *  tombol masih ada / proses terputus) -> mengulang bisa menghitung (membayar) dua kali. Hanya dua kasus Hitung yang pasti
+ *  aman diulang: halaman Hitung tidak cocok (Hitung TIDAK dijalankan) atau tidak dikenali (belum ditekan). */
+export function noRetrySql(alias = ""): string {
+	const a = alias ? alias + "." : "";
+	return `(${a}stage = 'hitung' AND ${a}detail NOT LIKE '%Hitung TIDAK dijalankan%' AND ${a}detail NOT LIKE '%halaman Hitung tidak dikenali%')`;
+}
+/** Job GAGAL yang tidak akan dicoba ulang lagi (peringatan terakhir): percobaan habis, di luar jendela percobaan ulang,
+ *  atau termasuk yang tidak boleh diulang. Dulu hanya 'percobaan habis' -> job lain tidak pernah diperingatkan. */
+export function finalFailureSql(alias = ""): string {
+	const a = alias ? alias + "." : "";
+	return `(${a}attempts >= ? OR ${a}created_at < ? OR ${noRetrySql(alias)})`;
+}
 
 export type JobStatus = "QUEUED" | "RUNNING" | "DONE" | "FAILED" | "SKIPPED";
 
@@ -594,7 +607,8 @@ export async function dueRetryJobs(env: Env, maxRetries: number, gapMin: number,
 	const res = await getTurso(env)
 		.prepare(
 			`SELECT j.* FROM auto_input_job j JOIN auto_input_config c ON c.username = j.username AND c.enabled = 1
-			 WHERE j.status = 'FAILED' AND j.hidden = 0 AND j.attempts < ? AND j.updated_at <= ? AND j.created_at >= ? ORDER BY j.updated_at ASC, j.id ASC LIMIT ?`,
+			 WHERE j.status = 'FAILED' AND j.hidden = 0 AND j.attempts < ? AND j.updated_at <= ? AND j.created_at >= ? AND NOT ${noRetrySql("j")}
+			 ORDER BY j.updated_at ASC, j.id ASC LIMIT ?`,
 		)
 		.bind(maxRetries, tsPlusMinutes(-gapMin), tsPlusMinutes(-RETRY_WINDOW_MIN), limit)
 		.all<Record<string, unknown>>();
@@ -627,8 +641,8 @@ export interface FailedAlert {
 export async function pendingFailureAlerts(env: Env, username: string, maxRetries: number): Promise<FailedAlert[]> {
 	await ensureAutoInputTables(env); // tanpa expireRunning: dipoll tiap 20 dtk, cukup cron/menu yang merapikan job basi
 	const res = await getTurso(env)
-		.prepare(`SELECT * FROM auto_input_job WHERE username = ? AND hidden = 0 AND status = 'FAILED' AND attempts >= ? AND alerted = 0 AND updated_at >= ? AND created_at >= ? ORDER BY id ASC LIMIT 20`)
-		.bind(username, Math.max(0, maxRetries), tsPlusMinutes(-6 * 60), tsPlusMinutes(-6 * 60))
+		.prepare(`SELECT * FROM auto_input_job WHERE username = ? AND hidden = 0 AND status = 'FAILED' AND ${finalFailureSql()} AND alerted = 0 AND updated_at >= ? AND created_at >= ? ORDER BY id ASC LIMIT 20`)
+		.bind(username, Math.max(0, maxRetries), tsPlusMinutes(-RETRY_WINDOW_MIN), tsPlusMinutes(-6 * 60), tsPlusMinutes(-6 * 60))
 		.all<Record<string, unknown>>();
 	return (res.results ?? []).map(rowToJob).map((j) => ({ id: j.id, website: j.website, market: j.market, prizes: j.prizes, stage: j.stage, detail: j.detail, attempts: j.attempts }));
 }

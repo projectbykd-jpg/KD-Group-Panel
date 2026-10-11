@@ -86,9 +86,11 @@ export async function upsertRegistry(
 		   sent_at = excluded.sent_at,
 		   username = excluded.username,
 		   market = excluded.market,
-		   telegram = excluded.telegram,
-		   linktree = excluded.linktree,
-		   panelz = excluded.panelz,
+		   -- tanda "sudah terkirim" hanya boleh NAIK: kiriman kedua yang gagal (klik ganda / dua operator) dulu menimpa
+		   -- telegram=1 jadi 0 sehingga teks yang sama tidak lagi diblokir sebagai duplikat.
+		   telegram = MAX(sent_registry.telegram, excluded.telegram),
+		   linktree = MAX(sent_registry.linktree, excluded.linktree),
+		   panelz = MAX(sent_registry.panelz, excluded.panelz),
 		   content = excluded.content`,
 	)
 		.bind(

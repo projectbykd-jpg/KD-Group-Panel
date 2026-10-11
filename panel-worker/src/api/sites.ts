@@ -42,6 +42,13 @@ export async function adminSaveSite(env: Env, token: string, data: Record<string
 	const vals: Record<string, string> = {};
 	for (const f of FIELDS) vals[f] = String(data[f] ?? "").trim();
 
+	// Kode website yang SUDAH dipakai website lain tidak boleh ditimpa diam-diam (dulu: rename HUGO->FOLA atau "tambah" FOLA
+	// menimpa token & kredensial FOLA dengan isi form; kolom kosong menghapusnya).
+	if (!original || original !== website) {
+		const clash = await env.DB.prepare(`SELECT 1 AS x FROM site_accounts WHERE website = ?`).bind(website).first();
+		if (clash) return { success: false, message: `Kode website ${website} sudah dipakai. Ubah data ${website} lewat tombol Edit-nya, atau pakai kode lain.` };
+	}
+
 	const cols = ["website", ...FIELDS];
 	const placeholders = cols.map(() => "?").join(", ");
 	const updates = FIELDS.map((f) => `${f} = excluded.${f}`).join(", ");

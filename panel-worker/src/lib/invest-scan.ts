@@ -555,13 +555,26 @@ export async function investPumpUser(env: Env, user: string, sliceMs = USER_SLIC
 // slice kecil per user + batas subrequest total (limit CF Free 50/invocation).
 // Kalau user sedang aktif membuka halaman, lock per-user milik polling-nya yang
 // menang -> cron skip user itu.
+/** Giliran pump satu tick: maks floor(anggaran / 8) user, diputar tiap menit; total fetch tidak pernah > anggaran. */
+export function pumpTurn(users: string[], nowMs = Date.now(), budget = FETCH_BUDGET_PER_TICK): { turn: string[]; perUserFetch: number } {
+	if (!users.length) return { turn: [], perUserFetch: 0 };
+	const MIN_FETCH_PER_USER = 8;
+	const slots = Math.max(1, Math.floor(budget / MIN_FETCH_PER_USER));
+	const start = Math.floor(nowMs / 60_000) % users.length;
+	const turn = [...users.slice(start), ...users.slice(0, start)].slice(0, slots);
+	return { turn, perUserFetch: Math.floor(budget / turn.length) };
+}
+
 export async function investPump(env: Env): Promise<void> {
 	const users = await investRunningUsers(env);
 	if (!users.length) return;
 	const deadline = Date.now() + PUMP_BUDGET_MS;
-	const perUserFetch = Math.max(8, Math.floor(FETCH_BUDGET_PER_TICK / users.length));
-	const perUserMs = Math.max(6_000, Math.floor(PUMP_BUDGET_MS / users.length));
-	for (const u of users) {
+	// Anggaran TOTAL per tick, bukan per user: dulu jatah minimum 8 fetch/user -> 6 user = 48 fetch admin (+ Turso) melewati
+	// batas 50 subrequest; cursor scan tidak tersimpan dan scan mengulang pasaran yang sama terus. Kini maks MIN_FETCH_PER_USER
+	// per user dan user dilayani bergiliran (urutan diputar tiap menit) supaya semua tetap maju.
+	const { turn, perUserFetch } = pumpTurn(users);
+	const perUserMs = Math.max(6_000, Math.floor(PUMP_BUDGET_MS / turn.length));
+	for (const u of turn) {
 		if (Date.now() >= deadline) break;
 		await investPumpUser(env, u, Math.min(perUserMs, deadline - Date.now()), perUserFetch);
 	}

@@ -864,7 +864,7 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 		expect((await byMarketDate())["TOTOMACAU-13 2026-10-08"]).toBe("CONFLICT");
 		const al = await pendingTotoAlerts(env, ["HUGOTOGEL"]);
 		expect(al.length).toBeGreaterThanOrEqual(1);
-		await ackTotoAlerts(env, al.map((a) => a.id));
+		await ackTotoAlerts(env, al.map((a) => a.id), al.map((a) => a.website));
 		expect(await pendingTotoAlerts(env, ["HUGOTOGEL"])).toHaveLength(0);
 	});
 	it("mode 1: angka BEDA tidak pernah dikoreksi (hanya ditandai), walau koreksi=1", async () => {

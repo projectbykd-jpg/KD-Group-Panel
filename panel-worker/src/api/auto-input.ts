@@ -301,7 +301,7 @@ export async function autoInputAckAlerts(env: Env, token: string, ids: number[])
 	const s = await gate(env, token);
 	const all = (Array.isArray(ids) ? ids : []).map(Number);
 	await ackFailureAlerts(env, s.username, all.filter((n) => n > 0));
-	await ackTotoAlerts(env, all.filter((n) => n < 0).map((n) => -n));
+	await ackTotoAlerts(env, all.filter((n) => n < 0).map((n) => -n), s.profile.websites);
 	return { success: true };
 }
 

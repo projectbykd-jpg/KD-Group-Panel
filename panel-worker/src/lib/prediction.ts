@@ -2,6 +2,7 @@
 // Smart Content V5.1 (generator angka per-website via seed) + Smart Lock registry
 // (kunci permanen TANGGAL || SESI || WEBSITE) di tabel D1 prediction_registry /
 // prediction_content.
+import { tsPlusMinutes } from "./time";
 import { sha256Hex } from "./crypto";
 import { getSiteAccount } from "./site";
 import { sendTelegram } from "../senders/telegram";
@@ -58,6 +59,8 @@ function nowMinutes7(): number {
 	const d = now7();
 	return d.getUTCHours() * 60 + d.getUTCMinutes();
 }
+/** Reservasi PROCESSING lebih muda dari ini dianggap masih dikerjakan request lain (tidak boleh direbut). */
+const PROCESSING_STALE_MIN = 3;
 function ts7(): string {
 	return now7().toISOString().slice(0, 19).replace("T", " ");
 }
@@ -377,6 +380,7 @@ export async function sendPredictionJob(opts: PredJobOptions) {
 	const reservations: { website: string; content: string; uniqueKey: string }[] = [];
 	const reserveStmts: D1PreparedStatement[] = [];
 	const nowText = ts7();
+	const staleBefore = tsPlusMinutes(-PROCESSING_STALE_MIN);
 
 	for (const w of websites) {
 		const prev = registry[scheduleId + "||" + w] || null;
@@ -414,8 +418,11 @@ export async function sendPredictionJob(opts: PredJobOptions) {
 				   sent_at = excluded.sent_at, request_id = excluded.request_id,
 				   detail = excluded.detail, content_hash = excluded.content_hash
 				 WHERE prediction_registry.status <> 'BERHASIL'
-				   AND prediction_registry.request_id <> ?`,
-			).bind(dateKey, scheduleId, predictionName, w, cleanUser, nowText, requestId, await sha256Hex(content), uniqueKey, requestId),
+				   AND prediction_registry.request_id <> ?
+				   -- reservasi lain yang MASIH berjalan (PROCESSING < ${PROCESSING_STALE_MIN} menit) tidak boleh direbut: dulu cron & operator
+				   -- yang menekan kirim bersamaan sama-sama lolos klaim -> prediksi terkirim 2x. Yang basi (request mati) boleh diambil alih.
+				   AND NOT (prediction_registry.status = 'PROCESSING' AND prediction_registry.sent_at > ?)`,
+			).bind(dateKey, scheduleId, predictionName, w, cleanUser, nowText, requestId, await sha256Hex(content), uniqueKey, requestId, staleBefore),
 		);
 	}
 	if (reserveStmts.length) await env.DB.batch(reserveStmts);
@@ -612,7 +619,7 @@ export async function getPredictionStatusDataInternal(
 		closing: {
 			kind: "closing",
 			name: CLOSING_PREDICTION_NAME,
-			time: "06:15 & 16:00",
+			time: CLOSING_PREDICTION_SLOTS.join(" & "),
 			activeSlot,
 			totalWebsites: websites.length,
 			exampleText: await buildClosingPredictionMessage("HUGO", now7(), activeSlot),

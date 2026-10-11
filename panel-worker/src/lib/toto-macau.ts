@@ -196,13 +196,15 @@ export async function pendingTotoAlerts(env: Env, websites: string[]): Promise<T
 		.all<Record<string, unknown>>();
 	return (res.results ?? []).map(toLog);
 }
-export async function ackTotoAlerts(env: Env, ids: number[]): Promise<void> {
+export async function ackTotoAlerts(env: Env, ids: number[], websites: string[]): Promise<void> {
 	const list = ids.filter((n) => Number.isInteger(n) && n > 0).slice(0, 50);
-	if (!list.length) return;
+	// hanya website milik akun ini -- dulu id saja, sehingga operator bisa membungkam peringatan website lain
+	const ws = [...new Set(websites.map((w) => String(w).trim().toUpperCase()).filter(Boolean))];
+	if (!list.length || !ws.length) return;
 	await ensureTables(env);
 	await getTurso(env)
-		.prepare(`UPDATE toto_macau_log SET alerted = 1 WHERE id IN (${list.map(() => "?").join(",")})`)
-		.bind(...list)
+		.prepare(`UPDATE toto_macau_log SET alerted = 1 WHERE id IN (${list.map(() => "?").join(",")}) AND website IN (${ws.map(() => "?").join(",")})`)
+		.bind(...list, ...ws)
 		.run();
 }
 
