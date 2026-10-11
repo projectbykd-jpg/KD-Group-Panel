@@ -234,13 +234,20 @@ export async function syncSessionsFromScript(
 }
 
 /** Dipanggil userscript: id sesi (asli) yang boleh dioperasikan bot + template aktif -- hanya milik `owner`. */
-export async function pullEnabledSessions(env: Env, owner: string): Promise<{ enabledKeys: string[]; templates: LivechatTemplateRow[] }> {
+export async function pullEnabledSessions(
+	env: Env,
+	owner: string,
+	opts: { includeLegacyTemplates?: boolean } = {},
+): Promise<{ enabledKeys: string[]; templates: LivechatTemplateRow[] }> {
 	await ensureTables(env);
 	const db = getTurso(env);
 	const sessions = await db.prepare(`SELECT session_key FROM livechat_session WHERE owner = ? AND bot_enabled = 1`).bind(owner).all<{ session_key: string }>();
+	// Panel menampilkan template lama (owner '') ke ADMIN; bot milik ADMIN harus memakai template yang sama dengan yang ia lihat,
+	// kalau tidak bot "aktif" tetapi tidak punya balasan dan diam. Pengguna lain TIDAK pernah memakai template lama.
+	const owners = opts.includeLegacyTemplates && owner !== "" ? [owner, ""] : [owner];
 	const templates = await db
-		.prepare(`SELECT id, reply_text, active, sort_order, updated_at FROM livechat_template WHERE owner = ? AND active = 1 ORDER BY sort_order ASC, id ASC`)
-		.bind(owner)
+		.prepare(`SELECT id, reply_text, active, sort_order, updated_at FROM livechat_template WHERE owner IN (${inList(owners)}) AND active = 1 ORDER BY sort_order ASC, id ASC`)
+		.bind(...owners)
 		.all<LivechatTemplateRow>();
 	return { enabledKeys: sessions.results.map((r) => rawKey(owner, r.session_key)), templates: templates.results };
 }
