@@ -50,7 +50,7 @@ if [ -n "$CF_TOKEN" ]; then
     acct=$(curl -sS -m 20 -H "Authorization: Bearer $CF_TOKEN" "$CF_API/accounts?per_page=5" 2>/dev/null | jq -r '.result[0].id // empty' 2>/dev/null)
   fi
   if [ -z "$acct" ]; then
-    echo "::notice::Kuota Cloudflare tidak dicek: Account ID tidak terbaca. Isi variabel repo CF_ACCOUNT_ID atau beri token izin 'Account Settings: Read'."
+    echo "::notice::Kuota Cloudflare tidak dicek: Account ID tidak terbaca. Isi CF_ACCOUNT_ID di GitHub (tab Variables atau Secrets) atau beri token izin 'Account Settings: Read'."
   else
     day=$(date -u +%Y-%m-%d); since="${day}T00:00:00Z"; until=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     gql() { # gql "query" -> JSON di stdout
