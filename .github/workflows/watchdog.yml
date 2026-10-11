@@ -1,4 +1,6 @@
 name: Penjaga panel (watchdog)
+# Judul run membedakan uji manual dari pemeriksaan otomatis -> "normal kembali" hanya membandingkan run otomatis.
+run-name: ${{ (github.event_name == 'workflow_dispatch' && inputs.kirim_tes == true) && 'Penjaga panel (uji)' || 'Penjaga panel (otomatis)' }}
 
 # Worker TIDAK bisa melaporkan kematiannya sendiri: kalau Cloudflare menolak request (kuota habis / Worker crash / D1 mati),
 # kode panel tidak jalan sama sekali -> notifikasi Error & Bug di dalam panel ikut bisu. Workflow ini berjalan DI LUAR Cloudflare
@@ -14,6 +16,10 @@ name: Penjaga panel (watchdog)
 # Variabel repo (opsional, tab Variables): CF_ACCOUNT_ID, CF_WARN_PCT, CF_LIMIT_REQ, CF_LIMIT_D1_READ, CF_LIMIT_D1_WRITE,
 #  CF_LIMIT_KV_READ, CF_LIMIT_KV_WRITE (bawaan = batas paket gratis; naikkan bila upgrade ke Workers Paid).
 # Anti-banjir: pesan BERMASALAH saat baru terjadi, pengingat tiap ±1 jam, pesan "normal kembali" saat pulih.
+#
+# PEMICU: jadwal GitHub (schedule) di repo ini TERBUKTI meleset jauh (cron.yml "*/5" nyatanya jalan tiap 3-4 jam), jadi
+# pemicu utama = cron-job.org tiap 5 menit memanggil API workflow_dispatch dengan inputs {"kirim_tes":"false"}
+# (langkah pasang: KB Asisten "penjaga panel"). schedule di bawah tetap ada sebagai jaring pengaman bila cron-job.org mati.
 on:
   schedule:
     - cron: "*/5 * * * *"
@@ -46,7 +52,7 @@ jobs:
           RAW_TG_TOKEN: ${{ secrets.TG_ALERT_TOKEN }}
           RAW_TG_CHAT: ${{ secrets.TG_ALERT_CHAT }}
           CF_TOKEN: ${{ secrets.CF_ANALYTICS_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
-          CF_ACCOUNT: ${{ vars.CF_ACCOUNT_ID }}
+          CF_ACCOUNT: ${{ vars.CF_ACCOUNT_ID || secrets.CF_ACCOUNT_ID }}
           CF_WARN_PCT: ${{ vars.CF_WARN_PCT || '80' }}
           CF_LIMIT_REQ: ${{ vars.CF_LIMIT_REQ || '100000' }}
           CF_LIMIT_D1_READ: ${{ vars.CF_LIMIT_D1_READ || '5000000' }}
@@ -58,6 +64,8 @@ jobs:
           RUN_NUMBER: ${{ github.run_number }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          # kesimpulan run TERJADWAL sebelumnya (uji manual tidak dihitung, supaya tidak ada "normal kembali" palsu)
-          export PREV=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow watchdog.yml --event schedule --status completed --limit 1 --json conclusion -q '.[0].conclusion' 2>/dev/null || echo "")
+          # kesimpulan run OTOMATIS sebelumnya (jadwal GitHub atau cron-job.org); uji manual tidak dihitung,
+          # supaya tidak ada "normal kembali" palsu sesudah uji yang gagal.
+          export PREV=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow watchdog.yml --status completed --limit 30 --json conclusion,displayTitle -q '[.[] | select(.displayTitle | test("otomatis"))][0].conclusion // ""' 2>/dev/null || echo "")
+          echo "Run otomatis sebelumnya: ${PREV:-belum ada}"
           bash .github/scripts/watchdog.sh
