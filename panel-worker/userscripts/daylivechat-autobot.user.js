@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DayLiveChat Auto-Reply Bot (Day-Group Panel)
 // @namespace    daygroup-panel
-// @version      2.3.0
+// @version      2.4.0
 // @description  Balas otomatis member yang spam/kasar di sesi chat yang DIPILIH lewat Day-Group Panel (Live Chat > Sesi Chat). Sesi yang tidak diaktifkan tetap 100% manual.
 // @author       Day-Group Panel
 // @match        https://daylivechat.com/*
@@ -80,6 +80,18 @@
 		}
 	}
 
+	// Status hubungan ke panel: ditampilkan di widget (titik merah + teks) supaya "bot aktif tapi diam" bisa terlihat penyebabnya.
+	// Dulu jawaban {success:false} (mis. 'Kunci userscript tidak valid' setelah Kunci Bot diganti) DIABAIKAN diam-diam.
+	let panelErr = "";
+	function setPanelStatus(msg) {
+		if (msg === panelErr) return;
+		panelErr = msg;
+		if (msg) log("Panel menolak: " + msg);
+		else log("Hubungan ke panel normal.");
+		try {
+			refreshPanelUI();
+		} catch (e) {}
+	}
 	function panelApi(action, body) {
 		return fetch(CFG.panelUrl.replace(/\/+$/, "") + "/api", {
 			method: "POST",
@@ -87,8 +99,13 @@
 			body: JSON.stringify(Object.assign({ action, key: CFG.botKey }, body || {})),
 		})
 			.then((r) => r.json())
+			.then((j) => {
+				if (j && j.success === false) setPanelStatus(String(j.message || "ditolak") + (/tidak valid/i.test(String(j.message || "")) ? " — salin Kunci Bot baru dari menu Sesi Chat lalu Simpan" : ""));
+				else if (j) setPanelStatus("");
+				return j;
+			})
 			.catch((e) => {
-				log("Panel error: " + (e && e.message ? e.message : e));
+				setPanelStatus("tidak bisa menghubungi panel (" + (e && e.message ? e.message : e) + ")");
 				return null;
 			});
 	}
@@ -138,6 +155,7 @@
 			<button id="dgb-toggle-master" style="margin-left:auto;">Nyalakan</button>
 		</div>
 		<div class="row"><span class="dot" id="dgb-dot-login"></span>Login DayLiveChat</div>
+		<div class="row"><span class="dot" id="dgb-dot-panel"></span><span id="dgb-panel-status">Panel</span></div>
 		<button class="primary" id="dgb-save">Simpan Pengaturan</button>
 		<div id="dgb-log"></div>
 	`;
@@ -164,6 +182,14 @@
 		fab.classList.toggle("on", !!CFG.masterOn);
 		const loginDot = document.getElementById("dgb-dot-login");
 		if (loginDot) loginDot.classList.toggle("ok", !!getToken());
+		const panelDot = document.getElementById("dgb-dot-panel");
+		const panelTxt = document.getElementById("dgb-panel-status");
+		if (panelDot) {
+			panelDot.classList.toggle("ok", !panelErr && !!CFG.botKey);
+			panelDot.style.background = panelErr ? "#f87171" : "";
+		}
+		if (panelTxt) panelTxt.textContent = panelErr ? "Panel: " + panelErr : CFG.botKey ? "Panel: terhubung" : "Panel: Kunci Bot belum diisi";
+		fab.style.outline = panelErr && CFG.masterOn ? "3px solid #f87171" : "";
 	}
 
 	fab.addEventListener("click", () => {
@@ -222,11 +248,15 @@
 
 	let enabledKeys = [];
 	let templates = [];
+	let noTplLogged = false;
 	async function pullPanel() {
 		const r = await panelApi("livechatBotPull", {});
 		if (r && r.success) {
 			enabledKeys = r.enabledKeys || [];
 			templates = r.templates || [];
+			const noTpl = CFG.masterOn && enabledKeys.length > 0 && !templates.length;
+			if (noTpl && !noTplLogged) log("Ada sesi aktif tapi TIDAK ada template balasan aktif — tambahkan di panel (Live Chat > Template Balasan).");
+			noTplLogged = noTpl;
 			// jeda dari panel (admin bisa ubah); angka tak valid diabaikan -> tetap bawaan
 			if (Number(r.burstResetSec) >= 30 && Number(r.burstResetSec) <= 600) BURST_RESET_MS = Number(r.burstResetSec) * 1000;
 			if (Number(r.graceSec) >= 5 && Number(r.graceSec) <= 300) GRACE_MS = Number(r.graceSec) * 1000;

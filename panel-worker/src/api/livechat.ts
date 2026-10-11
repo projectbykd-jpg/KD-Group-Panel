@@ -65,15 +65,15 @@ async function makeUserKey(env: Env, uname: string): Promise<string> {
 	return `kd1_${b64u(payload)}_${await macHex(env.LIVECHAT_BOT_KEY, payload)}`;
 }
 
-const keyCache = new Map<string, { owner: string; exp: number }>();
+const keyCache = new Map<string, { owner: string; admin: boolean; exp: number }>();
 /** Validasi Kunci Bot dari userscript -> pemilik datanya ('' = data lama). Melempar bila tidak sah. */
-async function gateBotKey(env: Env, key: string): Promise<string> {
+async function gateBotKeyFull(env: Env, key: string): Promise<{ owner: string; admin: boolean }> {
 	if (!env.LIVECHAT_BOT_KEY) throw new Error("Live Chat Bot belum dikonfigurasi (secret LIVECHAT_BOT_KEY). Hubungi admin.");
 	const bad = new Error("Kunci userscript tidak valid.");
 	if (!key) throw bad;
-	if (constEq(key, env.LIVECHAT_BOT_KEY)) return "";
+	if (constEq(key, env.LIVECHAT_BOT_KEY)) return { owner: "", admin: true };
 	const hit = keyCache.get(key);
-	if (hit && hit.exp > Date.now()) return hit.owner;
+	if (hit && hit.exp > Date.now()) return { owner: hit.owner, admin: hit.admin };
 	const m = /^kd1_(.+)_([0-9a-f]{32})$/.exec(key);
 	if (!m) throw bad;
 	let payload = "";
@@ -88,8 +88,12 @@ async function gateBotKey(env: Env, key: string): Promise<string> {
 	const u = await env.DB.prepare(`SELECT role, status FROM users WHERE username_lc = ?`).bind(uname).first<{ role: string; status: string }>();
 	if (!u || u.status !== "AKTIF" || (u.role !== "ADMIN" && u.role !== "OPERATOR")) throw bad;
 	if (keyCache.size > 500) keyCache.clear();
-	keyCache.set(key, { owner: uname, exp: Date.now() + 30_000 });
-	return uname;
+	const admin = u.role === "ADMIN";
+	keyCache.set(key, { owner: uname, admin, exp: Date.now() + 30_000 });
+	return { owner: uname, admin };
+}
+async function gateBotKey(env: Env, key: string): Promise<string> {
+	return (await gateBotKeyFull(env, key)).owner;
 }
 /** Hanya untuk test. */
 export function resetLivechatKeyCache(): void {
@@ -205,8 +209,8 @@ export async function livechatBotSync(env: Env, key: string, rows: unknown) {
 }
 
 export async function livechatBotPull(env: Env, key: string) {
-	const owner = await gateBotKey(env, key);
-	const { enabledKeys, templates } = await pullEnabledSessions(env, owner);
+	const { owner, admin } = await gateBotKeyFull(env, key);
+	const { enabledKeys, templates } = await pullEnabledSessions(env, owner, { includeLegacyTemplates: admin });
 	// Jeda bot diatur admin (Pengaturan Sistem > Live Chat Bot); skrip memakai nilai ini, bawaan lokal bila server lama.
 	return { success: true, enabledKeys, templates, burstResetSec: await getSys(env, "sys_livechat_burst_reset_sec"), graceSec: await getSys(env, "sys_livechat_grace_sec") };
 }

@@ -107,6 +107,17 @@ describe("Live Chat: data & kunci terpisah per pengguna", () => {
 		expect((await tpls(boss)).map((t) => t.reply_text)).toEqual(["Template ADMIN"]);
 	});
 
+	it("bot milik ADMIN memakai template lama (owner '') yang juga tampil di panelnya; pengguna lain tidak pernah", async () => {
+		const boss = await tok("Boss", "pw-boss"), ani = await tok("Ani", "pw-ani");
+		turso.current!.raw.prepare(`INSERT INTO livechat_template (owner, reply_text, active, sort_order, updated_at) VALUES ('', 'Template LAMA', 1, 0, 'x')`).run();
+		expect((await tpls(boss)).map((t) => t.reply_text)).toEqual(["Template LAMA"]); // panel admin menampilkannya
+		const pull = async (k: string) => ((await livechatBotPull(ctx.env, k)) as { templates: { reply_text: string }[] }).templates.map((t) => t.reply_text);
+		expect(await pull(await keyOf(boss))).toEqual(["Template LAMA"]); // dulu [] -> bot aktif tapi diam
+		expect(await pull(await keyOf(ani))).toEqual([]);
+		await livechatSaveTemplate(ctx.env, boss, { replyText: "Template BOSS" });
+		expect((await pull(await keyOf(boss))).sort()).toEqual(["Template BOSS", "Template LAMA"]);
+	});
+
 	it("kunci lama (LIVECHAT_BOT_KEY) tetap jalan ke data lama yang hanya dilihat ADMIN", async () => {
 		const boss = await tok("Boss", "pw-boss"), ani = await tok("Ani", "pw-ani");
 		await livechatBotSync(ctx.env, MASTER, [row("9", "Lama")]);
