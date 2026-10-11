@@ -8,6 +8,7 @@
 //
 // Aman diulang: artikel DIKLAIM dulu (tg_posted_at diisi) baru dikirim -> tak pernah dobel; gagal sementara melepas klaim,
 // gagal permanen menandai 'error'. Masalah konfigurasi (token/Chat ID/izin bot) TIDAK menandai artikel; terlihat di BOT > Setting.
+import { enqueueNotify } from "./admin-notify";
 import { logActivity } from "./activity";
 import { botCfg, botCfgSet, ensureNewsCategoryColumns, newsCategoryLabel, tgPromoUrl } from "./bot-news";
 import { loadIntegrations, newsSiteUrl, tgChannelToken } from "./integrations";
@@ -97,6 +98,8 @@ async function setLastError(env: Env, cfg: Record<string, string>, msg: string):
 	if ((cfg.tg_channel_last_error || "").slice(22) === v.slice(22) && v) return; // pesan sama: jangan tulis ulang tiap 5 menit
 	if (!v && !cfg.tg_channel_last_error) return;
 	await botCfgSet(env, { tg_channel_last_error: v });
+	// galat konfigurasi baru -> antrean notifikasi admin (sekali per jenis galat per hari)
+	if (msg) await enqueueNotify(env, "channel", `ch:${tsNow().slice(0, 10)}:${msg.slice(0, 120)}`, msg.slice(0, 300) + " — perbaiki di BOT › Setting › Sosial & Promo › Channel Telegram.");
 }
 
 export interface TgRunResult {

@@ -1,5 +1,6 @@
 // Port wrapper prediksi V6Core.gs (getPredictionStatusData / generatePredictionCopyBundle /
 // generateClosingPredictionCopy / sendPredictionAuto / sendClosingPredictionAuto) + router auto-post.
+import { enqueueNotify } from "../lib/admin-notify";
 import { requireSession } from "./auth";
 import { getUserProfiles } from "../lib/db";
 import { getSiteAccounts } from "../lib/site";
@@ -131,6 +132,20 @@ function slotDue(nowMinutes: number, slotMinutes: number, catchup: number, windo
 	return diff >= -1 && diff <= maxAfter && nowMinutes <= 1435;
 }
 
+/** Isi notifikasi admin saat sesi Auto Posting tetap gagal setelah percobaan habis: website yang gagal + alasannya. */
+export function autoPostFailText(
+	res: { websiteResults?: { website: string; status: string; reason?: string }[]; pendingWebsites?: string[]; predictionName?: string } | undefined,
+	scheduleId: string,
+	dateKey: string,
+	attempts: number,
+): string {
+	const failed = (res?.websiteResults || []).filter((w) => String(w.status).toUpperCase() === "GAGAL");
+	const list = failed.length
+		? failed.map((w) => `${w.website} (${String(w.reason || "tanpa alasan").slice(0, 120)})`).join("; ")
+		: (res?.pendingWebsites || []).join(", ") || "tidak ada hasil dari pengiriman";
+	return `${res?.predictionName || scheduleId} ${dateKey}: gagal setelah ${attempts}x percobaan — ${list}`.slice(0, 650);
+}
+
 export async function runAutoPostRouter(env: Env, opts: { force?: boolean; windowMinutes?: number } = {}) {
 	const summary = { ran: false, slots: 0, sent: 0, already: 0, failed: 0, message: "" };
 	if (!(await isAutoPostEnabled(env))) {
@@ -232,7 +247,12 @@ export async function runAutoPostRouter(env: Env, opts: { force?: boolean; windo
 	const runSlot = async (
 		guardKey: string,
 		scheduleId: string,
-		job: () => Promise<{ counters?: { success?: number; already?: number; failed?: number }; pendingWebsites?: string[] }>,
+		job: () => Promise<{
+			counters?: { success?: number; already?: number; failed?: number };
+			pendingWebsites?: string[];
+			websiteResults?: { website: string; status: string; reason?: string }[];
+			predictionName?: string;
+		}>,
 	) => {
 		if (!opts.force) {
 			if (await kvGet(guardKey)) return;
@@ -265,6 +285,8 @@ export async function runAutoPostRouter(env: Env, opts: { force?: boolean; windo
 			if (att >= MAX_ATTEMPTS) {
 				await kvPut(guardKey, GUARD_TTL);
 				await env.SESS.delete(attKey);
+				// percobaan HABIS -> kabari admin lewat Telegram (website + alasan), sekali per sesi per hari
+				await enqueueNotify(env, "autopost", `ap:${guardKey}`, autoPostFailText(res, scheduleId, dateKey, att));
 			} else {
 				await env.SESS.put(attKey, String(att), { expirationTtl: GUARD_TTL });
 			}
