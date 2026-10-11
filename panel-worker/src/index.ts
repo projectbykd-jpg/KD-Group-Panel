@@ -2,7 +2,7 @@
 // Semua panggilan frontend lama google.script.run.<fn>(...) dipetakan ke
 // POST /api  body: { "action": "<fn>", ...args }
 import { installFetchGuard } from "./lib/fetch-guard";
-import { getSys } from "./lib/settings";
+import { getSys, getSysCached } from "./lib/settings";
 import { loadMasterData } from "./lib/master-data";
 import { adminGetMasterData, adminSaveMasterData, shioMapGet, adminGetIntegrations, adminSaveIntegrations, adminTestIntegrations } from "./api/master-data";
 
@@ -411,7 +411,29 @@ export default {
 			const handler = ROUTES[action];
 			if (!handler) return json({ success: false, message: "Aksi tidak dikenal: " + action }, 404);
 			try {
-				const out = await handler(env, body);
+				// Batas tunggu: permintaan yang menggantung (mis. database tidak menjawab) jadi galat yang jelas + tercatat +
+				// dikabarkan ke Telegram, bukan spinner tanpa akhir. Prosesnya tetap diselesaikan di belakang (waitUntil).
+				const work = Promise.resolve().then(() => handler(env, body));
+				const limitMs = getSysCached("sys_api_timeout_sec") * 1000; // dari cache: tidak boleh ikut menunggu database
+				let timer: ReturnType<typeof setTimeout> | undefined;
+				const TIMEOUT = Symbol("timeout");
+				const raced = await Promise.race([
+					work,
+					new Promise<typeof TIMEOUT>((res) => {
+						timer = setTimeout(() => res(TIMEOUT), limitMs);
+					}),
+				]);
+				if (timer) clearTimeout(timer);
+				if (raced === TIMEOUT) {
+					ctx.waitUntil(work.then(() => undefined, () => undefined));
+					const msg = `Server tidak menjawab dalam ${limitMs / 1000} detik (aksi ${action}). Coba lagi sebentar; bila berulang, hubungi admin.`;
+					console.error("API timeout [" + action + "]");
+					ctx.waitUntil(
+						recordError(env, { source: "api", loc: action, message: `Permintaan menggantung lebih dari ${limitMs / 1000} dtk`, detail: "Batas: Admin > Pengaturan Sistem > Batas tunggu permintaan panel." }).then(() => undefined, () => undefined),
+					);
+					return json({ success: false, message: msg }, 504);
+				}
+				const out = raced;
 				// Handler boleh membalas Response jadi (mis. JSON mentah hasil laporan).
 				if (out instanceof Response) return out;
 				if (INVEST_PUMP_ACTIONS.has(action)) {

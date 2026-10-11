@@ -269,11 +269,32 @@ async function doLoad(env: Env): Promise<void> {
 	}
 }
 
-/** Terapkan data master dari D1 ke daftar yang dipakai kode. Aman dipanggil di tiap request (cache 15 dtk). */
+/** Terapkan data master dari D1 ke daftar yang dipakai kode. Aman dipanggil di tiap request (cache 15 dtk).
+ *  Batas tunggu pemuatan bersama. Dipakai SEMUA request: tanpa batas, satu query D1 yang menggantung membuat seluruh
+ *  isolate ikut menggantung (panel "Memuat…" / login "Memverifikasi…" tanpa akhir). Lewat batas -> lanjut dengan nilai
+ *  yang sedang berlaku dan coba muat lagi beberapa detik kemudian. */
+export const MASTER_LOAD_TIMEOUT_MS = 4000;
 export async function loadMasterData(env: Env): Promise<void> {
 	if (Date.now() - loadedAt < TTL_MS) return;
-	if (inflight) return inflight;
-	inflight = (async () => {
+	const p = inflight ?? startLoad(env);
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const timedOut = await Promise.race([
+		p.then(() => false),
+		new Promise<boolean>((res) => {
+			timer = setTimeout(() => res(true), MASTER_LOAD_TIMEOUT_MS);
+		}),
+	]);
+	if (timer) clearTimeout(timer);
+	if (timedOut && inflight === p) {
+		// lepaskan janji yang menggantung supaya request berikutnya tidak ikut menunggu; muat ulang ±3 dtk lagi
+		inflight = null;
+		loadedAt = Date.now() - TTL_MS + 3000;
+		console.error("loadMasterData: lebih dari " + MASTER_LOAD_TIMEOUT_MS + " ms, lanjut dengan nilai yang berlaku");
+	}
+}
+function startLoad(env: Env): Promise<void> {
+	const self: { p: Promise<void> | null } = { p: null };
+	const p: Promise<void> = (async () => {
 		try {
 			await doLoad(env);
 			await loadIntegrations(env);
@@ -281,11 +302,15 @@ export async function loadMasterData(env: Env): Promise<void> {
 		} catch {
 			/* tabel settings belum siap -> pakai yang sedang berlaku (bawaan) */
 		} finally {
-			loadedAt = Date.now();
-			inflight = null;
+			if (inflight === self.p) {
+				loadedAt = Date.now();
+				inflight = null;
+			}
 		}
 	})();
-	return inflight;
+	self.p = p;
+	inflight = p;
+	return p;
 }
 
 export function getMasterDef(key: string): MasterDef | undefined {
