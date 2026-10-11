@@ -46,6 +46,7 @@ const ARG_MAP = {
 	adminDeleteSite: ["token", "website"],
 	autoInputGetState: ["token"],
 	autoInputSetEnabled: ["token", "enabled"],
+	autoInputSetMarkets: ["token", "markets"],
 	autoInputSaveSession: ["token", "data"],
 	autoInputDeleteSession: ["token", "website"],
 	autoInputClearJob: ["token", "jobId"],

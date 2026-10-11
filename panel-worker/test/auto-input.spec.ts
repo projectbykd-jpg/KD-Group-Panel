@@ -4,7 +4,10 @@ const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: im
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
 import { autoInputAfterSend, autoInputRetryTick, runQueuedJob, type AutoInputNotice } from "../src/api/auto-input";
-import { hideJobs, pruneAutoInputJobs, pendingFailureAlerts, ackFailureAlerts, claimJob, parseCookieInput, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
+import { autoInputGetState, autoInputSetMarkets } from "../src/api/auto-input";
+import { checkLogin } from "../src/api/auth";
+import { hashPassword } from "../src/lib/crypto";
+import { getDisabledMarkets, setDisabledMarkets, cleanMarketList, hideJobs, pruneAutoInputJobs, pendingFailureAlerts, ackFailureAlerts, claimJob, parseCookieInput, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
 import { frameSources, parseAngkaPage, readTopRow, parseHitungPage, runAutoInput, buildPayload, parseForms } from "../src/lib/auto-input-run";
 import { processText } from "../src/lib/parser";
 import { fakeD1, fakeEnv } from "./helpers/fake-env";
@@ -494,6 +497,53 @@ describe("autoInputAfterSend (DB)", () => {
 		expect(m.st.calcPosts).toBe(1);
 		expect(await claimJob(env, "Op", id)).toBeNull();
 	});
+	describe("saklar per pasaran (pemilik: atur mana yang auto & mana yang tidak)", () => {
+		it("normalisasi daftar: huruf besar, tanpa duplikat/kosong, urut", () => {
+			expect(cleanMarketList([" arizona ", "ARIZONA", "", null, "canada"])).toEqual(["ARIZONA", "CANADA"]);
+			expect(cleanMarketList("bukan array")).toEqual([]);
+		});
+		it("pasaran dimatikan -> tidak dibuat job sama sekali (tidak menyentuh admin); pasaran lain tetap auto", async () => {
+			const m = mockSite();
+			await setEnabled(env, "Op", true);
+			await withSession();
+			await setDisabledMarkets(env, "Op", ["floridaeve"]);
+			const n = await go(m);
+			expect(n?.results).toEqual([]);
+			expect(n?.skippedReason).toContain("FLORIDAEVE tidak di-auto");
+			expect(m.st.posts).toHaveLength(0);
+			expect(await listJobs(env, "Op")).toHaveLength(0);
+			await setDisabledMarkets(env, "Op", ["ARIZONA"]); // pasaran lain dimatikan -> FLORIDAEVE jalan
+			const n2 = await go(m);
+			expect(n2?.results[0].status).toBe("BERHASIL");
+		});
+		it("dimatikan setelah job gagal -> percobaan ulang dihentikan jadi DILEWATI (bukan gagal, tanpa peringatan)", async () => {
+			const m = mockSite({ expired: true });
+			await setEnabled(env, "Op", true);
+			await withSession();
+			await go(m);
+			expect((await listJobs(env, "Op"))[0]).toMatchObject({ status: "FAILED" });
+			await setDisabledMarkets(env, "Op", ["FLORIDAEVE"]);
+			turso.current!.raw.prepare(`UPDATE auto_input_job SET updated_at = ? WHERE status = 'FAILED'`).run(new Date(Date.now() + 7 * 3600_000 - 3 * 60_000).toISOString().slice(0, 19).replace("T", " "));
+			await autoInputRetryTick(env, m.fetchFn);
+			const j = (await listJobs(env, "Op"))[0];
+			expect(j.status).toBe("SKIPPED");
+			expect(j.detail).toContain("tidak di-auto");
+			expect(m.st.calcPosts).toBe(0);
+		});
+		it("lewat API: daftar menampilkan pasaran riwayat + yang dimatikan; simpan per akun", async () => {
+			const ctx = fakeEnv();
+			env = ctx.env;
+			ctx.db.prepare(`INSERT INTO users (username, username_lc, password_hash, role, status, websites) VALUES ('Op', 'op', ?, 'OPERATOR', 'AKTIF', 'HUGOTOGEL')`).run(await hashPassword("pw"));
+			const tok = ((await checkLogin(env, "Op", "pw", "")) as { sessionToken: string }).sessionToken;
+			await autoInputSetMarkets(env, tok, ["Canada"]);
+			expect(await getDisabledMarkets(env, "Op")).toEqual(["CANADA"]);
+			const st = (await autoInputGetState(env, tok)) as unknown as { markets: { market: string; auto: boolean }[] };
+			expect(st.markets).toEqual([{ market: "CANADA", auto: false }]);
+			await autoInputSetMarkets(env, tok, []);
+			expect(await getDisabledMarkets(env, "Op")).toEqual([]);
+		});
+	});
+
 	describe("percobaan ulang otomatis (jeda 2 menit, maks 2x)", () => {
 		const age = (min: number) =>
 			turso.current!.raw

@@ -22,7 +22,11 @@ import {
 	deleteSession,
 	finishJob,
 	getEnabled,
+	getDisabledMarkets,
 	getSession,
+	knownMarkets,
+	normMarket,
+	setDisabledMarkets,
 	getSessions,
 	listJobs,
 	planAutoInput,
@@ -51,10 +55,18 @@ function mustOwnWebsite(profile: UserProfile, website: string): string {
 
 export async function autoInputGetState(env: Env, token: string) {
 	const s = await gate(env, token);
-	const [enabled, sessions, jobs] = await Promise.all([getEnabled(env, s.username), getSessions(env, s.username), listJobs(env, s.username)]);
+	const [enabled, sessions, jobs, disabledMarkets, seen] = await Promise.all([
+		getEnabled(env, s.username),
+		getSessions(env, s.username),
+		listJobs(env, s.username),
+		getDisabledMarkets(env, s.username),
+		knownMarkets(env, s.username),
+	]);
 	return {
 		success: true,
 		enabled,
+		// Saklar per pasaran: daftar = pasaran di riwayat 30 hari + yang sudah dimatikan (supaya tetap bisa dinyalakan lagi).
+		markets: [...new Set([...seen, ...disabledMarkets])].sort().map((m) => ({ market: m, auto: !disabledMarkets.includes(m) })),
 		// PHPSESSID TIDAK pernah dikirim balik ke browser -- hanya penanda "terisi" + 4 karakter akhir.
 		websites: s.profile.websites.map((w) => {
 			const x = sessions.find((e) => e.website === w);
@@ -77,6 +89,18 @@ export async function autoInputSetEnabled(env: Env, token: string, enabled: bool
 	await setEnabled(env, s.username, !!enabled);
 	await logActivity(env, s.username, "AUTO PREDIKSI", enabled ? "Diaktifkan" : "Dimatikan", "BERHASIL", "");
 	return { success: true, enabled: !!enabled };
+}
+
+/** Simpan pasaran yang TIDAK di-auto. markets = daftar lengkap pasaran yang dimatikan (menggantikan yang lama). */
+export async function autoInputSetMarkets(env: Env, token: string, markets: unknown) {
+	const s = await gate(env, token);
+	const before = await getDisabledMarkets(env, s.username);
+	const list = await setDisabledMarkets(env, s.username, markets);
+	const off = list.filter((m) => !before.includes(m)), on = before.filter((m) => !list.includes(m));
+	if (off.length || on.length) {
+		await logActivity(env, s.username, "AUTO PREDIKSI", [off.length ? "Pasaran dimatikan: " + off.join(", ") : "", on.length ? "Pasaran di-auto lagi: " + on.join(", ") : ""].filter(Boolean).join(" · "), "BERHASIL", "");
+	}
+	return { success: true, disabledMarkets: list };
 }
 
 export async function autoInputSaveSession(env: Env, token: string, data: Record<string, unknown>) {
@@ -171,6 +195,9 @@ export async function autoInputAfterSend(
 
 	const plan = planAutoInput(rawText, processed);
 	if (!plan.ok) return { skippedReason: plan.reason, results: [] };
+	if ((await getDisabledMarkets(env, profile.username)).includes(normMarket(plan.market))) {
+		return { skippedReason: `Pasaran ${plan.market} tidak di-auto (diatur di menu Auto Prediksi) — input manual`, results: [] };
+	}
 
 	const sessions = await getSessions(env, profile.username);
 	const results: AutoInputNotice["results"] = [];
@@ -195,6 +222,10 @@ export async function runQueuedJob(env: Env, username: string, jobId: number, fe
 	const job = await claimJob(env, username, jobId);
 	if (!job) return { website: "-", status: "SUDAH", detail: "Job tidak ditemukan atau sudah berjalan.", manual: false };
 	const website = job.website;
+	if ((await getDisabledMarkets(env, username)).includes(normMarket(job.market))) {
+		await finishJob(env, job.id, "SKIPPED", "cek", `Pasaran ${job.market} tidak di-auto — input manual.`);
+		return { website, status: "DILEWATI", detail: `Pasaran ${job.market} tidak di-auto — input manual.`, manual: true };
+	}
 	const sess = await getSession(env, username, website);
 	if (!sess?.phpsessid) {
 		await finishJob(env, job.id, "FAILED", "cek", "PHPSESSID belum disimpan.");
@@ -222,6 +253,11 @@ export async function autoInputRetryTick(env: Env, fetchFn?: Fetcher): Promise<b
 		if (!job) continue; // sudah diambil tick lain
 		const n = job.attempts;
 		const tag = `[Percobaan ulang ${n}/${maxRetries}] `;
+		// pasaran dimatikan setelah job gagal -> berhenti mencoba (bukan gagal; tidak memicu peringatan)
+		if ((await getDisabledMarkets(env, job.username)).includes(normMarket(job.market))) {
+			await finishJob(env, job.id, "SKIPPED", job.stage || "cek", `Pasaran ${job.market} tidak di-auto — percobaan ulang dihentikan, input manual.`, job.period);
+			continue;
+		}
 		const sess = await getSession(env, job.username, job.website);
 		if (!sess?.phpsessid) {
 			await finishJob(env, job.id, "FAILED", job.stage || "cek", tag + "PHPSESSID belum disimpan — input manual.", job.period);

@@ -48,6 +48,7 @@ import {
 	autoInputAckAlerts,
 	autoInputSaveSession,
 	autoInputSetEnabled,
+	autoInputSetMarkets,
 	autoInputTest,
 } from "./api/auto-input";
 import { adminDeleteSite, adminListSites, adminSaveSite } from "./api/sites";
@@ -236,6 +237,7 @@ const ROUTES: Record<string, Handler> = {
 	// auto prediksi (input Nomor Keluar + Hitung di admin website)
 	autoInputGetState: (env, b) => autoInputGetState(env, s(b.token)),
 	autoInputSetEnabled: (env, b) => autoInputSetEnabled(env, s(b.token), !!b.enabled),
+	autoInputSetMarkets: (env, b) => autoInputSetMarkets(env, s(b.token), b.markets),
 	autoInputSaveSession: (env, b) => autoInputSaveSession(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
 	autoInputDeleteSession: (env, b) => autoInputDeleteSession(env, s(b.token), s(b.website)),
 	autoInputClearJob: (env, b) => autoInputClearJob(env, s(b.token), rowId(b.jobId)),

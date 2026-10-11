@@ -4547,6 +4547,7 @@
               </ol>
             </details>
             <div class="ai-site-grid">${rows}</div>
+            ${aiMarketsHtml(st)}
           </section>
 
           <section id="aiPane-toto" class="ai-pane" ${aiTab === 'toto' ? '' : 'hidden'}>
@@ -4572,6 +4573,42 @@
       autoInputSelUpdate('jobs');
       autoInputBadges();
       autoInputTotoLoad();
+    }
+    // Saklar per pasaran: hijau = di-auto, abu = tidak di-auto (input manual). Daftar = pasaran di riwayat 30 hari + yang dimatikan.
+    function aiMarketsHtml(st) {
+      const list = (st && st.markets) || [];
+      const off = list.filter(m => !m.auto).length;
+      const chips = list.length
+        ? list.map(m => `<button type="button" class="ai-chip${m.auto ? ' active' : ''}" onclick="autoInputMarketToggle(${jsArg(m.market)})" title="${m.auto ? 'Di-auto — klik untuk mematikan' : 'Tidak di-auto — klik untuk menyalakan'}"><i class="fa-solid ${m.auto ? 'fa-circle-check' : 'fa-circle-pause'}"></i>${escapeHtml(m.market)}</button>`).join('')
+        : '<span class="text-[11px] text-slate-400">Belum ada pasaran di riwayat 30 hari — tambahkan manual di bawah.</span>';
+      return `<div class="ai-box mt-4" id="aiMarketsBox">
+        <div class="text-xs font-bold text-white"><i class="fa-solid fa-sliders mr-1"></i>Pasaran yang di-auto <span class="text-slate-400 font-normal">· ${off ? off + ' dimatikan' : 'semua aktif'}</span></div>
+        <div class="text-[11px] text-slate-400">Klik pasaran untuk menyalakan / mematikan. Pasaran yang dimatikan <b>tidak diinput otomatis</b>, tidak dicoba ulang, dan tidak memicu peringatan gagal — input manual seperti biasa.</div>
+        <div class="ai-chips">${chips}</div>
+        <div class="flex gap-2 items-center"><input id="aiMarketAdd" type="text" autocomplete="off" maxlength="40" placeholder="Nama pasaran, mis. ARIZONA" class="ai-search glass-inner border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none"><button type="button" class="ai-btn" onclick="autoInputMarketAdd()"><i class="fa-solid fa-ban"></i>Matikan pasaran ini</button></div>
+      </div>`;
+    }
+    function aiDisabledMarkets() {
+      return ((autoInputState && autoInputState.markets) || []).filter(m => !m.auto).map(m => m.market);
+    }
+    function autoInputSaveMarkets(list, msg) {
+      google.script.run
+        .withSuccessHandler(res => { if (apiFailed(res)) { toast(apiMessage(res)); return; } toast(msg); loadAutoInputPage(true); })
+        .withFailureHandler(err => toast((err && err.message) || 'Gagal menyimpan pasaran'))
+        .autoInputSetMarkets(currentSessionToken, list);
+    }
+    function autoInputMarketToggle(market) {
+      const off = aiDisabledMarkets();
+      const isOff = off.includes(market);
+      autoInputSaveMarkets(isOff ? off.filter(m => m !== market) : off.concat([market]), isOff ? market + ' di-auto lagi' : market + ' tidak di-auto lagi (input manual)');
+    }
+    function autoInputMarketAdd() {
+      const el = document.getElementById('aiMarketAdd');
+      const m = String((el && el.value) || '').trim().toUpperCase().replace(/\s+/g, ' ');
+      if (!m) { toast('Ketik nama pasaran dulu'); return; }
+      const off = aiDisabledMarkets();
+      if (off.includes(m)) { toast(m + ' sudah dimatikan'); return; }
+      autoInputSaveMarkets(off.concat([m]), m + ' tidak di-auto lagi (input manual)');
     }
     function aiJobsChipsHtml() {
       const jobs = aiJobsState.jobs || [];
