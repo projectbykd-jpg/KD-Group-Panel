@@ -10,11 +10,13 @@
 //      server (lihat catatan di lib/livechat-bot.ts).
 import { requireSession } from "./auth";
 import { getSys } from "../lib/settings";
-import { tsNow } from "../lib/time";
+import { tsNow, tsPlusMinutes } from "../lib/time";
 import { constEq } from "../lib/crypto";
 import type { MenuKey } from "../lib/menus";
 import { logActivity } from "../lib/activity";
 import {
+	clearSessions,
+	pruneStaleSessions,
 	deleteTemplate,
 	listSessions,
 	listTemplates,
@@ -106,9 +108,16 @@ export async function livechatListSessions(env: Env, token: string) {
 	const s = await gatePanel(env, token, "livechat-sessions");
 	const { owners } = scopeOf(s);
 	const templates = (await listTemplates(env, owners)).filter((t) => Number(t.active) === 1);
+	let sessions = await listSessions(env, owners);
+	// Sesi yang tidak disinkron berjam-jam dibuang otomatis (bot mati / kunci diganti): bukan sesi hidup lagi.
+	const cutoff = tsPlusMinutes(-60 * (await getSys(env, "sys_livechat_prune_hours")));
+	if (sessions.some((x) => String(x.last_seen_at || "") < cutoff)) {
+		await pruneStaleSessions(env, owners, cutoff);
+		sessions = sessions.filter((x) => String(x.last_seen_at || "") >= cutoff);
+	}
 	return {
 		success: true,
-		sessions: await listSessions(env, owners),
+		sessions,
 		templateCount: templates.length,
 		// jam server (WIB) + batas basi: UI membandingkan dengan 'Sinkron terakhir' tanpa bergantung jam browser
 		nowTs: tsNow(),
@@ -129,6 +138,8 @@ export async function livechatResetBotKey(env: Env, token: string) {
 	const next = (await keyVersion(env, me)) + 1;
 	await env.DB.prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).bind(verKey(me), String(next)).run();
 	keyCache.clear();
+	// Kunci lama mati -> sesi yang pernah disinkronkan dengan kunci itu ikut dibuang (ADMIN: juga data lama '').
+	await clearSessions(env, scopeOf(s).owners);
 	await logActivity(env, s.username, "LIVE CHAT BOT", "Reset Kunci Bot", "BERHASIL", "");
 	return { success: true, key: await makeUserKey(env, me) };
 }

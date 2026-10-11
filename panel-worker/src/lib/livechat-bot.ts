@@ -142,6 +142,22 @@ export async function listSessions(env: Env, owners: string[]): Promise<Livechat
 	return r.results;
 }
 
+/** Buang SEMUA sesi milik `owners` (dipakai saat Kunci Bot diganti: sesi dari kunci lama tidak boleh tersisa; sesi baru muncul lagi
+ *  begitu bot dengan kunci baru menyinkron). Template & log tidak disentuh. */
+export async function clearSessions(env: Env, owners: string[]): Promise<void> {
+	await ensureTables(env);
+	await getTurso(env).prepare(`DELETE FROM livechat_session WHERE owner IN (${inList(owners)})`).bind(...owners).run();
+}
+/** Buang sesi milik `owners` yang tidak disinkron sejak `cutoffTs` (bot mati lama -> daftar usang, bot juga tidak membalas).
+ *  Mengembalikan jumlah baris yang dibuang. Satu perintah DELETE; dipanggil dari daftar hanya bila ada baris basi. */
+export async function pruneStaleSessions(env: Env, owners: string[], cutoffTs: string): Promise<void> {
+	await ensureTables(env);
+	await getTurso(env)
+		.prepare(`DELETE FROM livechat_session WHERE owner IN (${inList(owners)}) AND last_seen_at < ?`)
+		.bind(...owners, cutoffTs)
+		.run();
+}
+
 /** Toggle "Aktifkan Bot" per sesi -- hanya sesi milik `owners`; SATU-SATUNYA cara sesi jadi bot_enabled=1. */
 export async function setSessionBot(env: Env, owners: string[], sessionKey: string, enabled: boolean): Promise<void> {
 	await ensureTables(env);

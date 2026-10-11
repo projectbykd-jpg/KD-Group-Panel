@@ -114,6 +114,32 @@ describe("Live Chat: data & kunci terpisah per pengguna", () => {
 		expect(await sessions(ani)).toEqual([]);
 	});
 
+	it("ganti Kunci Bot membuang sesi lama milik pengguna itu (pengguna lain tidak terpengaruh); ADMIN juga membuang data lama", async () => {
+		const ani = await tok("Ani", "pw-ani"), budi = await tok("Budi", "pw-budi"), boss = await tok("Boss", "pw-boss");
+		const [ka, kb] = [await keyOf(ani), await keyOf(budi)];
+		await livechatBotSync(ctx.env, ka, [row("1"), row("2")]);
+		await livechatBotSync(ctx.env, kb, [row("1")]);
+		await livechatBotSync(ctx.env, MASTER, [row("9")]);
+		expect((await sessions(boss)).map((r) => r.session_key)).toContain("9");
+		await livechatResetBotKey(ctx.env, ani);
+		expect(await sessions(ani)).toEqual([]);
+		expect((await sessions(budi)).length).toBe(1);
+		await livechatResetBotKey(ctx.env, boss);
+		expect(await sessions(boss)).toEqual([]);
+		// sesi muncul lagi begitu bot dengan kunci baru menyinkron
+		await livechatBotSync(ctx.env, await keyOf(ani), [row("3")]);
+		expect((await sessions(ani)).length).toBe(1);
+	});
+
+	it("sesi yang tidak disinkron lebih lama dari batas dibuang otomatis dari daftar", async () => {
+		const ani = await tok("Ani", "pw-ani");
+		await livechatBotSync(ctx.env, await keyOf(ani), [row("1"), row("2")]);
+		const old = new Date(Date.now() + 7 * 3600_000 - 14 * 3600_000).toISOString().slice(0, 19).replace("T", " ");
+		turso.current!.raw.prepare(`UPDATE livechat_session SET last_seen_at = ? WHERE session_key = 'ani:1'`).run(old);
+		expect((await sessions(ani)).map((r) => r.session_key)).toEqual(["ani:2"]);
+		expect((turso.current!.raw.prepare(`SELECT COUNT(*) n FROM livechat_session`).get() as { n: number }).n).toBe(1);
+	});
+
 	it("reset kunci mematikan kunci lama; pengguna nonaktif/dihapus ditolak; log terpisah", async () => {
 		const ani = await tok("Ani", "pw-ani");
 		const old = await keyOf(ani);
