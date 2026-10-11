@@ -70,6 +70,8 @@ export async function ensureAutoInputTables(env: Env): Promise<void> {
 		// hidden = 1: disembunyikan user (sudah beres / ditangani manual). Baris tetap ada sebagai pagar anti-input-ganda (UNIQUE website+result_key).
 		`ALTER TABLE auto_input_job ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`,
 		`CREATE INDEX IF NOT EXISTS ix_auto_input_job_retry ON auto_input_job(status, updated_at)`,
+		// Pasaran yang TIDAK di-auto untuk akun ini (JSON array nama pasaran ternormalisasi). Kosong = semua pasaran auto.
+		`ALTER TABLE auto_input_config ADD COLUMN disabled_markets TEXT NOT NULL DEFAULT '[]'`,
 	]) {
 		try {
 			await db.prepare(stmt).run();
@@ -153,6 +155,55 @@ export async function setEnabled(env: Env, username: string, enabled: boolean): 
 		)
 		.bind(username, enabled ? 1 : 0, tsNow())
 		.run();
+}
+
+// ---------------------------------------------------------------------------
+// Pasaran yang tidak di-auto (per akun). Pasaran di daftar ini dilewati SEJAK AWAL: tidak dibuat job, tidak dicoba
+// ulang, tidak memicu peringatan gagal -- operator menginput manual seperti biasa.
+// ---------------------------------------------------------------------------
+const MAX_DISABLED = 100;
+export function cleanMarketList(v: unknown): string[] {
+	const arr = Array.isArray(v) ? v : [];
+	const out = new Set<string>();
+	for (const x of arr) {
+		const m = normMarket(String(x ?? ""));
+		if (m && m !== "UNKNOWN" && m.length <= 40) out.add(m);
+		if (out.size >= MAX_DISABLED) break;
+	}
+	return [...out].sort();
+}
+export async function getDisabledMarkets(env: Env, username: string): Promise<string[]> {
+	await ensureAutoInputTables(env);
+	const row = await getTurso(env)
+		.prepare(`SELECT disabled_markets FROM auto_input_config WHERE username = ?`)
+		.bind(username)
+		.first<Record<string, unknown>>();
+	try {
+		return cleanMarketList(JSON.parse(String(row?.disabled_markets ?? "[]")));
+	} catch {
+		return [];
+	}
+}
+export async function setDisabledMarkets(env: Env, username: string, markets: unknown): Promise<string[]> {
+	const list = cleanMarketList(markets);
+	await ensureAutoInputTables(env);
+	await getTurso(env)
+		.prepare(
+			`INSERT INTO auto_input_config (username, enabled, updated_at, disabled_markets) VALUES (?, 0, ?, ?)
+			 ON CONFLICT(username) DO UPDATE SET disabled_markets = excluded.disabled_markets, updated_at = excluded.updated_at`,
+		)
+		.bind(username, tsNow(), JSON.stringify(list))
+		.run();
+	return list;
+}
+/** Pasaran yang pernah muncul di riwayat job akun ini (untuk daftar saklar di menu). */
+export async function knownMarkets(env: Env, username: string, days = 30): Promise<string[]> {
+	await ensureAutoInputTables(env);
+	const r = await getTurso(env)
+		.prepare(`SELECT DISTINCT market FROM auto_input_job WHERE username = ? AND created_at >= ? ORDER BY market`)
+		.bind(username, tsPlusMinutes(-days * 24 * 60))
+		.all<Record<string, unknown>>();
+	return (r.results ?? []).map((x) => String(x.market ?? "")).filter(Boolean);
 }
 
 // ---------------------------------------------------------------------------
