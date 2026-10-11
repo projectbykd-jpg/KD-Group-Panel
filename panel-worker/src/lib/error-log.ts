@@ -11,7 +11,7 @@
 import { getSys } from "./settings";
 import { alertTgCfg, loadIntegrations, saveIntegrations } from "./integrations";
 import { logActivity } from "./activity";
-import { sendTelegram } from "../senders/telegram";
+import { sendTelegram, sendTelegramRich } from "../senders/telegram";
 import { tsNow } from "./time";
 import { enqueueNotify, notifyEnabled } from "./admin-notify";
 
@@ -181,17 +181,25 @@ async function alertState(env: Env, force: boolean): Promise<"ok" | "belum-diatu
  *  - gagal karena sebab lain: dicatat di Log Aktivitas (bukan dibuang diam-diam). Pengujian manual (`logFailure` false) cukup menampilkannya ke layar.
  * Mengembalikan "Terkirim" atau teks "Tele Error: ..."; `migratedTo` terisi bila ID dipindahkan otomatis.
  */
-export async function deliverAlert(env: Env, text: string, logFailure = true): Promise<{ result: string; migratedTo?: string }> {
+export async function deliverAlert(env: Env, text: string, logFailure = true, html = false): Promise<{ result: string; migratedTo?: string }> {
 	const cfg = alertTgCfg();
 	const redact = (s: string) => s.split(cfg.token).join("***").slice(0, 300);
-	let result = await sendTelegram(text, cfg);
+	// html: teks memakai <b>/<i> (semua bagian dinamis sudah di-escape pemanggil). Bila Telegram menolak formatnya,
+	// kirim ulang sebagai teks polos tanpa tag -- pesan tidak boleh hilang karena urusan format.
+	const send = async (c: { token: string; chatId: string }): Promise<string> => {
+		if (!html) return sendTelegram(text, c);
+		const r = await sendTelegramRich(c, text, { parseMode: "HTML" });
+		if (!/can't parse entities/i.test(r)) return r;
+		return sendTelegram(text.replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&"), c);
+	};
+	let result = await send(cfg);
 	if (result === "Terkirim") return { result };
 	let migratedTo: string | undefined;
 	const m = /"migrate_to_chat_id"\s*:\s*(-100\d{5,20})/.exec(result);
 	if (m) {
 		const saved = await saveIntegrations(env, { int_alert_tg_chat: m[1] }).catch(() => ({ ok: false as const }));
 		if (saved.ok) {
-			const retry = await sendTelegram(text, { token: cfg.token, chatId: m[1] });
+			const retry = await send({ token: cfg.token, chatId: m[1] });
 			if (retry === "Terkirim") {
 				migratedTo = m[1];
 				result = retry;
@@ -281,7 +289,7 @@ export async function recordError(env: Env, input: ErrInput, opts: { force?: boo
 			)
 			.run();
 		let result: RecordResult = { alert: "" };
-		const line = `[${alertKind}] (${source}) ${loc || "-"}: ${message.slice(0, 300)}`;
+		const line = { r: message.slice(0, 300), m: `${alertKind === "baru" ? "baru" : "muncul lagi"} · ${source}`, s: loc || "-" };
 		// kunci unik per KEJADIAN (baru / muncul lagi), bukan per detik: dua kejadian dalam detik yang sama tidak boleh saling menimpa
 		const nkey = `err:${fp}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 		if (alertKind && st === "ok" && (force || (await notifyEnabled(env, "err")))) {
