@@ -228,9 +228,15 @@ describe("laporan harian", () => {
 		reg.run(y, "FOLA", "GAGAL", "b");
 		turso.current!.raw.prepare(`INSERT INTO auto_input_job (username, website, market, result_key, status, created_at, updated_at) VALUES ('a','HUGO','HK','r1','DONE',?,?)`).run(y + " 10:00:00", y + " 10:00:00");
 		const now = Date.parse(wibDay(0) + "T08:00:00+07:00");
+		await saveSys(ctx.env, { sys_tgn_daily_hour: 7 }); // jam diatur admin
+		resetSysCache();
 		expect(await queueDailyReport(ctx.env, Date.parse(wibDay(0) + "T06:00:00+07:00"))).toBe(false); // sebelum jam 7
 		expect(await queueDailyReport(ctx.env, now)).toBe(true);
 		expect(await queueDailyReport(ctx.env, now + 3600_000)).toBe(false); // sekali sehari
+		// bawaan (tidak diatur admin) = 00 WIB: laporan hari yang baru selesai keluar ±00:00-00:05
+		await ctx.env.DB.prepare(`DELETE FROM settings WHERE key = 'sys_tgn_daily_hour'`).run();
+		resetSysCache();
+		expect(await queueDailyReport(ctx.env, Date.parse(wibDay(-1) + "T00:05:00+07:00"))).toBe(true);
 		openGap();
 		await flushNotify(ctx.env);
 		const msg = sent.find((m) => m.includes("Laporan harian"))!;
