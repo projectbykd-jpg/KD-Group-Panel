@@ -1,5 +1,6 @@
 // Port wrapper prediksi V6Core.gs (getPredictionStatusData / generatePredictionCopyBundle /
 // generateClosingPredictionCopy / sendPredictionAuto / sendClosingPredictionAuto) + router auto-post.
+import { recordError } from "../lib/error-log";
 import { enqueueNotify } from "../lib/admin-notify";
 import { requireSession } from "./auth";
 import { getUserProfiles } from "../lib/db";
@@ -265,8 +266,11 @@ export async function runAutoPostRouter(env: Env, opts: { force?: boolean; windo
 		let res;
 		try {
 			res = await job();
-		} catch {
-			return;
+		} catch (e) {
+			// Dulu ditelan diam-diam: slot dicoba tiap menit sampai jendelanya tutup lalu hilang tanpa jejak. Sekarang tercatat di
+			// Error & Bug (-> Telegram) dan dihitung sebagai percobaan, supaya batas percobaan + notifikasi gagal-final tetap berlaku.
+			await recordError(env, { source: "cron", loc: "auto-post " + scheduleId, message: e instanceof Error ? e.message : String(e), detail: e instanceof Error ? e.stack : "" }).catch(() => {});
+			res = { counters: { failed: 1 }, pendingWebsites: ["(galat sistem)"], websiteResults: [{ website: "-", status: "GAGAL", reason: "Galat sistem: " + (e instanceof Error ? e.message : String(e)).slice(0, 150) }] };
 		}
 		summary.ran = true;
 		summary.slots++;
@@ -399,7 +403,7 @@ export async function adminGetAutoPostWebhook(env: Env, token: string, origin?: 
 		everyMinute: true,
 		message:
 			"Pasang di cron-job.org / GitHub Actions: panggil URL di atas dengan method GET tiap 1 menit. " +
-			"Router cek sendiri slot mana yang jatuh tempo (toleransi susulan 25 menit).",
+			`Router cek sendiri slot mana yang jatuh tempo (toleransi susulan ${await getSys(env, "sys_catchup_minutes")} menit, diatur di Pengaturan Sistem).`,
 	};
 }
 

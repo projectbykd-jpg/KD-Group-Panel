@@ -187,6 +187,25 @@ ${rows}</table>`;
 });
 
 describe("runAutoInput", () => {
+	it("halaman Nomor Keluar tanpa form (kasus ARIZONA/CANADA): pesan menyebut sesi OK + apa yang benar-benar diterima, tanpa POST", async () => {
+		const m = mockSite();
+		const f = async (u: string, i?: RequestInit) =>
+			new URL(u).pathname === "/admin_angka13.php" && i?.method !== "POST"
+				? new Response("<html><head><title>Info Pasaran</title></head><body>Pasaran ini diupdate otomatis oleh pusat</body></html>", { status: 200 })
+				: m.fetchFn(u, i);
+		const r = await runAutoInput({ session: sess, plan: plan(), fetchFn: f });
+		expect(r.ok).toBe(false);
+		expect(r.stage).toBe("cek");
+		expect(r.detail).toContain("sesi login OK");
+		expect(r.detail).not.toContain("sesi mungkin habis");
+		expect(r.detail).toContain("psr=p21545");
+		expect(r.detail).toContain("pool=pool-14-0-1-");
+		expect(r.detail).toContain('judul "Info Pasaran"');
+		expect(r.detail).toContain("diupdate otomatis oleh pusat");
+		expect(m.st.posts).toHaveLength(0);
+		const { cleanReason } = await import("../src/lib/admin-notify");
+		expect(cleanReason(r.detail)).not.toContain("Diterima:"); // Telegram tetap ringkas & bisa digabung antar website
+	});
 	it("uji kering: validasi lolos, TIDAK ada POST", async () => {
 		const m = mockSite();
 		const r = await runAutoInput({ session: sess, plan: plan(), dryRun: true, fetchFn: m.fetchFn });
@@ -716,5 +735,45 @@ describe("autoInputAfterSend (DB)", () => {
 		]);
 		await expect(saveSession(env, "Op", "X", "http://ag.suksesbogil.com", SID2)).rejects.toThrow(/https/);
 		await expect(saveSession(env, "Op", "SOHOTOGEL", "https://agwl5.suksesbogil.com", "bad")).rejects.toThrow(/PHPSESSID/);
+	});
+});
+
+describe("percobaan ulang tidak boleh menekan Hitung dua kali (audit: risiko bayar ganda)", () => {
+	let env: Env;
+	const ago = (min: number) => new Date(Date.now() + 7 * 3600_000 - min * 60_000).toISOString().slice(0, 19).replace("T", " ");
+	beforeEach(async () => {
+		turso.current = fakeD1([]);
+		resetAutoInputTablesFlag();
+		env = fakeEnv().env;
+		await setEnabled(env, "Op", true);
+	});
+	const job = (key: string, stage: string, detail: string, attempts = 0, createdMin = 10) =>
+		turso.current!.raw
+			.prepare(`INSERT INTO auto_input_job (username, website, market, result_key, status, stage, detail, created_at, updated_at, attempts) VALUES ('Op','HUGOTOGEL','HK',?, 'FAILED', ?, ?, ?, ?, ?)`)
+			.run(key, stage, detail, ago(createdMin), ago(5), attempts);
+
+	it("Hitung mungkin sudah ditekan -> TIDAK dicoba ulang; Hitung yang pasti belum ditekan -> tetap dicoba ulang", async () => {
+		const { dueRetryJobs } = await import("../src/lib/auto-input");
+		job("k1", "hitung", "Hitung dikirim tapi tombol Hitung periode ini masih ada — cek manual apakah sudah terhitung.");
+		job("k2", "hitung", "Proses terputus di tengah jalan — CEK MANUAL di admin website (angka mungkin sudah masuk).");
+		job("k3", "hitung", "Angka sudah MASUK, tapi halaman Hitung tidak cocok (periode 1 ≠ 2) — Hitung TIDAK dijalankan, cek manual.");
+		job("k4", "hitung", "Angka sudah MASUK, tapi halaman Hitung tidak dikenali — tekan Hitung manual.");
+		job("k5", "cek", "Halaman Nomor Keluar tidak dikenali");
+		const due = await dueRetryJobs(env, 2, 2, 10);
+		const keys = due.map((j) => JSON.stringify(j));
+		expect(keys.some((k) => k.includes("Hitung dikirim"))).toBe(false);
+		expect(keys.some((k) => k.includes("terputus di tengah"))).toBe(false);
+		expect(keys.some((k) => k.includes("Hitung TIDAK dijalankan"))).toBe(true);
+		expect(keys.some((k) => k.includes("halaman Hitung tidak dikenali"))).toBe(true);
+		expect(keys.some((k) => k.includes("Nomor Keluar"))).toBe(true);
+		expect(due.length).toBe(3);
+	});
+
+	it("yang tidak akan dicoba ulang langsung jadi peringatan (dulu: tidak pernah diperingatkan)", async () => {
+		job("k1", "hitung", "Hitung dikirim tapi tombol Hitung periode ini masih ada — cek manual apakah sudah terhitung.");
+		job("k2", "cek", "Halaman Nomor Keluar tidak dikenali", 0, 90); // di luar jendela percobaan ulang 60 menit
+		job("k3", "cek", "masih akan dicoba ulang", 0, 10);
+		const al = await pendingFailureAlerts(env, "Op", 2);
+		expect(al.map((a) => a.detail).sort()).toEqual(["Halaman Nomor Keluar tidak dikenali", "Hitung dikirim tapi tombol Hitung periode ini masih ada — cek manual apakah sudah terhitung."]);
 	});
 });
