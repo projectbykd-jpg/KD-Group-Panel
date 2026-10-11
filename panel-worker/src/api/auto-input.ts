@@ -4,6 +4,7 @@ import { getSys } from "../lib/settings";
 import { ghToken, investTurboRepo, loadIntegrations } from "../lib/integrations";
 import { ackTotoAlerts, dismissTotoRows, listTotoEvents, totoDispatchAt, totoWindowInfo, pruneTotoMacau, listTotoLog, logTotoEvent, pendingTotoAlerts, TOTO_MAX_ATTEMPTS, totoMacauRun } from "../lib/toto-macau";
 import { requireSession } from "./auth";
+import { saveMaster, loadMasterData } from "../lib/master-data";
 import { logActivity } from "../lib/activity";
 import { dateKeyNow } from "../lib/time";
 import { hasMenu } from "../lib/menus";
@@ -26,7 +27,8 @@ import {
 	getDisabledMarkets,
 	getSession,
 	normMarket,
-	setDisabledMarkets,
+	clearLegacyDisabled,
+	catalogMarkets,
 	getSessions,
 	listJobs,
 	planAutoInput,
@@ -57,13 +59,26 @@ export async function autoInputGetState(env: Env, token: string) {
 	const s = await gate(env, token);
 	// 3 query Turso saja (dulu 5+ ditambah ensure 12 perintah): config (saklar + pasaran mati), sesi, riwayat job.
 	const [cfg, sessions, jobs] = await Promise.all([getConfig(env, s.username), getSessions(env, s.username), listJobs(env, s.username)]);
-	const { enabled, disabledMarkets } = cfg;
-	// Daftar saklar pasaran = pasaran di riwayat job + yang sudah dimatikan (supaya tetap bisa dinyalakan lagi); tanpa query tambahan.
+	const { enabled } = cfg;
+	const isAdmin = s.profile.role === "ADMIN";
+	await loadMasterData(env);
+	let disabledMarkets = await getDisabledMarkets(env);
+	// Pemindahan sekali jalan: daftar lama per-akun milik ADMIN naik jadi daftar global (lalu dikosongkan agar tidak terulang).
+	if (isAdmin && cfg.disabledMarkets.length) {
+		const merged = [...new Set([...disabledMarkets, ...cfg.disabledMarkets])];
+		const r = await saveMaster(env, "md_ai_off_markets", merged);
+		if (r.ok) {
+			await clearLegacyDisabled(env, s.username).catch(() => {});
+			disabledMarkets = await getDisabledMarkets(env);
+		}
+	}
+	// Daftar saklar = katalog pasaran panel (Invest + Panel-Z) + riwayat job + yang sudah dimatikan; tanpa query tambahan.
 	const seen = jobs.map((j) => normMarket(j.market)).filter(Boolean);
 	return {
 		success: true,
 		enabled,
-		markets: [...new Set([...seen, ...disabledMarkets])].sort().map((m) => ({ market: m, auto: !disabledMarkets.includes(m) })),
+		isAdmin,
+		markets: [...new Set([...catalogMarkets(), ...seen, ...disabledMarkets])].sort().map((m) => ({ market: m, auto: !disabledMarkets.includes(m) })),
 		// PHPSESSID TIDAK pernah dikirim balik ke browser -- hanya penanda "terisi" + 4 karakter akhir.
 		websites: s.profile.websites.map((w) => {
 			const x = sessions.find((e) => e.website === w);
@@ -88,14 +103,18 @@ export async function autoInputSetEnabled(env: Env, token: string, enabled: bool
 	return { success: true, enabled: !!enabled };
 }
 
-/** Simpan pasaran yang TIDAK di-auto. markets = daftar lengkap pasaran yang dimatikan (menggantikan yang lama). */
+/** Simpan pasaran yang TIDAK di-auto. HANYA ADMIN; berlaku untuk semua user. markets = daftar lengkap yang dimatikan (menggantikan yang lama). */
 export async function autoInputSetMarkets(env: Env, token: string, markets: unknown) {
 	const s = await gate(env, token);
-	const before = await getDisabledMarkets(env, s.username);
-	const list = await setDisabledMarkets(env, s.username, markets);
+	if (s.profile.role !== "ADMIN") throw new Error("Hanya ADMIN yang boleh mengatur pasaran Auto Prediksi (berlaku untuk semua user).");
+	await loadMasterData(env);
+	const before = await getDisabledMarkets(env);
+	const r = await saveMaster(env, "md_ai_off_markets", Array.isArray(markets) ? markets : []);
+	if (!r.ok) return { success: false, message: r.error };
+	const list = await getDisabledMarkets(env);
 	const off = list.filter((m) => !before.includes(m)), on = before.filter((m) => !list.includes(m));
 	if (off.length || on.length) {
-		await logActivity(env, s.username, "AUTO PREDIKSI", [off.length ? "Pasaran dimatikan: " + off.join(", ") : "", on.length ? "Pasaran di-auto lagi: " + on.join(", ") : ""].filter(Boolean).join(" · "), "BERHASIL", "");
+		await logActivity(env, s.username, "AUTO PREDIKSI", [off.length ? "Pasaran dimatikan (semua user): " + off.join(", ") : "", on.length ? "Pasaran di-auto lagi (semua user): " + on.join(", ") : ""].filter(Boolean).join(" · "), "BERHASIL", "");
 	}
 	return { success: true, disabledMarkets: list };
 }
