@@ -10,6 +10,7 @@
 //      server (lihat catatan di lib/livechat-bot.ts).
 import { requireSession } from "./auth";
 import { getSys } from "../lib/settings";
+import { tsNow } from "../lib/time";
 import { constEq } from "../lib/crypto";
 import type { MenuKey } from "../lib/menus";
 import { logActivity } from "../lib/activity";
@@ -105,7 +106,14 @@ export async function livechatListSessions(env: Env, token: string) {
 	const s = await gatePanel(env, token, "livechat-sessions");
 	const { owners } = scopeOf(s);
 	const templates = (await listTemplates(env, owners)).filter((t) => Number(t.active) === 1);
-	return { success: true, sessions: await listSessions(env, owners), templateCount: templates.length };
+	return {
+		success: true,
+		sessions: await listSessions(env, owners),
+		templateCount: templates.length,
+		// jam server (WIB) + batas basi: UI membandingkan dengan 'Sinkron terakhir' tanpa bergantung jam browser
+		nowTs: tsNow(),
+		staleMin: await getSys(env, "sys_livechat_stale_min"),
+	};
 }
 
 /** Kunci Bot milik pengguna yang sedang login (hanya untuk dirinya sendiri). */

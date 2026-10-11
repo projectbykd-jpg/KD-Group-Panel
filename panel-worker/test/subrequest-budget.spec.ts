@@ -83,6 +83,8 @@ describe("anggaran subrequest menu Auto Prediksi (isolate dingin)", () => {
 		if (turso.calls > 6) console.log(turso.log.join("\n"));
 		expect(turso.calls).toBeLessThanOrEqual(6); // batch skema + 1 query kolom + sesi + template aktif + template (dulu 8 perintah skema x2 + query)
 		expect(a.sessions).toHaveLength(3);
+		expect(a).toMatchObject({ staleMin: 3 });
+		expect((a as unknown as { nowTs: string }).nowTs).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/);
 		expect(Math.max(...a.sessions.map((x) => x.last_message.length))).toBeLessThanOrEqual(300);
 	});
 });

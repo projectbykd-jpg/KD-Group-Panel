@@ -7706,6 +7706,7 @@ Tindakan ini tidak dapat dibatalkan.`,
     let livechatSessionsCache = [];
     let livechatTemplatesCache = [];
     let livechatPollTimer = null;
+    let livechatMeta = { nowTs: '', staleMin: 3 };
     let livechatSig = '';
 
     // Kode Console pemuat bot: alamat panel diambil dari halaman ini, jadi selalu cocok dengan domain yang dipakai.
@@ -7782,10 +7783,11 @@ Tindakan ini tidak dapat dibatalkan.`,
       google.script.run.withSuccessHandler(r => {
         if (!r || r.success === false) { if (!silent) toast((r && r.message) || 'Gagal memuat sesi chat'); return; }
         // Render ulang daftar hanya bila isinya berubah (last_seen_at ikut berubah tiap sinkron, jadi tidak ikut dibandingkan).
-        const sig = JSON.stringify((r.sessions || []).map(x => [x.session_key, x.bot_enabled, x.customer_name, x.queue_code, x.divisi, x.last_message, x.last_sender])) + '|' + r.templateCount;
+        const sig = JSON.stringify((r.sessions || []).map(x => [x.session_key, x.bot_enabled, x.customer_name, x.queue_code, x.divisi, x.last_message, x.last_sender])) + '|' + r.templateCount + '|' + String(r.nowTs || '').slice(0, 16);
         if (silent && sig === livechatSig) return;
         livechatSig = sig;
         livechatSessionsCache = r.sessions || [];
+        livechatMeta = { nowTs: r.nowTs || '', staleMin: Number(r.staleMin) || 3 };
         const noTpl = document.getElementById('livechatNoTpl');
         if (noTpl) noTpl.style.display = (Number(r.templateCount) === 0) ? '' : 'none';
         renderLivechatSessions();
@@ -7807,7 +7809,13 @@ Tindakan ini tidak dapat dibatalkan.`,
       }
       empty.style.display = 'none';
       const newest = list.reduce((a, b) => (String(a.last_seen_at || '') > String(b.last_seen_at || '')) ? a : b);
-      if (hint) hint.textContent = 'Sinkron terakhir: ' + (newest.last_seen_at || '-');
+      if (hint) {
+        const wib = t => Date.parse(String(t || '').replace(' ', 'T') + '+07:00');
+        const ageMin = (livechatMeta.nowTs && newest.last_seen_at) ? Math.round((wib(livechatMeta.nowTs) - wib(newest.last_seen_at)) / 60000) : 0;
+        const stale = ageMin > livechatMeta.staleMin;
+        hint.textContent = 'Sinkron terakhir: ' + (newest.last_seen_at || '-') + (stale ? ' — ' + (ageMin >= 120 ? Math.round(ageMin / 60) + ' jam' : ageMin + ' menit') + ' lalu. Bot di tab DayLiveChat tidak aktif (tab tertutup / bot mati / login CS habis): daftar ini bisa usang & bot TIDAK membalas.' : '');
+        hint.style.color = stale ? '#fbbf24' : '';
+      }
       wrap.innerHTML = list.map(row => {
         const on = Number(row.bot_enabled) === 1;
         return '<div class="mini-card flex items-center justify-between gap-3 flex-wrap' + (on ? ' border border-emerald-400/30' : '') + '">'
