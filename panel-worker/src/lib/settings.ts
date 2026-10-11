@@ -61,6 +61,7 @@ export const SYS_SETTINGS: SysSettingDef[] = [
 	{ key: "sys_lap_stale_running_min", group: "Laporan Harian (Tarik Data)", label: "Job dianggap macet", hint: "Job 'berjalan' tanpa kabar selama ini ditandai gagal. Sebaiknya lebih besar dari batas gagal start.", unit: "menit", def: 25, min: 5, max: 120 },
 	{ key: "sys_lap_dup_job_min", group: "Laporan Harian (Tarik Data)", label: "Cegah job ganda", hint: "Klik TARIK DATA lagi dalam rentang ini memakai job yang masih berjalan, bukan membuat job baru.", unit: "menit", def: 30, min: 5, max: 120 },
 	{ key: "sys_fetch_timeout_sec", group: "Jaringan & Cache", label: "Batas tunggu panggilan keluar", hint: "Panggilan ke situs luar (Telegram, Panel-Z, berita, GitHub, dll) yang lebih lama dari ini dibatalkan.", unit: "detik", def: 25, min: 5, max: 60 },
+	{ key: "sys_api_timeout_sec", group: "Jaringan & Cache", label: "Batas tunggu permintaan panel", hint: "Permintaan panel (menu, login, tombol) yang menggantung lebih lama dari ini dijawab dengan pesan galat yang jelas, dicatat di Admin > Error & Bug, dan dikabarkan ke Telegram admin -- bukan 'Memuat…' tanpa akhir. Prosesnya tetap diselesaikan di belakang. Harus lebih besar dari proses terlama (tarik laporan / proses BOT).", unit: "detik", def: 100, min: 30, max: 170 },
 	{ key: "sys_news_public_cache_sec", group: "Jaringan & Cache", label: "Cache daftar berita publik", hint: "Daftar berita di halaman publik di-cache sebentar supaya ringan. 0 = tanpa cache.", unit: "detik", def: 60, min: 0, max: 3600 },
 	{ key: "sys_news_ext_fetch_budget", group: "Bot News", label: "Tarikan sumber luar per putaran", hint: "Batas tarikan feed/redirect eksternal tiap putaran cron (menjaga batas 50 subrequest Cloudflare).", unit: "tarikan", def: 14, min: 3, max: 25 },
 	{ key: "sys_news_max_run_count", group: "Bot News", label: "Maks. artikel per klik manual", hint: "Batas jumlah artikel yang boleh dibuat dalam satu klik manual (tiap artikel memakai ±4-8 subrequest).", unit: "artikel", def: 5, min: 1, max: 10 },
@@ -102,6 +103,14 @@ export async function getSys(env: Env, key: string): Promise<number> {
 	const d = BY_KEY.get(key);
 	if (!d) throw new Error("Pengaturan tidak dikenal: " + key);
 	return (await loadAll(env)).get(key) ?? d.def;
+}
+
+/** Nilai dari cache saja, TANPA menyentuh database (untuk batas waktu: database yang menggantung tidak boleh ikut
+ *  menggantungkan batas waktunya sendiri). Cache kosong -> nilai bawaan. */
+export function getSysCached(key: string): number {
+	const d = BY_KEY.get(key);
+	if (!d) throw new Error("Pengaturan tidak dikenal: " + key);
+	return cache?.map.get(key) ?? d.def;
 }
 
 export async function getAllSys(env: Env): Promise<{ def: SysSettingDef; value: number }[]> {
