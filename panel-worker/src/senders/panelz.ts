@@ -44,6 +44,7 @@ async function pushAngka(
 	cfg: PanelZCfg,
 	rowId: string,
 	angka: string,
+	onNote?: (note: string) => void,
 ): Promise<string> {
 	const res = await fetch(cfg.url + "/config/update-resultlotto.php?row=" + rowId, {
 		method: "POST",
@@ -55,6 +56,16 @@ async function pushAngka(
 		},
 		body: new URLSearchParams({ updangka: angka }),
 	});
+	if (onNote) {
+		// bahan diagnosis bila angka tidak tampil sesudah dikirim: status + cuplikan jawaban Panel-Z (tanpa tag HTML). Tidak pernah melempar.
+		try {
+			const loc = typeof res.headers?.get === "function" ? res.headers.get("location") : null;
+			const snip = typeof res.text === "function" ? (await res.text()).replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 80) : "";
+			onNote(`HTTP ${res.status}${loc ? " → " + loc : ""}${snip ? ' "' + snip + '"' : ""}`);
+		} catch {
+			/* abaikan */
+		}
+	}
 	if (res.status === 200 || res.status === 302) return "Terkirim";
 	return "Gagal (" + res.status + ")";
 }
@@ -147,6 +158,8 @@ export interface PanelZHandle {
 	/** jumlah panggilan jaringan yang dipakai membuka daftar (untuk hitungan subrequest) */
 	fetches?: number;
 	push(rowId: string, angka: string): Promise<string>;
+	/** jawaban Panel-Z terakhir per baris yang dikirim (untuk diagnosis) */
+	notes?: Map<string, string>;
 	/** baca ulang; rowIds = baris yang baru dikirim -> hanya halaman yang memuat baris itu */
 	reload(rowIds?: string[]): Promise<string>;
 }
@@ -211,16 +224,21 @@ export async function openPanelZ(cfg: PanelZCfg, opts: { sinceDate?: string; max
 			fetches++;
 			remember(p, last);
 		}
+		const notes = new Map<string, string>();
 		const joined = (): string => [...pages.entries()].sort((a, b) => a[0] - b[0]).map((e) => e[1]).join("\n");
 		return {
 			html: joined(),
 			fetches,
+			notes,
 			push: async (rowId, angka) => {
-				const r = await pushAngka(session, cfg, rowId, angka);
+				const r = await pushAngka(session, cfg, rowId, angka, (n) => notes.set(rowId, n));
 				return r === "Terkirim" ? "Berhasil dikirim" : r;
 			},
 			reload: async (rowIds) => {
-				const want = rowIds?.length ? [...new Set(rowIds.map((id) => pageOf.get(id) ?? 1))] : [...pages.keys()];
+				// Halaman daftar bergeser bila Panel-Z membuat baris baru (mis. pukul 00:25 tiap hari): baris yang tadi di halaman n bisa pindah ke n+1,
+				// jadi baca juga halaman berikutnya -- dulu angka yang SUDAH masuk dianggap "belum tampil" lalu dikirim ulang berkali-kali.
+				const base = rowIds?.length ? [...new Set(rowIds.map((id) => pageOf.get(id) ?? 1))] : [...pages.keys()];
+				const want = rowIds?.length ? [...new Set(base.flatMap((n) => (n < total ? [n, n + 1] : [n])))].slice(0, 4) : base;
 				const out: string[] = [];
 				for (const n of want.sort((a, b) => a - b)) out.push(await load(n));
 				return out.join("\n");

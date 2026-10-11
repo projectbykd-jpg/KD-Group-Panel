@@ -235,6 +235,8 @@ export interface TotoSummary {
 	corrected: number;
 	/** website yang dilewati karena sedang diperiksa proses lain */
 	skippedBusy: number;
+	/** baris yang SUDAH dilaporkan gagal lalu dicoba ulang (siklus per jam) dan masih gagal: tidak dihitung 'gagal' lagi supaya tidak jadi alarm berulang */
+	stillFailed?: number;
 }
 
 /**
@@ -592,7 +594,7 @@ async function reconcileWebsite(
 	}
 
 	await flushLog(env, buf, budget);
-	const posted: { a: AdminRow; rowIds: string[]; old: string }[] = [];
+	const posted: { a: AdminRow; rowIds: string[]; old: string; retry: boolean }[] = [];
 	// satu kali baca status lama semua baris (hemat subrequest)
 	budget.used++;
 	const curRes = await db
@@ -659,10 +661,10 @@ async function reconcileWebsite(
 		}
 		let resetAttempts = false;
 		if (cur?.status === "FAILED" && Number(cur.attempts) >= TOTO_MAX_ATTEMPTS) {
-			if (String(cur.updated_at) > tsPlusMinutes(-60)) {
-				sum.failed++;
-				continue;
-			}
+			// Sudah gagal final & sudah diberitahukan: JANGAN dihitung "gagal" lagi di tiap putaran (dulu tiap 3 menit muncul "1 gagal" yang sama,
+			// jadi Error & Bug "muncul lagi" terus). Tiap >60 menit tetap dicoba ulang (baris kosong tidak boleh terlewat), tetapi kegagalan
+			// ulangnya dicatat sebagai "masih gagal", bukan alarm baru.
+			if (String(cur.updated_at) > tsPlusMinutes(-60)) continue;
 			resetAttempts = true; // sudah >60 menit sejak gagal terakhir: baris masih kosong/salah -> mulai siklus percobaan baru
 		} else if (wrong && (cur?.status === "SENT" || cur?.status === "VERIFIED") && Number(cur.attempts) >= TOTO_MAX_ATTEMPTS) {
 			resetAttempts = true; // angka yang tadinya benar diubah orang lain: koreksi lagi (siklus baru; terlihat di log bila terus bolak-balik)
@@ -702,10 +704,11 @@ async function reconcileWebsite(
 				break;
 			}
 		}
-		if (!failMsg) posted.push({ a, rowIds: need.map((t) => t.id), old: wrong ? oldVal : "" });
+		if (!failMsg) posted.push({ a, rowIds: need.map((t) => t.id), old: wrong ? oldVal : "", retry: resetAttempts });
 		else {
 			buf.push(db.prepare(`UPDATE toto_macau_log SET status = 'FAILED', detail = ?, updated_at = ? WHERE website = ? AND game = ? AND period = ?`).bind(("Panel-Z: " + failMsg).slice(0, 300), tsNow(), website, a.game.game, a.period));
-			sum.failed++;
+			if (resetAttempts) sum.stillFailed = (sum.stillFailed ?? 0) + 1;
+			else sum.failed++;
 			buf.push(evStmt(env, website, "info", "ERR", `${a.market} ${a.date}: gagal kirim ke Panel-Z — ${failMsg}`));
 		}
 	}
@@ -719,21 +722,46 @@ async function reconcileWebsite(
 		} catch {
 			after = [];
 		}
-		for (const { a, rowIds, old } of posted) {
-			const okRead = rowIds.every((id) => {
-				const z = after.find((x) => x.id === id);
-				return !!z && z.filled && z.value === a.number;
-			});
+		for (const { a, rowIds, old, retry } of posted) {
+			// baris dicari lewat id; bila halaman bergeser (id tidak ada), cari lewat pasaran + tanggal
+			const byId = (id: string) => after.find((x) => x.id === id);
+			const sameSlot = after.filter((x) => x.market === a.market && x.date === a.date);
+			const okRead =
+				rowIds.every((id) => {
+					const z = byId(id);
+					return !!z && z.filled && z.value === a.number;
+				}) ||
+				(rowIds.some((id) => !byId(id)) && sameSlot.length >= rowIds.length && sameSlot.every((z) => z.filled && z.value === a.number));
+			const why = okRead
+				? ""
+				: rowIds
+						.map((id) => {
+							const z = byId(id);
+							return z ? `baris ${id} berisi ${z.filled ? `"${z.value}"` : "kosong"}` : `baris ${id} tidak ditemukan di halaman yang dibaca ulang`;
+						})
+						.join("; ") + (panel.notes?.get(rowIds[0]) ? `; jawaban Panel-Z: ${panel.notes.get(rowIds[0])}` : "");
 			buf.push(
 				db
 					.prepare(`UPDATE toto_macau_log SET status = ?, detail = ?, updated_at = ? WHERE website = ? AND game = ? AND period = ?`)
-					.bind(okRead ? "SENT" : "FAILED", okRead ? (old ? `DIKOREKSI: Panel-Z berisi ${old}, diperbaiki ke angka admin ${a.number} & terverifikasi (dibaca ulang)` : "Terkirim ke Panel-Z & terverifikasi (dibaca ulang)") : "Terkirim tetapi angka belum tampil di baris Panel-Z — cek manual", tsNow(), website, a.game.game, a.period),
+					.bind(
+						okRead ? "SENT" : "FAILED",
+						okRead
+							? old
+								? `DIKOREKSI: Panel-Z berisi ${old}, diperbaiki ke angka admin ${a.number} & terverifikasi (dibaca ulang)`
+								: "Terkirim ke Panel-Z & terverifikasi (dibaca ulang)"
+							: `Terkirim tetapi angka belum tampil di baris Panel-Z — cek manual (${why})`.slice(0, 300),
+						tsNow(),
+						website,
+						a.game.game,
+						a.period,
+					),
 			);
-			buf.push(evStmt(env, website, "info", okRead ? "OK" : "ERR", `${a.market} ${a.date}: ${okRead ? (old ? `DIKOREKSI ${old} → ${a.number} — terbaca ulang di Panel-Z` : `TERKIRIM ${a.number} — terbaca ulang di Panel-Z`) : `terkirim ${a.number} tetapi belum tampil di Panel-Z — cek manual`}`));
+			buf.push(evStmt(env, website, "info", okRead ? "OK" : "ERR", `${a.market} ${a.date}: ${okRead ? (old ? `DIKOREKSI ${old} → ${a.number} — terbaca ulang di Panel-Z` : `TERKIRIM ${a.number} — terbaca ulang di Panel-Z`) : `terkirim ${a.number} tetapi belum tampil di Panel-Z — cek manual (${why})`}`));
 			if (okRead) {
 				sum.posted++;
 				if (old) sum.corrected++;
-			} else sum.failed++;
+			} else if (retry) sum.stillFailed = (sum.stillFailed ?? 0) + 1;
+			else sum.failed++;
 		}
 	}
 	await flushLog(env, buf, budget);
@@ -906,7 +934,7 @@ export async function totoMacauRun(env: Env, opts: { only?: string[]; exclude?: 
 			website,
 			"end",
 			crashed || d("failed") || d("conflict") ? "ERR" : d("posted") ? "OK" : "INFO",
-			crashed ? `Berhenti karena galat: ${crashed}` : `Selesai ${website}: ${d("posted")} dikirim (${sum.corrected - before.corrected} dikoreksi), ${d("already")} sudah ada, ${d("pending")} belum terisi, ${d("missing")} menunggu baris, ${d("conflict")} beda, ${d("failed")} gagal`,
+			crashed ? `Berhenti karena galat: ${crashed}` : `Selesai ${website}: ${d("posted")} dikirim (${sum.corrected - before.corrected} dikoreksi), ${d("already")} sudah ada, ${d("pending")} belum terisi, ${d("missing")} menunggu baris, ${d("conflict")} beda, ${d("failed")} gagal${(sum.stillFailed ?? 0) - (before.stillFailed ?? 0) ? `, ${(sum.stillFailed ?? 0) - (before.stillFailed ?? 0)} masih gagal (sudah dilaporkan, dicoba ulang tiap jam)` : ""}`,
 			[releaseLease(env, website, sum.more && !crashed)], // kunci dilepas di batch yang sama (tanpa panggilan tambahan)
 		);
 	}
