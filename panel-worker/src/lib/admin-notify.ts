@@ -397,7 +397,7 @@ export async function buildDailyReport(env: Env, day: string): Promise<string> {
 	].join("\n");
 }
 
-/** Antre laporan harian sekali per hari setelah jam yang diatur (bawaan 07 WIB). */
+/** Antre laporan harian sekali per hari setelah jam yang diatur (bawaan 00 WIB = begitu hari kemarin selesai). */
 export async function queueDailyReport(env: Env, nowMs = Date.now()): Promise<boolean> {
 	if (!(await notifyEnabled(env, "daily"))) return false;
 	const { date, hour } = wibNow(nowMs);
