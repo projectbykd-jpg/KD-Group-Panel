@@ -73,7 +73,7 @@ describe("antrean notifikasi admin", () => {
 		await configure();
 		await enqueueNotify(ctx.env, "autoinput", "ai:1", "HUGO · TOTO: gagal");
 		expect(await flushNotify(ctx.env)).toBe(1);
-		expect(sent[0]).toContain("Auto Prediksi GAGAL");
+		expect(sent[0]).toContain("Auto Prediksi gagal");
 		expect(sent[0]).toContain("HUGO · TOTO: gagal");
 		expect(sent[0]).not.toContain("kejadian saat belum diatur");
 		expect(await flushNotify(ctx.env)).toBe(0);
@@ -103,12 +103,12 @@ describe("antrean notifikasi admin", () => {
 	});
 
 	it("ringkasan dikelompokkan, dipotong di bawah batas Telegram; item yang tidak muat tetap menunggu", () => {
-		const items = Array.from({ length: 40 }, (_, i) => ({ id: i + 1, kind: (i % 2 ? "toto" : "err") as "toto" | "err", text: "x".repeat(200), tries: 0 }));
+		const items = Array.from({ length: 40 }, (_, i) => ({ id: i + 1, kind: (i % 2 ? "toto" : "err") as "toto" | "err", text: JSON.stringify({ r: "alasan " + i + " " + "x".repeat(200), s: "S" + i }), tries: 0 }));
 		const d = buildDigest(items);
 		expect(d.text.length).toBeLessThan(4096);
 		expect(d.ids.length).toBeGreaterThan(0);
 		expect(d.ids.length).toBeLessThan(40);
-		expect(d.text.indexOf("Error (menghambat user)")).toBeLessThan(d.text.indexOf("Toto Macau perlu dicek"));
+		expect(d.text.indexOf("Error — menghambat user")).toBeLessThan(d.text.indexOf("Toto Macau perlu dicek") === -1 ? Infinity : d.text.indexOf("Toto Macau perlu dicek"));
 	});
 });
 
@@ -188,7 +188,8 @@ describe("pemindai kegagalan final (dulu hanya popup di panel)", () => {
 		expect(await scanFinalFailures(ctx.env)).toBe(1);
 		expect(await scanFinalFailures(ctx.env)).toBe(0);
 		await flushNotify(ctx.env);
-		expect(sent[0]).toContain("HUGO · TOTO MACAU: PHPSESSID habis");
+		expect(sent[0]).toContain("<i>PHPSESSID habis</i>");
+		expect(sent[0]).toContain("<b>TOTO MACAU</b>: HUGO");
 		expect(sent[0]).not.toContain("FOLA");
 		expect(sent[0]).not.toContain("XO");
 	});
@@ -204,8 +205,10 @@ describe("pemindai kegagalan final (dulu hanya popup di panel)", () => {
 		ins.run("HUGO", 103, "1111", wibDay(0) + " 19:00", "FAILED", 1, "sementara", wib(5), wib(1));
 		expect(await scanFinalFailures(ctx.env)).toBe(2);
 		await flushNotify(ctx.env);
-		expect(sent[0]).toContain("[BEDA ANGKA] angka admin 1234");
-		expect(sent[0]).toContain("[GAGAL] angka admin 5678");
+		expect(sent[0]).toContain("Beda angka dengan admin — Panel-Z berisi 9999");
+		expect(sent[0]).toContain("HUGO (admin 1234)");
+		expect(sent[0]).toContain("Gagal dikirim ke Panel-Z — Panel-Z menolak");
+		expect(sent[0]).toContain("HUGO (admin 5678)");
 		expect(sent[0]).not.toContain("1111");
 	});
 });
@@ -228,11 +231,14 @@ describe("laporan harian", () => {
 		openGap();
 		await flushNotify(ctx.env);
 		const msg = sent.find((m) => m.includes("Laporan harian"))!;
-		expect(msg).toContain(`Tanggal ${y}`);
-		expect(msg).toContain("Auto Posting prediksi: 1 terkirim, 1 GAGAL");
-		expect(msg).toContain("Auto Prediksi: 1 berhasil");
-		expect(msg).toContain("Channel Telegram: 0 posting");
-		expect(msg).toContain("Error & Bug");
+		const { tanggalIndo } = await import("../src/lib/admin-notify");
+		expect(msg).toContain(`<i>${tanggalIndo(y)} (WIB)</i>`);
+		expect(msg).toContain("⚠️ 📤 <b>Auto Posting prediksi</b> — 1 terkirim · <b>1 gagal</b> (50%)");
+		expect(msg).toContain("✅ 🎯 <b>Auto Prediksi</b> — 1 berhasil");
+		expect(msg).toContain("📰 <b>BOT News</b>");
+		expect(msg).toContain("Website: <b>0</b> · Blogger: <b>0</b>");
+		expect(msg).toContain("Facebook Page: <b>0</b> · Channel Telegram: <b>0</b>");
+		expect(msg).toContain("<b>Error &amp; Bug</b>");
 	});
 
 	it("tick cron: pindai + laporan + kirim; kategori laporan dimatikan -> tidak ada laporan", async () => {
@@ -241,6 +247,31 @@ describe("laporan harian", () => {
 		resetSysCache();
 		await adminNotifyTick(ctx.env);
 		expect(sent.some((m) => m.includes("Laporan harian"))).toBe(false);
+	});
+});
+
+describe("format rapi (keluhan pemilik: 6 baris alasan sama bikin pening)", () => {
+	it("alasan yang sama ditulis SEKALI, website dikelompokkan per pasaran, teks teknis dibuang", async () => {
+		await configure();
+		const reason = "[Percobaan ulang 2/2] Halaman Nomor Keluar tidak dikenali (judul 'Silahkan isi Angka baru' tidak ada) — sesi mungkin habis atau tampilan situs berubah. (percobaan otomatis habis — CEK MANUAL)";
+		const { cleanReason } = await import("../src/lib/admin-notify");
+		const rows: [string, string][] = [["HUGO", "ARIZONA"], ["FOLA", "ARIZONA"], ["XO", "ARIZONA"], ["SENJA", "ARIZONA"], ["HUGO", "CANADA"], ["FOLA", "CANADA"]];
+		for (const [i, [site, market]] of rows.entries()) await enqueueNotify(ctx.env, "autoinput", "ai:" + i, { r: cleanReason(reason), m: market, s: site });
+		await flushNotify(ctx.env);
+		const msg = sent[0];
+		expect(msg.match(/Halaman Nomor Keluar tidak dikenali/g)).toHaveLength(1);
+		expect(msg).not.toContain("Percobaan ulang 2/2");
+		expect(msg).not.toContain("CEK MANUAL");
+		expect(msg).not.toContain("Silahkan isi Angka baru");
+		expect(msg).toContain("<b>ARIZONA</b>: HUGO, FOLA, XO, SENJA");
+		expect(msg).toContain("<b>CANADA</b>: HUGO, FOLA");
+		expect(msg).toContain("<b>🎯 Auto Prediksi gagal — input manual</b> (6)");
+	});
+
+	it("teks dinamis di-escape (tidak bisa merusak format HTML Telegram)", () => {
+		const d = buildDigest([{ id: 1, kind: "err", text: JSON.stringify({ r: "<script>x</script> & y", s: "loc<b>" }), tries: 0 }]);
+		expect(d.text).toContain("&lt;script&gt;x&lt;/script&gt; &amp; y");
+		expect(d.text).not.toContain("<script>");
 	});
 });
 

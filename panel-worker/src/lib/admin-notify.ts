@@ -28,13 +28,13 @@ export const NOTIFY_TOGGLE: Record<NotifyKind, string> = {
 	daily: "sys_tgn_daily",
 };
 const KIND_TITLE: Record<NotifyKind, string> = {
-	err: "⚠️ Error (menghambat user)",
-	"err-bg": "🛠 Error latar (cron / proses otomatis)",
-	autopost: "📤 Auto Posting prediksi GAGAL",
-	autoinput: "🎯 Auto Prediksi GAGAL (percobaan habis)",
+	err: "⚠️ Error — menghambat user",
+	"err-bg": "🛠 Error latar",
+	autopost: "📤 Auto Posting prediksi gagal",
+	autoinput: "🎯 Auto Prediksi gagal — input manual",
 	toto: "🎰 Toto Macau perlu dicek",
 	channel: "📢 Channel Telegram berhenti posting",
-	daily: "📊 Laporan harian",
+	daily: "",
 };
 const ORDER: NotifyKind[] = ["err", "autopost", "autoinput", "toto", "channel", "err-bg", "daily"];
 const MAX_TRIES = 5;
@@ -66,8 +66,37 @@ export async function notifyEnabled(env: Env, kind: NotifyKind): Promise<boolean
 	return (await getSys(env, NOTIFY_TOGGLE[kind])) === 1;
 }
 
+/** Isi satu kejadian. r = alasan (kejadian dengan alasan sama digabung jadi satu blok), m = kelompok di dalam alasan
+ *  (mis. pasaran), s = subjek (mis. website), t = teks bebas, html = isi HTML yang sudah aman (hanya laporan harian). */
+export interface NotifyItem { r?: string; m?: string; s?: string; t?: string; html?: string }
+
+const cut = (v: unknown, n: number) => (v == null ? undefined : String(v).slice(0, n));
+function encodeItem(it: string | NotifyItem): string {
+	if (typeof it === "string") return JSON.stringify({ t: it.slice(0, 700) });
+	return JSON.stringify({ r: cut(it.r, 300), m: cut(it.m, 80), s: cut(it.s, 200), t: cut(it.t, 700), html: cut(it.html, 3000) });
+}
+export function decodeItem(text: string): NotifyItem {
+	try {
+		const o = JSON.parse(text);
+		if (o && typeof o === "object") return o as NotifyItem;
+	} catch {
+		/* teks lama (sebelum format terstruktur) */
+	}
+	return { t: text };
+}
+export const escHtml = (v: string) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/** Buang awalan/akhiran teknis dari alasan Auto Prediksi supaya yang tampil hanya intinya. */
+export function cleanReason(r: string): string {
+	return String(r || "")
+		.replace(/^\s*\[Percobaan ulang \d+\/\d+\]\s*/i, "")
+		.replace(/\s*\((?:dicoba lagi otomatis[^)]*|percobaan otomatis habis[^)]*)\)\s*$/i, "")
+		.replace(/\s*\(judul '[^']*' tidak ada\)/i, "")
+		.trim() || "gagal (tanpa keterangan)";
+}
+
 /** Masukkan kejadian ke antrean (sekali per kunci). Tidak pernah melempar. Mengembalikan true bila baru masuk. */
-export async function enqueueNotify(env: Env, kind: NotifyKind, key: string, text: string): Promise<boolean> {
+export async function enqueueNotify(env: Env, kind: NotifyKind, key: string, item: string | NotifyItem): Promise<boolean> {
 	try {
 		if (!(await notifyEnabled(env, kind))) return false;
 		// Telegram admin belum diatur -> jangan menumpuk (kalau tidak, begitu Token diisi grup dibanjiri kejadian berhari-hari);
@@ -77,7 +106,7 @@ export async function enqueueNotify(env: Env, kind: NotifyKind, key: string, tex
 		if (!c.token || !c.chatId) return false;
 		await ensureTable(env);
 		const r = await env.DB.prepare(`INSERT OR IGNORE INTO admin_notify (nkey, kind, text, created_at) VALUES (?, ?, ?, ?)`)
-			.bind(String(key).slice(0, 300), kind, String(text).slice(0, 700), tsNow())
+			.bind(String(key).slice(0, 300), kind, encodeItem(item), tsNow())
 			.run();
 		return (r.meta?.changes ?? 0) > 0;
 	} catch {
@@ -87,21 +116,58 @@ export async function enqueueNotify(env: Env, kind: NotifyKind, key: string, tex
 
 interface Pending { id: number; kind: NotifyKind; text: string; tries: number }
 
-/** Susun pesan dari item antrean: dikelompokkan per kategori, dipotong rapi agar < batas Telegram. */
-export function buildDigest(items: Pending[]): { text: string; ids: number[] } {
+/** Susun pesan HTML dari antrean: per kategori, kejadian dengan alasan sama digabung (alasan ditulis SEKALI, lalu daftar
+ *  website per kelompok). Dipotong rapi agar < batas Telegram; kelompok yang tidak muat tetap menunggu pesan berikutnya. */
+export function buildDigest(items: Pending[], nowMs = Date.now()): { text: string; ids: number[] } {
 	const ids: number[] = [];
-	let out = "🔔 KD-Group Panel — notifikasi";
+	const hhmm = new Date(nowMs + 7 * 3600_000).toISOString().slice(11, 16);
+	let out = `🔔 <b>KD-Group Panel</b> · ${hhmm} WIB`;
+	let full = false;
 	for (const kind of ORDER) {
-		const group = items.filter((i) => i.kind === kind);
+		if (full) break;
+		const group = items.filter((i) => i.kind === kind).map((i) => ({ ...i, it: decodeItem(i.text) }));
 		if (!group.length) continue;
-		const head = `\n\n${KIND_TITLE[kind]}${group.length > 1 ? ` (${group.length})` : ""}`;
-		if (out.length + head.length > MSG_LIMIT) break;
-		out += head;
-		for (const it of group) {
-			const line = kind === "daily" ? "\n" + it.text : "\n• " + it.text;
-			if (out.length + line.length > MSG_LIMIT) break;
-			out += line;
-			ids.push(it.id);
+		if (kind === "daily") {
+			for (const g of group) {
+				const block = "\n\n" + (g.it.html ?? escHtml(g.it.t ?? ""));
+				if (out.length + block.length > MSG_LIMIT) { full = true; break; }
+				out += block;
+				ids.push(g.id);
+			}
+			continue;
+		}
+		let sect = `\n\n<b>${KIND_TITLE[kind]}</b>${group.length > 1 ? ` (${group.length})` : ""}`;
+		const sectIds: number[] = [];
+		// kelompokkan per alasan (urutan kemunculan pertama dipertahankan)
+		const byReason = new Map<string, typeof group>();
+		for (const g of group) {
+			const k = g.it.r ?? "\u0000" + g.id; // tanpa alasan = baris sendiri
+			byReason.set(k, [...(byReason.get(k) ?? []), g]);
+		}
+		for (const [k, rows] of byReason) {
+			let block = "";
+			if (k.startsWith("\u0000")) {
+				const it = rows[0].it;
+				block = "\n• " + escHtml(it.t ?? [it.s, it.m].filter(Boolean).join(" · "));
+			} else {
+				block = `\n<i>${escHtml(k)}</i>`;
+				const byM = new Map<string, string[]>();
+				for (const r of rows) {
+					const m = r.it.m ?? "";
+					byM.set(m, [...(byM.get(m) ?? []), r.it.s ?? r.it.t ?? ""]);
+				}
+				for (const [m, subs] of byM) {
+					const list = escHtml([...new Set(subs.filter(Boolean))].join(", "));
+					block += m ? `\n   ▸ <b>${escHtml(m)}</b>: ${list}` : subs.map((x) => `\n   ▸ ${escHtml(x)}`).join("");
+				}
+			}
+			if (out.length + sect.length + block.length > MSG_LIMIT) { full = true; break; }
+			sect += block;
+			sectIds.push(...rows.map((r) => r.id));
+		}
+		if (sectIds.length) {
+			out += sect;
+			ids.push(...sectIds);
 		}
 	}
 	return { text: out, ids };
@@ -128,7 +194,7 @@ export async function flushNotify(env: Env): Promise<number> {
 	const { text, ids } = buildDigest(items);
 	if (!ids.length) return 0;
 	const sentErr = items.some((i) => ids.includes(i.id) && (i.kind === "err" || i.kind === "err-bg"));
-	const { result } = await deliverAlert(env, text);
+	const { result } = await deliverAlert(env, text, true, true);
 	const ph = ids.map(() => "?").join(",");
 	if (result === "Terkirim") {
 		await env.DB.prepare(`UPDATE admin_notify SET sent_at = ? WHERE id IN (${ph})`).bind(tsNow(), ...ids).run();
@@ -183,8 +249,8 @@ export async function scanFinalFailures(env: Env): Promise<number> {
 			.catch(() => ({ results: [] as Record<string, unknown>[] }));
 		const ids: number[] = [];
 		for (const j of r.results ?? []) {
-			const txt = `${j.website} · ${j.market}: ${String(j.detail || "gagal").slice(0, 200)} (tahap ${j.stage || "-"}, ${j.attempts}x dicoba ulang) — input manual di admin website.`;
-			if (await enqueueNotify(env, "autoinput", `ai:${j.id}`, txt)) n++;
+			const item = { r: cleanReason(String(j.detail || "")), m: String(j.market || "-"), s: String(j.website || "-") };
+			if (await enqueueNotify(env, "autoinput", `ai:${j.id}`, item)) n++;
 			ids.push(Number(j.id));
 		}
 		if (ids.length) await db.prepare(`UPDATE auto_input_job SET tg_sent = 1 WHERE id IN (${ids.map(() => "?").join(",")})`).bind(...ids).run();
@@ -198,9 +264,13 @@ export async function scanFinalFailures(env: Env): Promise<number> {
 		const ids: number[] = [];
 		for (const t of r.results ?? []) {
 			const market = String(t.market || (t.game === "m51" ? "TOTO MACAO 5D" : "TOTO MACAU"));
-			const what = t.status === "CONFLICT" ? "BEDA ANGKA" : "GAGAL";
-			const txt = `${t.website} · ${market} ${String(t.row_at || "").slice(0, 16)} [${what}]${t.number ? " angka admin " + t.number : ""}: ${String(t.detail || "").slice(0, 200)}`;
-			if (await enqueueNotify(env, "toto", `toto:${t.id}:${t.status}`, txt)) n++;
+			const what = t.status === "CONFLICT" ? "Beda angka dengan admin" : "Gagal dikirim ke Panel-Z";
+			const item = {
+				r: `${what}${t.detail ? " — " + String(t.detail).slice(0, 200) : ""}`,
+				m: `${market} ${String(t.row_at || "").slice(5, 16)}`.trim(),
+				s: `${t.website}${t.number ? " (admin " + t.number + ")" : ""}`,
+			};
+			if (await enqueueNotify(env, "toto", `toto:${t.id}:${t.status}`, item)) n++;
 			ids.push(Number(t.id));
 		}
 		if (ids.length) await db.prepare(`UPDATE toto_macau_log SET tg_sent = 1 WHERE id IN (${ids.map(() => "?").join(",")})`).bind(...ids).run();
@@ -218,62 +288,104 @@ function wibNow(nowMs: number): { date: string; hour: number } {
 function yesterday(date: string): string {
 	return new Date(Date.parse(date + "T00:00:00Z") - 86400_000).toISOString().slice(0, 10);
 }
+const HARI = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+const BULAN = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+export function tanggalIndo(day: string): string {
+	const d = new Date(day + "T00:00:00Z");
+	return `${HARI[d.getUTCDay()]}, ${d.getUTCDate()} ${BULAN[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+const fmt = (n: number) => n.toLocaleString("id-ID");
+const pct = (bad: number, total: number) => (total ? ` (${Math.round((bad * 100) / total)}%)` : "");
+/** Satu baris laporan: ikon status (✅ bersih / ⚠️ ada masalah) + label tebal + isi. */
+const row = (icon: string, label: string, body: string, ok: boolean) => `${ok ? "✅" : "⚠️"} ${icon} <b>${escHtml(label)}</b> — ${body}`;
 async function safe(label: string, fn: () => Promise<string>): Promise<string> {
 	try {
 		return await fn();
 	} catch {
-		return `${label}: tidak terbaca`;
+		return `❔ <b>${escHtml(label)}</b> — tidak terbaca`;
 	}
 }
 const cnt = (rows: { s: string; n: number }[] | undefined, s: string) => Number((rows ?? []).find((r) => String(r.s) === s)?.n ?? 0);
 
+/** Laporan harian (HTML aman: semua angka dari query, label tetap). Satu bagian gagal dibaca tidak menggagalkan laporan. */
 export async function buildDailyReport(env: Env, day: string): Promise<string> {
 	const db = getTurso(env);
 	const tursoOn = !!(String(env.TURSO_URL ?? "").trim() && String(env.TURSO_TOKEN ?? "").trim());
-	const lines: string[] = [`Tanggal ${day} (WIB)`];
-	lines.push(
+	const ops: string[] = [];
+	ops.push(
 		await safe("Auto Posting prediksi", async () => {
 			const r = await env.DB.prepare(`SELECT status AS s, COUNT(*) AS n FROM prediction_registry WHERE date_key = ? GROUP BY status`).bind(day).all<{ s: string; n: number }>();
 			const ok = cnt(r.results, "BERHASIL"), bad = cnt(r.results, "GAGAL");
-			return `📤 Auto Posting prediksi: ${ok} terkirim${bad ? `, ${bad} GAGAL` : ""}`;
+			return row("📤", "Auto Posting prediksi", `${fmt(ok)} terkirim${bad ? ` · <b>${fmt(bad)} gagal</b>${pct(bad, ok + bad)}` : ""}`, !bad);
 		}),
 	);
 	if (tursoOn) {
-		lines.push(
+		ops.push(
 			await safe("Auto Prediksi", async () => {
 				const r = await db.prepare(`SELECT status AS s, COUNT(*) AS n FROM auto_input_job WHERE substr(created_at,1,10) = ? GROUP BY status`).bind(day).all<{ s: string; n: number }>();
 				const done = cnt(r.results, "DONE"), fail = cnt(r.results, "FAILED"), skip = cnt(r.results, "SKIPPED");
-				return `🎯 Auto Prediksi: ${done} berhasil${fail ? `, ${fail} GAGAL` : ""}${skip ? `, ${skip} dilewati` : ""}`;
+				return row("🎯", "Auto Prediksi", `${fmt(done)} berhasil${fail ? ` · <b>${fmt(fail)} gagal</b>${pct(fail, done + fail)}` : ""}${skip ? ` · ${fmt(skip)} dilewati` : ""}`, !fail);
 			}),
 		);
-		lines.push(
+		ops.push(
 			await safe("Toto Macau", async () => {
 				const r = await db.prepare(`SELECT status AS s, COUNT(*) AS n FROM toto_macau_log WHERE period > 0 AND substr(row_at,1,10) = ? GROUP BY status`).bind(day).all<{ s: string; n: number }>();
 				const ok = cnt(r.results, "SENT") + cnt(r.results, "VERIFIED");
 				const fail = cnt(r.results, "FAILED"), conf = cnt(r.results, "CONFLICT");
 				const wait = cnt(r.results, "MISSING") + cnt(r.results, "PENDING") + cnt(r.results, "SENDING");
-				return `🎰 Toto Macau: ${ok} terisi/terverifikasi${fail ? `, ${fail} GAGAL` : ""}${conf ? `, ${conf} BEDA ANGKA` : ""}${wait ? `, ${wait} masih menunggu` : ""}`;
-			}),
-		);
-		lines.push(
-			await safe("Channel Telegram", async () => {
-				const r = await db.prepare(`SELECT COUNT(*) AS n FROM news_article WHERE tg_posted_at LIKE ?`).bind(day + "%").first<{ n: number }>();
-				return `📢 Channel Telegram: ${Number(r?.n ?? 0)} posting`;
+				const bits = [`${fmt(ok)} terisi`];
+				if (fail) bits.push(`<b>${fmt(fail)} gagal</b>`);
+				if (conf) bits.push(`<b>${fmt(conf)} beda angka</b>`);
+				if (wait) bits.push(`${fmt(wait)} menunggu`);
+				return row("🎰", "Toto Macau", bits.join(" · "), !fail && !conf);
 			}),
 		);
 	}
-	lines.push(
-		await safe("Error & Bug", async () => {
-			const r = await env.DB.prepare(
-				`SELECT SUM(CASE WHEN status = 'open' AND impact = 'blocking' THEN 1 ELSE 0 END) AS ob,
-				        SUM(CASE WHEN status = 'open' AND impact != 'blocking' THEN 1 ELSE 0 END) AS og,
-				        SUM(CASE WHEN substr(first_at,1,10) = ? THEN 1 ELSE 0 END) AS nw
-				 FROM error_log`,
-			).bind(day).first<{ ob: number; og: number; nw: number }>();
-			return `🐞 Error & Bug: ${Number(r?.nw ?? 0)} galat baru kemarin; terbuka sekarang ${Number(r?.ob ?? 0)} menghambat, ${Number(r?.og ?? 0)} latar`;
-		}),
-	);
-	return lines.join("\n");
+	const news: string[] = [];
+	if (tursoOn) {
+		news.push(
+			await safe("BOT News", async () => {
+				const r = await db
+					.prepare(
+						`SELECT
+							SUM(CASE WHEN substr(found_at,1,10) = ?1 THEN 1 ELSE 0 END) AS found,
+							SUM(CASE WHEN site_posted_at != '' AND substr(site_posted_at,1,10) = ?1 THEN 1 ELSE 0 END) AS site,
+							SUM(CASE WHEN status = 'posted' AND substr(posted_at,1,10) = ?1 THEN 1 ELSE 0 END) AS blogger,
+							SUM(CASE WHEN fb_direct_posted_at NOT IN ('', 'error') AND substr(fb_direct_posted_at,1,10) = ?1 THEN 1 ELSE 0 END) AS fb,
+							SUM(CASE WHEN tg_posted_at LIKE '20%' AND substr(tg_posted_at,1,10) = ?1 THEN 1 ELSE 0 END) AS tg,
+							SUM(CASE WHEN status = 'new' THEN 1 ELSE 0 END) AS queue
+						 FROM news_article`,
+					)
+					.bind(day)
+					.first<Record<string, number | null>>();
+				const n = (k: string) => Number(r?.[k] ?? 0);
+				return [
+					`📰 <b>BOT News</b> — ${fmt(n("found"))} artikel baru terkumpul · antrean sekarang ${fmt(n("queue"))}`,
+					`   ▸ Website: <b>${fmt(n("site"))}</b> · Blogger: <b>${fmt(n("blogger"))}</b>`,
+					`   ▸ Facebook Page: <b>${fmt(n("fb"))}</b> · Channel Telegram: <b>${fmt(n("tg"))}</b>`,
+				].join("\n");
+			}),
+		);
+	}
+	const errs = await safe("Error & Bug", async () => {
+		const r = await env.DB.prepare(
+			`SELECT SUM(CASE WHEN status = 'open' AND impact = 'blocking' THEN 1 ELSE 0 END) AS ob,
+			        SUM(CASE WHEN status = 'open' AND impact != 'blocking' THEN 1 ELSE 0 END) AS og,
+			        SUM(CASE WHEN substr(first_at,1,10) = ? THEN 1 ELSE 0 END) AS nw
+			 FROM error_log`,
+		).bind(day).first<{ ob: number; og: number; nw: number }>();
+		const ob = Number(r?.ob ?? 0), og = Number(r?.og ?? 0), nw = Number(r?.nw ?? 0);
+		return row("🐞", "Error & Bug", `${fmt(nw)} baru · terbuka: ${ob ? `<b>${fmt(ob)} menghambat</b>, ` : ""}${fmt(og)} latar`, !ob);
+	});
+	return [
+		`📊 <b>Laporan harian</b>`,
+		`<i>${tanggalIndo(day)} (WIB)</i>`,
+		"",
+		...ops,
+		...(news.length ? ["", ...news] : []),
+		"",
+		errs,
+	].join("\n");
 }
 
 /** Antre laporan harian sekali per hari setelah jam yang diatur (bawaan 07 WIB). */
@@ -285,7 +397,7 @@ export async function queueDailyReport(env: Env, nowMs = Date.now()): Promise<bo
 	const key = "daily:" + date;
 	const has = await env.DB.prepare(`SELECT 1 AS x FROM admin_notify WHERE nkey = ?`).bind(key).first();
 	if (has) return false;
-	return enqueueNotify(env, "daily", key, await buildDailyReport(env, yesterday(date)));
+	return enqueueNotify(env, "daily", key, { html: await buildDailyReport(env, yesterday(date)) });
 }
 
 /** Satu tick cron 5 menit: pindai kegagalan final, antre laporan harian, lalu kirim antrean. */
