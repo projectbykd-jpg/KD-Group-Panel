@@ -12,6 +12,7 @@
 //   * ragu = berhenti dan minta input manual.
 import { adminDomain } from "./integrations";
 import { getTurso } from "./turso";
+import { ensureColumns } from "./turso-schema";
 import { getSys } from "./settings";
 import { retentionFrom, tsNow, tsPlusMinutes } from "./time";
 import type { Processed } from "./parser";
@@ -37,29 +38,48 @@ export function finalFailureSql(alias = ""): string {
 export type JobStatus = "QUEUED" | "RUNNING" | "DONE" | "FAILED" | "SKIPPED";
 
 let tablesEnsured = false;
+let ensuring: Promise<void> | null = null;
 /** Hanya untuk test (tiap test memakai database baru). */
 export function resetAutoInputTablesFlag(): void {
 	tablesEnsured = false;
+	ensuring = null;
 	lastExpireAt = 0;
 }
-export async function ensureAutoInputTables(env: Env): Promise<void> {
-	if (tablesEnsured) return;
+/** Satu pembuatan skema bersama: tiga fungsi yang dipanggil paralel (Promise.all) di isolate dingin dulu masing-masing menjalankan
+ *  SELURUH pembuatan skema (penanda baru diset sesudah selesai) -> subrequest dikali tiga -> "Too many subrequests". */
+export function ensureAutoInputTables(env: Env): Promise<void> {
+	if (tablesEnsured) return Promise.resolve();
+	if (!ensuring) {
+		ensuring = ensureAutoInputTablesOnce(env).then(
+			() => {
+				tablesEnsured = true;
+			},
+			(e) => {
+				ensuring = null; // gagal -> request berikutnya boleh mencoba lagi
+				throw e;
+			},
+		);
+	}
+	return ensuring;
+}
+async function ensureAutoInputTablesOnce(env: Env): Promise<void> {
 	const db = getTurso(env);
-	for (const stmt of [
-		`CREATE TABLE IF NOT EXISTS auto_input_config (
+	// SATU batch untuk semua CREATE (dulu 12 perintah berurutan = 12+ subrequest di isolate dingin) + SATU query kolom.
+	await db.batch([
+		db.prepare(`CREATE TABLE IF NOT EXISTS auto_input_config (
 			username   TEXT PRIMARY KEY,
 			enabled    INTEGER NOT NULL DEFAULT 0,
 			updated_at TEXT NOT NULL DEFAULT ''
-		)`,
-		`CREATE TABLE IF NOT EXISTS auto_input_session (
+		)`),
+		db.prepare(`CREATE TABLE IF NOT EXISTS auto_input_session (
 			username   TEXT NOT NULL,
 			website    TEXT NOT NULL,
 			base_url   TEXT NOT NULL DEFAULT '',
 			phpsessid  TEXT NOT NULL DEFAULT '',
 			updated_at TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (username, website)
-		)`,
-		`CREATE TABLE IF NOT EXISTS auto_input_job (
+		)`),
+		db.prepare(`CREATE TABLE IF NOT EXISTS auto_input_job (
 			id          INTEGER PRIMARY KEY AUTOINCREMENT,
 			username    TEXT NOT NULL,
 			website     TEXT NOT NULL,
@@ -74,25 +94,24 @@ export async function ensureAutoInputTables(env: Env): Promise<void> {
 			created_at  TEXT NOT NULL DEFAULT '',
 			updated_at  TEXT NOT NULL DEFAULT '',
 			UNIQUE (website, result_key)
-		)`,
-		`CREATE INDEX IF NOT EXISTS ix_auto_input_job_user ON auto_input_job(username, id)`,
-		// attempts = jumlah percobaan ULANG otomatis yang sudah dilakukan (0 = hanya percobaan awal).
-		`ALTER TABLE auto_input_job ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0`,
-		// alerted = 1 setelah popup peringatan 'gagal & perlu dicek' ditampilkan ke user (supaya tidak muncul berulang).
-		`ALTER TABLE auto_input_job ADD COLUMN alerted INTEGER NOT NULL DEFAULT 0`,
-		// hidden = 1: disembunyikan user (sudah beres / ditangani manual). Baris tetap ada sebagai pagar anti-input-ganda (UNIQUE website+result_key).
-		`ALTER TABLE auto_input_job ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`,
-		`CREATE INDEX IF NOT EXISTS ix_auto_input_job_retry ON auto_input_job(status, updated_at)`,
+		)`),
+		db.prepare(`CREATE INDEX IF NOT EXISTS ix_auto_input_job_user ON auto_input_job(username, id)`),
+		db.prepare(`CREATE INDEX IF NOT EXISTS ix_auto_input_job_retry ON auto_input_job(status, updated_at)`),
+	]);
+	await ensureColumns(db, {
+		auto_input_job: [
+			// attempts = jumlah percobaan ULANG otomatis yang sudah dilakukan (0 = hanya percobaan awal).
+			["attempts", "INTEGER NOT NULL DEFAULT 0"],
+			// alerted = 1 setelah popup peringatan 'gagal & perlu dicek' ditampilkan ke user (supaya tidak muncul berulang).
+			["alerted", "INTEGER NOT NULL DEFAULT 0"],
+			// hidden = 1: disembunyikan user (sudah beres / ditangani manual). Baris tetap ada sebagai pagar anti-input-ganda.
+			["hidden", "INTEGER NOT NULL DEFAULT 0"],
+			// tg_sent = 1 setelah kegagalan final dikabarkan ke Telegram admin (lib/admin-notify).
+			["tg_sent", "INTEGER NOT NULL DEFAULT 0"],
+		],
 		// Pasaran yang TIDAK di-auto untuk akun ini (JSON array nama pasaran ternormalisasi). Kosong = semua pasaran auto.
-		`ALTER TABLE auto_input_config ADD COLUMN disabled_markets TEXT NOT NULL DEFAULT '[]'`,
-	]) {
-		try {
-			await db.prepare(stmt).run();
-		} catch (e) {
-			if (!/duplicate column/i.test(e instanceof Error ? e.message : String(e))) throw e;
-		}
-	}
-	tablesEnsured = true;
+		auto_input_config: [["disabled_markets", "TEXT NOT NULL DEFAULT '[]'"]],
+	});
 }
 
 // ---------------------------------------------------------------------------
@@ -151,12 +170,22 @@ export function planAutoInput(rawText: string, p: Processed): AutoInputPlan {
 // Saklar ON/OFF per user (default OFF)
 // ---------------------------------------------------------------------------
 export async function getEnabled(env: Env, username: string): Promise<boolean> {
+	return (await getConfig(env, username)).enabled;
+}
+/** Saklar + daftar pasaran yang dimatikan dalam SATU query (dulu dua query terpisah di tiap buka menu). */
+export async function getConfig(env: Env, username: string): Promise<{ enabled: boolean; disabledMarkets: string[] }> {
 	await ensureAutoInputTables(env);
 	const row = await getTurso(env)
-		.prepare(`SELECT enabled FROM auto_input_config WHERE username = ?`)
+		.prepare(`SELECT enabled, disabled_markets FROM auto_input_config WHERE username = ?`)
 		.bind(username)
 		.first<Record<string, unknown>>();
-	return !!Number(row?.enabled ?? 0);
+	let disabledMarkets: string[] = [];
+	try {
+		disabledMarkets = cleanMarketList(JSON.parse(String(row?.disabled_markets ?? "[]")));
+	} catch {
+		/* kosong */
+	}
+	return { enabled: !!Number(row?.enabled ?? 0), disabledMarkets };
 }
 
 export async function setEnabled(env: Env, username: string, enabled: boolean): Promise<void> {
@@ -186,16 +215,7 @@ export function cleanMarketList(v: unknown): string[] {
 	return [...out].sort();
 }
 export async function getDisabledMarkets(env: Env, username: string): Promise<string[]> {
-	await ensureAutoInputTables(env);
-	const row = await getTurso(env)
-		.prepare(`SELECT disabled_markets FROM auto_input_config WHERE username = ?`)
-		.bind(username)
-		.first<Record<string, unknown>>();
-	try {
-		return cleanMarketList(JSON.parse(String(row?.disabled_markets ?? "[]")));
-	} catch {
-		return [];
-	}
+	return (await getConfig(env, username)).disabledMarkets;
 }
 export async function setDisabledMarkets(env: Env, username: string, markets: unknown): Promise<string[]> {
 	const list = cleanMarketList(markets);
@@ -494,32 +514,32 @@ async function expireRunning(env: Env): Promise<void> {
 	const db = getTurso(env);
 	const now = tsNow();
 	const old = tsPlusMinutes(-RUNNING_TTL_MIN);
-	// Antre tapi tidak pernah dijalankan (halaman panel ditutup sebelum sempat memanggil): belum menyentuh admin.
-	await db
-		.prepare(
-			`UPDATE auto_input_job SET status = 'FAILED', stage = 'cek', updated_at = ?,
+	// Tiga UPDATE dalam SATU batch (1 subrequest, bukan 3). Urutan penting: yang paling spesifik dulu.
+	await db.batch([
+		// Antre tapi tidak pernah dijalankan (halaman panel ditutup sebelum sempat memanggil): belum menyentuh admin.
+		db
+			.prepare(
+				`UPDATE auto_input_job SET status = 'FAILED', stage = 'cek', updated_at = ?,
 			   detail = 'Tidak sempat dijalankan (halaman panel ditutup / koneksi putus) — admin belum disentuh, aman klik COBA LAGI.'
 			 WHERE status = 'QUEUED' AND updated_at < ?`,
-		)
-		.bind(now, old)
-		.run();
-	// Berjalan tapi putus. Tahap 'cek' = belum ada yang diubah; tahap lain = angka MUNGKIN sudah masuk.
-	await db
-		.prepare(
-			`UPDATE auto_input_job SET status = 'FAILED', updated_at = ?,
+			)
+			.bind(now, old),
+		// Berjalan tapi putus. Tahap 'cek' = belum ada yang diubah; tahap lain = angka MUNGKIN sudah masuk.
+		db
+			.prepare(
+				`UPDATE auto_input_job SET status = 'FAILED', updated_at = ?,
 			   detail = 'Terputus sebelum mengubah apa pun — aman klik COBA LAGI.'
 			 WHERE status = 'RUNNING' AND stage IN ('', 'cek') AND updated_at < ?`,
-		)
-		.bind(now, old)
-		.run();
-	await db
-		.prepare(
-			`UPDATE auto_input_job SET status = 'FAILED', updated_at = ?,
+			)
+			.bind(now, old),
+		db
+			.prepare(
+				`UPDATE auto_input_job SET status = 'FAILED', updated_at = ?,
 			   detail = 'Proses terputus di tengah jalan — CEK MANUAL di admin website (angka mungkin sudah masuk).'
 			 WHERE status = 'RUNNING' AND updated_at < ?`,
-		)
-		.bind(now, old)
-		.run();
+			)
+			.bind(now, old),
+	]);
 }
 
 /**
@@ -545,8 +565,13 @@ export async function listJobs(env: Env, username: string, days?: number): Promi
 	await expireRunning(env);
 	const n = days ?? (await getSys(env, "sys_auto_input_history_days"));
 	const from = retentionFrom(n);
+	// Hanya kolom yang dipakai tampilan (dulu SELECT * s.d. 2000 baris penuh -> respons Turso raksasa yang terpotong di tengah:
+	// "Unterminated string in JSON"). detail dipangkas 700 karakter (cuplikan diagnosa tetap muat); batas baris 1200 terbaru.
 	const res = await getTurso(env)
-		.prepare(`SELECT * FROM auto_input_job WHERE username = ? AND hidden = 0 AND created_at >= ? ORDER BY id DESC LIMIT 2000`)
+		.prepare(
+			`SELECT id, username, website, market, prizes, result_date, status, stage, substr(detail, 1, 700) AS detail, period, created_at, updated_at, attempts
+			 FROM auto_input_job WHERE username = ? AND hidden = 0 AND created_at >= ? ORDER BY id DESC LIMIT 1200`,
+		)
 		.bind(username, from)
 		.all<Record<string, unknown>>();
 	return (res.results ?? []).map(rowToJob);

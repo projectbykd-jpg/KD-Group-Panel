@@ -22,9 +22,9 @@ import {
 	deleteSession,
 	finishJob,
 	getEnabled,
+	getConfig,
 	getDisabledMarkets,
 	getSession,
-	knownMarkets,
 	normMarket,
 	setDisabledMarkets,
 	getSessions,
@@ -55,17 +55,14 @@ function mustOwnWebsite(profile: UserProfile, website: string): string {
 
 export async function autoInputGetState(env: Env, token: string) {
 	const s = await gate(env, token);
-	const [enabled, sessions, jobs, disabledMarkets, seen] = await Promise.all([
-		getEnabled(env, s.username),
-		getSessions(env, s.username),
-		listJobs(env, s.username),
-		getDisabledMarkets(env, s.username),
-		knownMarkets(env, s.username),
-	]);
+	// 3 query Turso saja (dulu 5+ ditambah ensure 12 perintah): config (saklar + pasaran mati), sesi, riwayat job.
+	const [cfg, sessions, jobs] = await Promise.all([getConfig(env, s.username), getSessions(env, s.username), listJobs(env, s.username)]);
+	const { enabled, disabledMarkets } = cfg;
+	// Daftar saklar pasaran = pasaran di riwayat job + yang sudah dimatikan (supaya tetap bisa dinyalakan lagi); tanpa query tambahan.
+	const seen = jobs.map((j) => normMarket(j.market)).filter(Boolean);
 	return {
 		success: true,
 		enabled,
-		// Saklar per pasaran: daftar = pasaran di riwayat 30 hari + yang sudah dimatikan (supaya tetap bisa dinyalakan lagi).
 		markets: [...new Set([...seen, ...disabledMarkets])].sort().map((m) => ({ market: m, auto: !disabledMarkets.includes(m) })),
 		// PHPSESSID TIDAK pernah dikirim balik ke browser -- hanya penanda "terisi" + 4 karakter akhir.
 		websites: s.profile.websites.map((w) => {
