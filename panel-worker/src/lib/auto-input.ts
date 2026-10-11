@@ -15,7 +15,8 @@ import { getTurso } from "./turso";
 import { ensureColumns } from "./turso-schema";
 import { getSys } from "./settings";
 import { retentionFrom, tsNow, tsPlusMinutes } from "./time";
-import type { Processed } from "./parser";
+import { MARKET_TO_PANEL, type Processed } from "./parser";
+import { INVEST_PASARAN } from "./invest";
 import { PREDICTION_SITE_NAMES } from "./prediction";
 
 export const RUNNING_TTL_MIN = 5;
@@ -200,7 +201,7 @@ export async function setEnabled(env: Env, username: string, enabled: boolean): 
 }
 
 // ---------------------------------------------------------------------------
-// Pasaran yang tidak di-auto (per akun). Pasaran di daftar ini dilewati SEJAK AWAL: tidak dibuat job, tidak dicoba
+// Pasaran yang tidak di-auto (GLOBAL, diatur admin). Pasaran di daftar ini dilewati SEJAK AWAL: tidak dibuat job, tidak dicoba
 // ulang, tidak memicu peringatan gagal -- operator menginput manual seperti biasa.
 // ---------------------------------------------------------------------------
 const MAX_DISABLED = 100;
@@ -214,29 +215,34 @@ export function cleanMarketList(v: unknown): string[] {
 	}
 	return [...out].sort();
 }
-export async function getDisabledMarkets(env: Env, username: string): Promise<string[]> {
-	return (await getConfig(env, username)).disabledMarkets;
+/** Daftar GLOBAL pasaran yang tidak di-auto: diatur ADMIN saja (Data Master `md_ai_off_markets`), berlaku untuk semua user.
+ *  Diisi `loadMasterData` (dipanggil di tiap request & cron) lewat `setGlobalOffMarkets`. */
+let globalOffMarkets: string[] = [];
+export function setGlobalOffMarkets(v: unknown): void {
+	globalOffMarkets = cleanMarketList(v);
 }
-export async function setDisabledMarkets(env: Env, username: string, markets: unknown): Promise<string[]> {
-	const list = cleanMarketList(markets);
+export function getGlobalOffMarkets(): string[] {
+	return globalOffMarkets;
+}
+/** Parameter `username` dipertahankan agar pemanggil lama tetap valid; daftarnya sekarang sama untuk semua akun. */
+export async function getDisabledMarkets(_env: Env, _username?: string): Promise<string[]> {
+	return globalOffMarkets;
+}
+/** Bersihkan daftar lama per-akun (sebelum jadi global) setelah dipindahkan. */
+export async function clearLegacyDisabled(env: Env, username: string): Promise<void> {
 	await ensureAutoInputTables(env);
 	await getTurso(env)
-		.prepare(
-			`INSERT INTO auto_input_config (username, enabled, updated_at, disabled_markets) VALUES (?, 0, ?, ?)
-			 ON CONFLICT(username) DO UPDATE SET disabled_markets = excluded.disabled_markets, updated_at = excluded.updated_at`,
-		)
-		.bind(username, tsNow(), JSON.stringify(list))
+		.prepare(`UPDATE auto_input_config SET disabled_markets = '[]', updated_at = ? WHERE username = ?`)
+		.bind(tsNow(), username)
 		.run();
-	return list;
 }
-/** Pasaran yang pernah muncul di riwayat job akun ini (untuk daftar saklar di menu). */
-export async function knownMarkets(env: Env, username: string, days = 30): Promise<string[]> {
-	await ensureAutoInputTables(env);
-	const r = await getTurso(env)
-		.prepare(`SELECT DISTINCT market FROM auto_input_job WHERE username = ? AND created_at >= ? ORDER BY market`)
-		.bind(username, tsPlusMinutes(-days * 24 * 60))
-		.all<Record<string, unknown>>();
-	return (r.results ?? []).map((x) => String(x.market ?? "")).filter(Boolean);
+/** Semua nama pasaran yang dikenal panel (daftar Invest + peta Panel-Z) -- sumber daftar saklar supaya lengkap walau belum pernah ada job. */
+export function catalogMarkets(): string[] {
+	const out = new Set<string>();
+	for (const [, name] of INVEST_PASARAN) out.add(normMarket(name));
+	for (const k of Object.keys(MARKET_TO_PANEL)) out.add(normMarket(k));
+	out.delete("");
+	return [...out];
 }
 
 // ---------------------------------------------------------------------------

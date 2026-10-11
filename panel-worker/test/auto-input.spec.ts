@@ -7,7 +7,7 @@ import { autoInputAfterSend, autoInputRetryTick, runQueuedJob, type AutoInputNot
 import { autoInputGetState, autoInputSetMarkets } from "../src/api/auto-input";
 import { checkLogin } from "../src/api/auth";
 import { hashPassword } from "../src/lib/crypto";
-import { getDisabledMarkets, setDisabledMarkets, cleanMarketList, hideJobs, pruneAutoInputJobs, pendingFailureAlerts, ackFailureAlerts, claimJob, parseCookieInput, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
+import { getDisabledMarkets, setGlobalOffMarkets, cleanMarketList, hideJobs, pruneAutoInputJobs, pendingFailureAlerts, ackFailureAlerts, claimJob, parseCookieInput, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
 import { frameSources, parseAngkaPage, readTopRow, parseHitungPage, runAutoInput, buildPayload, parseForms } from "../src/lib/auto-input-run";
 import { processText } from "../src/lib/parser";
 import { fakeD1, fakeEnv } from "./helpers/fake-env";
@@ -420,6 +420,7 @@ describe("autoInputAfterSend (DB)", () => {
 	let env: Env;
 	const profile = { username: "Op", role: "OPERATOR", websites: ["HUGOTOGEL", "FOLATOTO"], menus: null } as unknown as UserProfile;
 	beforeEach(() => {
+		setGlobalOffMarkets([]);
 		turso.current = fakeD1([]);
 		resetAutoInputTablesFlag();
 		env = fakeEnv().env;
@@ -525,13 +526,13 @@ describe("autoInputAfterSend (DB)", () => {
 			const m = mockSite();
 			await setEnabled(env, "Op", true);
 			await withSession();
-			await setDisabledMarkets(env, "Op", ["floridaeve"]);
+			setGlobalOffMarkets(["floridaeve"]);
 			const n = await go(m);
 			expect(n?.results).toEqual([]);
 			expect(n?.skippedReason).toContain("FLORIDAEVE tidak di-auto");
 			expect(m.st.posts).toHaveLength(0);
 			expect(await listJobs(env, "Op")).toHaveLength(0);
-			await setDisabledMarkets(env, "Op", ["ARIZONA"]); // pasaran lain dimatikan -> FLORIDAEVE jalan
+			setGlobalOffMarkets(["ARIZONA"]); // pasaran lain dimatikan -> FLORIDAEVE jalan
 			const n2 = await go(m);
 			expect(n2?.results[0].status).toBe("BERHASIL");
 		});
@@ -541,7 +542,7 @@ describe("autoInputAfterSend (DB)", () => {
 			await withSession();
 			await go(m);
 			expect((await listJobs(env, "Op"))[0]).toMatchObject({ status: "FAILED" });
-			await setDisabledMarkets(env, "Op", ["FLORIDAEVE"]);
+			setGlobalOffMarkets(["FLORIDAEVE"]);
 			turso.current!.raw.prepare(`UPDATE auto_input_job SET updated_at = ? WHERE status = 'FAILED'`).run(new Date(Date.now() + 7 * 3600_000 - 3 * 60_000).toISOString().slice(0, 19).replace("T", " "));
 			await autoInputRetryTick(env, m.fetchFn);
 			const j = (await listJobs(env, "Op"))[0];
@@ -549,17 +550,44 @@ describe("autoInputAfterSend (DB)", () => {
 			expect(j.detail).toContain("tidak di-auto");
 			expect(m.st.calcPosts).toBe(0);
 		});
-		it("lewat API: daftar menampilkan pasaran riwayat + yang dimatikan; simpan per akun", async () => {
+		it("lewat API: HANYA admin yang boleh mengatur; berlaku global untuk semua user; daftar lengkap (katalog)", async () => {
 			const ctx = fakeEnv();
 			env = ctx.env;
-			ctx.db.prepare(`INSERT INTO users (username, username_lc, password_hash, role, status, websites) VALUES ('Op', 'op', ?, 'OPERATOR', 'AKTIF', 'HUGOTOGEL')`).run(await hashPassword("pw"));
-			const tok = ((await checkLogin(env, "Op", "pw", "")) as { sessionToken: string }).sessionToken;
-			await autoInputSetMarkets(env, tok, ["Canada"]);
-			expect(await getDisabledMarkets(env, "Op")).toEqual(["CANADA"]);
-			const st = (await autoInputGetState(env, tok)) as unknown as { markets: { market: string; auto: boolean }[] };
-			expect(st.markets).toEqual([{ market: "CANADA", auto: false }]);
-			await autoInputSetMarkets(env, tok, []);
-			expect(await getDisabledMarkets(env, "Op")).toEqual([]);
+			setGlobalOffMarkets([]);
+			const hash = await hashPassword("pw");
+			ctx.db.prepare(`INSERT INTO users (username, username_lc, password_hash, role, status, websites) VALUES ('Op', 'op', ?, 'OPERATOR', 'AKTIF', 'HUGOTOGEL')`).run(hash);
+			ctx.db.prepare(`INSERT INTO users (username, username_lc, password_hash, role, status, websites) VALUES ('Adm', 'adm', ?, 'ADMIN', 'AKTIF', 'HUGOTOGEL')`).run(hash);
+			const op = ((await checkLogin(env, "Op", "pw", "")) as { sessionToken: string }).sessionToken;
+			const adm = ((await checkLogin(env, "Adm", "pw", "")) as { sessionToken: string }).sessionToken;
+			await expect(autoInputSetMarkets(env, op, ["Canada"])).rejects.toThrow(/ADMIN/);
+			expect(await getDisabledMarkets(env)).toEqual([]);
+			expect(await autoInputSetMarkets(env, adm, ["Canada"])).toMatchObject({ success: true, disabledMarkets: ["CANADA"] });
+			const stOp = (await autoInputGetState(env, op)) as unknown as { isAdmin: boolean; markets: { market: string; auto: boolean }[] };
+			expect(stOp.isAdmin).toBe(false);
+			expect(stOp.markets.find((x) => x.market === "CANADA")).toEqual({ market: "CANADA", auto: false });
+			expect(stOp.markets.length).toBeGreaterThan(40); // katalog Invest + Panel-Z, bukan hanya riwayat
+			expect(stOp.markets.find((x) => x.market === "HONGKONG")?.auto).toBe(true);
+			const stAdm = (await autoInputGetState(env, adm)) as unknown as { isAdmin: boolean };
+			expect(stAdm.isAdmin).toBe(true);
+			await autoInputSetMarkets(env, adm, []);
+			expect(await getDisabledMarkets(env)).toEqual([]);
+		});
+		it("pemindahan sekali jalan: daftar lama per-akun milik admin naik jadi global lalu dikosongkan", async () => {
+			const ctx = fakeEnv();
+			env = ctx.env;
+			setGlobalOffMarkets([]);
+			ctx.db.prepare(`INSERT INTO users (username, username_lc, password_hash, role, status, websites) VALUES ('Adm', 'adm', ?, 'ADMIN', 'AKTIF', 'HUGOTOGEL')`).run(await hashPassword("pw"));
+			const adm = ((await checkLogin(env, "Adm", "pw", "")) as { sessionToken: string }).sessionToken;
+			await getSessions(env, "Adm"); // pastikan tabel ada
+			turso.current!.raw.prepare(`INSERT INTO auto_input_config (username, enabled, updated_at, disabled_markets) VALUES ('Adm', 1, 'x', '["ARIZONA","SYDNEY"]')`).run();
+			const st = (await autoInputGetState(env, adm)) as unknown as { markets: { market: string; auto: boolean }[] };
+			expect(st.markets.filter((x) => !x.auto).map((x) => x.market)).toEqual(["ARIZONA", "SYDNEY"]);
+			expect(await getDisabledMarkets(env)).toEqual(["ARIZONA", "SYDNEY"]);
+			const row = turso.current!.raw.prepare(`SELECT disabled_markets FROM auto_input_config WHERE username='Adm'`).get() as { disabled_markets: string };
+			expect(row.disabled_markets).toBe("[]");
+			await autoInputSetMarkets(env, adm, []); // admin mengosongkan -> tidak hidup lagi dari data lama
+			await autoInputGetState(env, adm);
+			expect(await getDisabledMarkets(env)).toEqual([]);
 		});
 	});
 

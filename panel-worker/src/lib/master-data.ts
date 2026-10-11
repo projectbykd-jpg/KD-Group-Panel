@@ -13,7 +13,7 @@ import {
 } from "./prediction";
 import { SHIO_ORDER, SHIO_CONFIG, MARKET_TO_PANEL } from "./parser";
 import { INVEST_PASARAN } from "./invest";
-import { SITE_HOST_DEFAULT, setSiteHosts } from "./auto-input";
+import { SITE_HOST_DEFAULT, setSiteHosts, setGlobalOffMarkets, cleanMarketList } from "./auto-input";
 import { ANCHOR_WORD_CANDIDATES, FB_TEMPLATE_EVERGREEN_HASHTAGS } from "./bot-news";
 import { loadIntegrations } from "./integrations";
 import { getSys } from "./settings";
@@ -168,6 +168,14 @@ function parseSiteHost(raw: unknown): Parsed<Record<string, string[]>> {
 	return { ok: true, value: out };
 }
 
+function parseOffMarkets(raw: unknown): Parsed<string[]> {
+	if (!Array.isArray(raw)) return fail("Format daftar pasaran tidak valid.");
+	const list = cleanMarketList(raw);
+	const given = new Set(raw.map((x) => str(x)).filter(Boolean));
+	if (list.length < given.size && list.length >= 100) return fail("Maksimal 100 pasaran.");
+	return { ok: true, value: list };
+}
+
 // ---- 8. Kata anchor backlink & hashtag Facebook ---------------------------------------------------------------------
 function parseWords(raw: unknown): Parsed<string[]> {
 	const list = [...new Set((Array.isArray(raw) ? raw : []).map((x) => str(x).toLowerCase()).filter(Boolean))];
@@ -227,6 +235,12 @@ export const MASTER_DEFS: MasterDef<any>[] = [
 		hint: "Host admin tempat tiap website berada (host -> kode website). Host wajib berada di domain yang diizinkan (Admin > Integrasi > Domain admin).",
 		def: clone(SITE_HOST_DEFAULT), parse: parseSiteHost,
 		apply: (v: Record<string, string[]>) => setSiteHosts(v),
+	},
+	{
+		key: "md_ai_off_markets", group: "Auto Input", title: "Pasaran yang Tidak di-Auto Prediksi",
+		hint: "Pasaran di daftar ini dilewati Auto Prediksi untuk SEMUA user (tidak dibuat job, tidak dicoba ulang, tidak memicu peringatan) -- operator input manual. Kosong = semua pasaran di-auto. Juga bisa diatur lewat saklar di menu Auto Prediksi (khusus admin).",
+		def: [] as string[], parse: parseOffMarkets,
+		apply: (v: string[]) => setGlobalOffMarkets(v),
 	},
 	{
 		key: "md_anchor_words", group: "Bot News", title: "Kata Anchor Backlink",
