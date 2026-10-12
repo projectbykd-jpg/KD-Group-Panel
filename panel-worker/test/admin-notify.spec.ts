@@ -210,7 +210,7 @@ describe("pemindai kegagalan final (dulu hanya popup di panel)", () => {
 		await flushNotify(ctx.env);
 		expect(sent[0]).toContain("Beda angka dengan admin — Panel-Z berisi 9999");
 		expect(sent[0]).toContain("HUGO (admin 1234)");
-		expect(sent[0]).toContain("Gagal dikirim ke Panel-Z — Panel-Z menolak");
+		expect(sent[0]).toContain("Angka belum masuk ke Panel-Z — Panel-Z menolak");
 		expect(sent[0]).toContain("HUGO (admin 5678)");
 		expect(sent[0]).not.toContain("1111");
 	});

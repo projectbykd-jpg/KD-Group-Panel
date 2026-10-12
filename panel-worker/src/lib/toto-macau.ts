@@ -594,7 +594,7 @@ async function reconcileWebsite(
 	}
 
 	await flushLog(env, buf, budget);
-	const posted: { a: AdminRow; rowIds: string[]; old: string; retry: boolean }[] = [];
+	const posted: { a: AdminRow; rowIds: string[]; old: string; retry: boolean; attemptNo: number }[] = [];
 	// satu kali baca status lama semua baris (hemat subrequest)
 	budget.used++;
 	const curRes = await db
@@ -638,7 +638,9 @@ async function reconcileWebsite(
 		const dupNote = targets.length > 1 ? ` (${targets.length} baris ganda di Panel-Z, semuanya diperlakukan sama)` : "";
 		const need = targets.filter((t) => !(t.filled && t.value === a.number)); // kosong/xxxx ATAU angka berbeda
 		if (!need.length) {
-			await upsertLog(env, { ...base, status: cur?.status === "SENT" ? "SENT" : "VERIFIED", detail: cur?.status === "SENT" ? "Terkirim & terbaca di Panel-Z" : "Panel-Z sudah berisi angka yang sama" }, buf);
+			// attempts > 0 & belum SENT = kiriman putaran sebelumnya yang belum sempat terlihat saat dibaca ulang -> kini terkonfirmasi dari daftar lengkap
+			const confirmedLater = cur?.status === "PENDING" && Number(cur?.attempts ?? 0) > 0;
+			await upsertLog(env, { ...base, status: cur?.status === "SENT" || confirmedLater ? "SENT" : "VERIFIED", detail: cur?.status === "SENT" ? "Terkirim & terbaca di Panel-Z" : confirmedLater ? "Terkirim & terkonfirmasi di Panel-Z (dibaca ulang dari daftar lengkap pada putaran berikutnya)" : "Panel-Z sudah berisi angka yang sama" }, buf);
 			sum.already++;
 			buf.push(evStmt(env, website, "info", "OK", `${a.market} ${a.date}: sudah sama dengan admin (${a.number})${dupNote}`));
 			continue;
@@ -704,7 +706,7 @@ async function reconcileWebsite(
 				break;
 			}
 		}
-		if (!failMsg) posted.push({ a, rowIds: need.map((t) => t.id), old: wrong ? oldVal : "", retry: resetAttempts });
+		if (!failMsg) posted.push({ a, rowIds: need.map((t) => t.id), old: wrong ? oldVal : "", retry: resetAttempts, attemptNo: resetAttempts ? 1 : Number(cur?.attempts ?? 0) + 1 });
 		else {
 			buf.push(db.prepare(`UPDATE toto_macau_log SET status = 'FAILED', detail = ?, updated_at = ? WHERE website = ? AND game = ? AND period = ?`).bind(("Panel-Z: " + failMsg).slice(0, 300), tsNow(), website, a.game.game, a.period));
 			if (resetAttempts) sum.stillFailed = (sum.stillFailed ?? 0) + 1;
@@ -715,14 +717,16 @@ async function reconcileWebsite(
 
 	// Baca ulang Panel-Z: angka yang baru dikirim HARUS tampil di baris yang benar.
 	if (posted.length) {
-		budget.used += 2; // baca ulang halaman yang memuat baris terkirim (biasanya 1-2 halaman)
 		let after: PanelZRow2[] = [];
 		try {
 			after = parsePanelZRows(await panel.reload(posted.flatMap((x) => x.rowIds)));
 		} catch {
 			after = [];
 		}
-		for (const { a, rowIds, old, retry } of posted) {
+		const pagesRead = panel.lastReload ?? [];
+		budget.used += Math.max(1, pagesRead.length);
+		const pagesTxt = pagesRead.length ? `halaman ${pagesRead.join(", ")}` : "halaman yang dibaca ulang";
+		for (const { a, rowIds, old, retry, attemptNo } of posted) {
 			// baris dicari lewat id; bila halaman bergeser (id tidak ada), cari lewat pasaran + tanggal
 			const byId = (id: string) => after.find((x) => x.id === id);
 			const sameSlot = after.filter((x) => x.market === a.market && x.date === a.date);
@@ -732,35 +736,49 @@ async function reconcileWebsite(
 					return !!z && z.filled && z.value === a.number;
 				}) ||
 				(rowIds.some((id) => !byId(id)) && sameSlot.length >= rowIds.length && sameSlot.every((z) => z.filled && z.value === a.number));
+			const note = panel.notes?.get(rowIds[0]) ?? "";
+			const missing = !okRead && rowIds.some((id) => !byId(id));
+			const tries = `percobaan ${Math.min(attemptNo, TOTO_MAX_ATTEMPTS)}/${TOTO_MAX_ATTEMPTS}`;
+			// Baris TIDAK TERLIHAT (bukan "terlihat tetapi kosong"): daftar Panel-Z bisa bergeser saat baris baru dibuat. Jangan langsung dianggap gagal --
+			// putaran berikutnya (±3 menit) membaca daftar lengkap dari awal: bila angkanya sudah ada -> TERKIRIM, bila masih kosong -> dikirim lagi.
+			// Alarm baru muncul bila sampai percobaan terakhir angkanya tetap tidak tersimpan.
+			const defer = missing && attemptNo < TOTO_MAX_ATTEMPTS;
 			const why = okRead
 				? ""
 				: rowIds
 						.map((id) => {
 							const z = byId(id);
-							return z ? `baris ${id} berisi ${z.filled ? `"${z.value}"` : "kosong"}` : `baris ${id} tidak ditemukan di halaman yang dibaca ulang`;
+							return z ? `baris ${id} masih ${z.filled ? `berisi "${z.value}"` : "kosong"}` : `baris ${id} tidak terlihat di ${pagesTxt}`;
 						})
-						.join("; ") + (panel.notes?.get(rowIds[0]) ? `; jawaban Panel-Z: ${panel.notes.get(rowIds[0])}` : "");
+						.join("; ");
+			const detail = okRead
+				? (old
+						? `DIKOREKSI: Panel-Z berisi ${old}, diperbaiki ke angka admin ${a.number} & terverifikasi (dibaca ulang)`
+						: "Terkirim ke Panel-Z & terverifikasi (dibaca ulang)") + (note ? ` [Panel-Z: ${note}]` : "") // jawaban saat BERHASIL = pembanding bila ada yang gagal
+				: defer
+					? `Terkirim ${a.number}${note ? ` (Panel-Z: ${note})` : ""} tetapi ${why} — dipastikan lagi otomatis pada putaran berikutnya (${tries})`
+					: missing
+						? `Sudah dikirim ${TOTO_MAX_ATTEMPTS}x${note ? ` (Panel-Z: ${note})` : ""} tetapi angka tetap belum ada di baris ${a.market} ${a.date} Panel-Z — cek manual (${why})`
+						: `Panel-Z menjawab${note ? ` ${note}` : " OK"} tetapi angka TIDAK tersimpan: ${why} — cek manual (${tries})`;
 			buf.push(
 				db
 					.prepare(`UPDATE toto_macau_log SET status = ?, detail = ?, updated_at = ? WHERE website = ? AND game = ? AND period = ?`)
-					.bind(
-						okRead ? "SENT" : "FAILED",
-						okRead
-							? old
-								? `DIKOREKSI: Panel-Z berisi ${old}, diperbaiki ke angka admin ${a.number} & terverifikasi (dibaca ulang)`
-								: "Terkirim ke Panel-Z & terverifikasi (dibaca ulang)"
-							: `Terkirim tetapi angka belum tampil di baris Panel-Z — cek manual (${why})`.slice(0, 300),
-						tsNow(),
-						website,
-						a.game.game,
-						a.period,
-					),
+					.bind(okRead ? "SENT" : defer ? "PENDING" : "FAILED", detail.slice(0, 300), tsNow(), website, a.game.game, a.period),
 			);
-			buf.push(evStmt(env, website, "info", okRead ? "OK" : "ERR", `${a.market} ${a.date}: ${okRead ? (old ? `DIKOREKSI ${old} → ${a.number} — terbaca ulang di Panel-Z` : `TERKIRIM ${a.number} — terbaca ulang di Panel-Z`) : `terkirim ${a.number} tetapi belum tampil di Panel-Z — cek manual (${why})`}`));
+			buf.push(
+				evStmt(
+					env,
+					website,
+					"info",
+					okRead ? "OK" : defer ? "WARN" : "ERR",
+					`${a.market} ${a.date}: ${okRead ? (old ? `DIKOREKSI ${old} → ${a.number} — terbaca ulang di Panel-Z` : `TERKIRIM ${a.number} — terbaca ulang di Panel-Z`) : defer ? `terkirim ${a.number}, belum terlihat (${why}) — dicek lagi putaran berikutnya` : `terkirim ${a.number} tetapi belum tampil di Panel-Z — cek manual (${why})`}${note ? ` [Panel-Z: ${note}]` : ""}`,
+				),
+			);
 			if (okRead) {
 				sum.posted++;
 				if (old) sum.corrected++;
-			} else if (retry) sum.stillFailed = (sum.stillFailed ?? 0) + 1;
+			} else if (defer) sum.pending++;
+			else if (retry) sum.stillFailed = (sum.stillFailed ?? 0) + 1;
 			else sum.failed++;
 		}
 	}
