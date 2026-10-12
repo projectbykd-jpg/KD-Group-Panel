@@ -123,7 +123,7 @@ import {
 	botNewsToggleSource,
 } from "./api/bot";
 import { tgChannelRun } from "./lib/tg-channel";
-import { botNewsRun, disableGnewsSources, fbDirectRun, newsPruneQueueDaily, newsPullSources, publicNewsBanner, publicNewsDetail, publicNewsList, publicNewsPopular, publicNewsRandom, publicNewsRssXml, publicNewsSitemapXml, seedCategorySources } from "./lib/bot-news";
+import { botNewsRun, disableGnewsSources, fbDirectRun, newsPruneQueueDaily, newsPullSources, publicNewsBanner, publicNewsDetail, publicNewsExport, publicNewsList, publicNewsPopular, publicNewsRandom, publicNewsRssXml, publicNewsSitemapXml, seedCategorySources } from "./lib/bot-news";
 import {
 	livechatBotPull,
 	livechatBotReport,
@@ -584,6 +584,24 @@ export default {
 		// Sitemap XML artikel "Berita Terkini" -- lihat catatan di publicNewsSitemapXml
 		// soal kenapa ini TIDAK otomatis kepakai Search Console utk lokalstore88.online
 		// tanpa frontend-nya ikut proxy/serve balik file ini di domain sendiri.
+		// Ekspor artikel lengkap untuk generator halaman statis LapakStore88 (GitHub Action). Tanpa hitung views; cache tepi 5 menit.
+		if (url.pathname === "/public/news-export") {
+			try {
+				const cache = (globalThis as unknown as { caches?: { default: Cache } }).caches?.default;
+				const ck = new Request(url.toString(), { method: "GET" });
+				const hit = request.method === "GET" && cache ? await cache.match(ck) : undefined;
+				if (hit) return hit;
+				const page = parseInt(url.searchParams.get("page") || "1", 10);
+				const pageSize = parseInt(url.searchParams.get("pageSize") || "50", 10);
+				const res = json(await publicNewsExport(env, page, pageSize));
+				res.headers.set("cache-control", "public, max-age=300");
+				if (request.method === "GET" && cache) ctx.waitUntil(cache.put(ck, res.clone()));
+				return res;
+			} catch (e) {
+				return json({ success: false, message: e instanceof Error ? e.message : String(e) }, 500);
+			}
+		}
+
 		if (url.pathname === "/public/news-sitemap.xml") {
 			try {
 				// Cache tepi: tanpa ini tiap hit (termasuk bot crawler) menjalankan query ke Turso.

@@ -1466,10 +1466,9 @@ export async function newsProcessOne(
 			// Foto dibungkus link ke aset sendiri (acak) -- backlink acak, sama
 			// seperti yang sudah dipasang di tema Blogger, tapi di sini berlaku
 			// juga utk artikel yang tayang di situs sendiri (content yang sama).
-			const heroLink = pickOwnLink(cfg);
-			content =
-				`<p><a href="${escAttr(heroLink.url)}" rel="noopener"><img src="${escAttr(imageUrl)}" alt="${escAttr(rw.title)}" style="max-width:100%"></a></p>\n` +
-				content;
+			// Foto utama TIDAK lagi dibungkus tautan ke toko: pembaca yang mengklik foto tidak dilempar keluar artikel
+			// (pola tautan sisipan di gambar juga mudah dianggap link scheme oleh mesin pencari).
+			content = `<p><img src="${escAttr(imageUrl)}" alt="${escAttr(rw.title)}" style="max-width:100%"></p>\n` + content;
 		}
 
 		// Structured data (schema.org NewsArticle) -- murni data buat mesin
@@ -1854,6 +1853,16 @@ export async function botNewsRun(
 	// sini (tidak pernah coba posting Blogger sama sekali), pace-nya cuma dari
 	// site_per_run. Berjalan tiap tick TERLEPAS dari status cap Blogger di atas. ----
 	let siteOnly = 0;
+	// Batas harian situs sendiri (Admin > Pengaturan Sistem > Bot News). 1 query, hanya bila loop situs memang akan jalan.
+	let siteCapped = false;
+	if (sitePerRun > 0) {
+		const siteCap = await getSys(env, "sys_news_site_daily_cap");
+		if (siteCap > 0) {
+			const left = Math.max(0, siteCap - (await siteCounts(env)).today);
+			if (left < sitePerRun) siteCapped = left === 0;
+			sitePerRun = Math.min(sitePerRun, left);
+		}
+	}
 	for (let i = 0; i < sitePerRun; i++) {
 		const r = await newsProcessOne(env, { postToBlogger: false });
 		if (!r.done) {
@@ -1867,7 +1876,7 @@ export async function botNewsRun(
 	const capped = postedSoFar >= cap;
 	const parts: string[] = [`Feed +${pull.added} artikel baru`];
 	if (mode !== "site") parts.push(`diposting ${posted} ke Blogger`);
-	if (mode !== "blogger") parts.push(`${siteOnly} ke situs sendiri`);
+	if (mode !== "blogger") parts.push(`${siteOnly} ke situs sendiri${siteCapped ? " (batas harian situs tercapai)" : ""}`);
 	return {
 		pulled: pull.added,
 		posted,
@@ -2090,6 +2099,21 @@ export async function publicNewsList(env: Env, category: string, page: number, p
 	const rows = rowsRes.results ?? [];
 	const total = Number(totalRow?.c ?? 0);
 	return { success: true, articles: rows, total, page: Math.max(1, page || 1), pageSize: size, categories: NEWS_CATEGORIES };
+}
+
+/** Ekspor massal untuk generator halaman statis LapakStore88 (GitHub Action): artikel tayang terbaru dulu, isi lengkap,
+ *  TANPA menaikkan penghitung views (beda dengan publicNewsDetail). pageSize dibatasi 50 supaya respons Turso tidak raksasa. */
+export async function publicNewsExport(env: Env, page: number, pageSize: number) {
+	await ensureNewsCategoryColumns(env);
+	const size = Math.min(50, Math.max(1, pageSize || 50));
+	const offset = Math.max(0, (Math.max(1, page || 1) - 1) * size);
+	const r = await getTurso(env)
+		.prepare(
+			`SELECT id, title, rewritten_html, excerpt, image_url, category, source, url, keywords, meta_description, site_posted_at AS posted_at FROM news_article WHERE site_posted_at != '' ORDER BY site_posted_at DESC, id DESC LIMIT ? OFFSET ?`,
+		)
+		.bind(size, offset)
+		.all<Record<string, unknown>>();
+	return { success: true, page: Math.max(1, page || 1), pageSize: size, articles: r.results ?? [] };
 }
 
 export async function publicNewsDetail(env: Env, id: number) {

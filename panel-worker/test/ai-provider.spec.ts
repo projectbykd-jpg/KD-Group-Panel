@@ -331,6 +331,7 @@ describe("proses artikel ujung-ke-ujung (situs sendiri)", () => {
 		expect(row.image_url).toBe("https://cdn.test/hero.jpg");
 		const html = row.rewritten_html;
 		expect(html.indexOf("hero.jpg")).toBeLessThan(html.indexOf("Paragraf 1:"));
+		expect(html).not.toMatch(/<a [^>]*>\s*<img[^>]*hero\.jpg/); // foto utama tidak lagi dibungkus tautan ke toko
 		// Bawaan 4 gambar per artikel = 1 utama + 3 foto isi, disebar di antara paragraf.
 		expect(html.match(/<figure/g)).toHaveLength(3);
 		expect(html).toContain("foto-a.jpg");
@@ -341,6 +342,28 @@ describe("proses artikel ujung-ke-ujung (situs sendiri)", () => {
 		// Panjang bawaan dinaikkan sekali (12-18 paragraf).
 		const cfg = await botCfg(env);
 		expect([cfg.para_min, cfg.para_max, cfg.images_per_article, cfg.content_v2]).toEqual(["12", "18", "4", "1"]);
+	});
+
+	it("batas harian situs sendiri: setelah N artikel hari ini, loop situs berhenti (antrean tidak disentuh)", async () => {
+		const { botNewsRun, publicNewsExport } = await import("../src/lib/bot-news");
+		await botCfgSet(env, { ai_providers: JSON.stringify([prov()]), site_per_run: "3", per_run: "0" });
+		const today = new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 19).replace("T", " ");
+		const ins = turso.current!.raw.prepare(`INSERT INTO news_article (id, source, url, url_hash, title, status, found_at, site_posted_at, rewritten_html) VALUES (?, 'X', ?, ?, ?, 'site', ?, ?, '<p>isi</p>')`);
+		for (let i = 0; i < 40; i++) ins.run(100 + i, "https://n.test/" + i, "hh" + i, "Judul " + i, today, today);
+		turso.current!.raw.prepare(`INSERT INTO news_article (id, source, url, url_hash, title, status, found_at) VALUES (3, 'X', 'https://news.test/3', 'h3', 'Judul baru', 'new', ?)`).run(today);
+		const calls = mockFetch(() => chatOk("x"));
+		const r = await botNewsRun(env, { force: true, mode: "site" });
+		expect(r.siteOnly).toBe(0);
+		expect(r.message).toMatch(/batas harian situs tercapai/);
+		expect(calls).toEqual([]);
+		expect((turso.current!.raw.prepare(`SELECT status FROM news_article WHERE id = 3`).get() as { status: string }).status).toBe("new");
+		// ekspor untuk generator statis: isi lengkap, terbaru dulu, maks 50 per halaman, views TIDAK bertambah
+		const ex = await publicNewsExport(env, 1, 500);
+		expect(ex.pageSize).toBe(50);
+		expect(ex.articles).toHaveLength(40);
+		expect(ex.articles[0]).toMatchObject({ rewritten_html: "<p>isi</p>" });
+		const v = turso.current!.raw.prepare(`SELECT SUM(views) AS s FROM news_article`).get() as { s: number };
+		expect(Number(v.s)).toBe(0);
 	});
 
 	it("tanpa AI provider aktif: antrean tidak disentuh sama sekali", async () => {
