@@ -1032,15 +1032,12 @@ async function geminiFbCaption(env: Env, cfg: Record<string, string>, art: { tit
 		`Balas HANYA teks captionnya saja, tanpa tanda kutip, tanpa markdown.\n\n` +
 		`JUDUL: ${art.title}\nRINGKASAN: ${art.excerpt || "(tidak ada)"}\nSUMBER: ${art.source}`;
 	try {
-		const { value } = await aiGenerate(env, cfg, { purpose: "fb-caption", messages: [{ role: "user", content: prompt }], temperature: 0.9, maxTokens: 400 }, (raw) => {
-			const text = stripEchoedPlaceholders(raw).slice(0, 500);
-			if (!text) throw new Error("caption kosong");
-			return text;
-		});
+		// maxTokens longgar: model penalaran memakai sebagian batas untuk "berpikir" -- batas sempit = caption terpotong.
+		const { value } = await aiGenerate(env, cfg, { purpose: "fb-caption", messages: [{ role: "user", content: prompt }], temperature: 0.9, maxTokens: 1200 }, parseFbCaptionReply);
 		return value;
 	} catch {
-		// fallback tanpa AI kalau semua provider gagal -- tetap bisa posting, cuma polos.
-		return `${art.title}`;
+		// fallback tanpa AI kalau semua provider gagal/ditolak -- tetap bisa posting, cuma polos.
+		return fallbackCaption(art);
 	}
 }
 
@@ -1105,13 +1102,74 @@ export function stripEchoedPlaceholders(text: string): string {
 		.trim();
 }
 
+/** Buang blok "berpikir" model penalaran (<think>...</think>) yang kadang ikut ke isi jawaban. */
+export function stripThinking(text: string): string {
+	return String(text ?? "")
+		.replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi, "")
+		.trim();
+}
+
+const CAPTION_END_RE = /(?:[.!?…"'”»)\]]|\p{Extended_Pictographic}[\u{FE0F}\u{1F3FB}-\u{1F3FF}\u200D\p{Extended_Pictographic}]*)$/u;
+const CAPTION_META_RE =
+	/\b(?:let me|here(?:'s| is| are)|i(?:'ll| will| need| should)|tight and snappy|option \d|the user|caption (?:should|needs|must)|word count|character count|hashtags? (?:should|need))\b/i;
+
+/**
+ * Alasan caption hasil AI DITOLAK ("" = layak). Kasus nyata: model penalaran kehabisan batas token lalu mengembalikan
+ * potongan rencananya ("tight and snappy: 1. Kementerian ... baru saja merilis") -- teks itu tidak kosong sehingga dulu
+ * diterima dan bisa ikut tayang di Facebook. Ditolak -> aiGenerate mencoba model/provider berikutnya.
+ */
+export function captionRejectReason(text: string): string {
+	const t = String(text ?? "").trim();
+	if (t.length < 30) return "caption terlalu pendek";
+	if (/<\/?(?:think|thinking|reasoning)>/i.test(t)) return "berisi proses berpikir model";
+	if (/^[^\n]{0,80}:\s*(?:\n|$)/.test(t)) return "diawali label/rencana (baris berakhiran titik dua)";
+	if (/^\s*(?:\d+[.)]|[-*•])\s/m.test(t)) return "berbentuk daftar/draf, bukan caption";
+	if (CAPTION_META_RE.test(t)) return "berisi catatan rencana model (bahasa Inggris)";
+	if (!CAPTION_END_RE.test(t)) return "terpotong (tidak diakhiri tanda baca/emoji)";
+	return "";
+}
+
+/** Potong ke maks `max` karakter di akhir kalimat terdekat (bukan di tengah kata). */
+export function clipCaption(text: string, max = 500): string {
+	const t = String(text ?? "").trim();
+	if (t.length <= max) return t;
+	const head = t.slice(0, max);
+	const cut = Math.max(head.lastIndexOf(". "), head.lastIndexOf("! "), head.lastIndexOf("? "), head.lastIndexOf("\n"));
+	return (cut > max * 0.4 ? head.slice(0, cut + 1) : head.replace(/\s+\S*$/, "") + "…").trim();
+}
+
+/** Urai + validasi caption AI biasa (FB langsung). Melempar bila tidak layak supaya provider berikutnya dicoba. */
+export function parseFbCaptionReply(raw: string): string {
+	const text = stripEchoedPlaceholders(stripThinking(raw));
+	const why = captionRejectReason(text);
+	if (why) throw new Error("caption ditolak: " + why);
+	return clipCaption(text, 500);
+}
+
 /** Urai balasan AI template FB: "caption ===HASHTAG=== hashtag". Murni (tanpa I/O) supaya bisa diuji. */
 export function parseFbTemplateReply(raw: string): { text: string; hashtags: string[] } {
-	const [captionPart, hashtagPart] = raw.trim().split(/===HASHTAG===/i);
-	const text = stripEchoedPlaceholders(captionPart || raw).slice(0, 500);
-	if (!text) throw new Error("caption kosong");
-	const aiTags = (hashtagPart || "").match(/#[\p{L}\p{N}_]+/gu) || [];
-	return { text, hashtags: aiTags.slice(0, 8) };
+	const clean = stripThinking(raw);
+	const [captionPart, hashtagPart] = clean.split(/===HASHTAG===/i);
+	let caption = stripEchoedPlaceholders(captionPart || clean);
+	let tagSource = hashtagPart || "";
+	if (hashtagPart === undefined) {
+		// model lupa penanda: hashtag di baris terakhir tetap dipakai, sisanya divalidasi sebagai caption
+		const m = caption.match(/\n\s*((?:#[\p{L}\p{N}_]+\s*){2,})$/u);
+		if (m) {
+			tagSource = m[1];
+			caption = caption.slice(0, m.index).trim();
+		}
+	}
+	const why = captionRejectReason(caption);
+	if (why) throw new Error("caption ditolak: " + why);
+	const aiTags = tagSource.match(/#[\p{L}\p{N}_]+/gu) || [];
+	return { text: clipCaption(caption, 500), hashtags: aiTags.slice(0, 8) };
+}
+
+/** Caption cadangan tanpa AI (semua provider gagal/ditolak): judul + kalimat pertama ringkasan -- polos tapi rapi. */
+export function fallbackCaption(art: { title: string; excerpt: string }): string {
+	const first = String(art.excerpt || "").replace(/\s+/g, " ").trim().match(/^.{20,240}?[.!?](?=\s|$)/);
+	return first ? `${art.title}\n\n${first[0]}` : art.title;
 }
 
 /** Link promosi channel Telegram (BOT > Setting > Sosial & Promo). Kosong = tidak ada promosi Telegram. */
@@ -1140,10 +1198,10 @@ async function geminiFbTemplateCaption(
 		`JANGAN menulis kata "caption" atau tanda < > dalam balasanmu.\n\n` +
 		`JUDUL: ${art.title}\nRINGKASAN: ${art.excerpt || "(tidak ada)"}\nSUMBER: ${art.source}`;
 	try {
-		const { value } = await aiGenerate(env, cfg, { purpose: "fb-template", messages: [{ role: "user", content: prompt }], temperature: 0.9, maxTokens: 500 }, parseFbTemplateReply);
+		const { value } = await aiGenerate(env, cfg, { purpose: "fb-template", messages: [{ role: "user", content: prompt }], temperature: 0.9, maxTokens: 1200 }, parseFbTemplateReply);
 		return value;
 	} catch {
-		return { text: art.title, hashtags: [] };
+		return { text: fallbackCaption(art), hashtags: [] };
 	}
 }
 
