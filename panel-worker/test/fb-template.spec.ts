@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { captionRejectReason, clipCaption, fallbackCaption, parseFbCaptionReply, parseFbTemplateReply, stripEchoedPlaceholders } from "../src/lib/bot-news";
+import { captionRejectReason, clipCaption, fallbackCaption, parseFbTemplateReply, stripEchoedPlaceholders } from "../src/lib/bot-news";
 
 describe("Template FB: placeholder prompt tidak ikut ke caption", () => {
 	it("membuang baris <caption> yang disalin AI (kasus nyata)", () => {
@@ -20,12 +20,11 @@ describe("Template FB: placeholder prompt tidak ikut ke caption", () => {
 	});
 });
 
-describe("Template FB & FB langsung: jawaban AI rusak ditolak (provider berikutnya dicoba)", () => {
+describe("Template FB: jawaban AI rusak ditolak (provider berikutnya dicoba)", () => {
 	const good = "63.789 orang kena PHK sepanjang tahun ini, dan satu provinsi menyumbang paling banyak. Kira-kira provinsi mana? 👇";
 	it("kasus nyata: potongan rencana model penalaran ditolak", () => {
 		const raw = "tight and snappy:\n1. Kementerian Ketenagakerjaan baru saja merilis";
 		expect(() => parseFbTemplateReply(raw)).toThrow(/ditolak/);
-		expect(() => parseFbCaptionReply(raw)).toThrow(/ditolak/);
 	});
 	it("menolak: terpotong, daftar draf, catatan bahasa Inggris, label berakhiran titik dua, think tak tertutup", () => {
 		for (const raw of [
@@ -42,7 +41,6 @@ describe("Template FB & FB langsung: jawaban AI rusak ditolak (provider berikutn
 		const r = parseFbTemplateReply(`<think>rencana panjang...</think>\n${good}\n===HASHTAG===\n#PHK #Kemnaker #BeritaTerkini`);
 		expect(r.text).toBe(good);
 		expect(r.hashtags).toEqual(["#PHK", "#Kemnaker", "#BeritaTerkini"]);
-		expect(parseFbCaptionReply(good)).toBe(good);
 		for (const ok of ["Harga emas naik lagi hari ini, sudah cek tabunganmu belum?", "Timnas menang 2-0! Siapa yang nonton semalam? ⚽🔥", 'Kata menteri soal harga BBM: "kita siap."']) {
 			expect(captionRejectReason(ok), ok).toBe("");
 		}

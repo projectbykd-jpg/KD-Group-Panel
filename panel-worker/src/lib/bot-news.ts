@@ -970,115 +970,6 @@ function insertAnchorBacklink(html: string, cfg: Record<string, string>): string
 	return html;
 }
 
-function buildFbCaption(title: string, metaDescription: string, links: { blogger?: string; site?: string; store?: string; tg?: string }): string {
-	const lines = [`📰 ${title}`];
-	if (metaDescription) lines.push("", metaDescription);
-	lines.push("");
-	if (links.blogger) lines.push(`🔗 Baca di blog kami: ${links.blogger}`);
-	if (links.site) lines.push(`📰 Baca di web berita kami: ${links.site}`);
-	if (links.store) lines.push(`🛒 Toko aplikasi premium: ${links.store}`);
-	if (links.tg) lines.push(`${TG_PROMO_LINE}: ${links.tg}`);
-	return lines.join("\n").slice(0, 1900); // batas wajar caption FB
-}
-
-/** Posting ke Facebook Page (foto+caption kalau ada gambar, teks+link kalau tidak). Gagal = non-fatal, dicatat saja. */
-export async function fbPostToPage(
-	cfg: Record<string, string>,
-	post: { title: string; metaDescription: string; postUrl: string; imageUrl?: string; siteUrl?: string; storeUrl?: string },
-): Promise<string | null> {
-	const pageId = cfg.fb_page_id;
-	const token = cfg.fb_page_token;
-	if (!pageId || !token) return null; // belum disetel -> lewati diam-diam
-	const caption = buildFbCaption(post.title, post.metaDescription, { blogger: post.postUrl, site: post.siteUrl, store: post.storeUrl, tg: tgPromoUrl(cfg) });
-	const primaryLink = post.postUrl || post.siteUrl || post.storeUrl || "";
-	const endpoint = post.imageUrl
-		? `https://graph.facebook.com/v21.0/${encodeURIComponent(pageId)}/photos`
-		: `https://graph.facebook.com/v21.0/${encodeURIComponent(pageId)}/feed`;
-	const body = new URLSearchParams({ access_token: token });
-	if (post.imageUrl) {
-		body.set("url", post.imageUrl);
-		body.set("caption", caption);
-	} else {
-		body.set("message", caption);
-		body.set("link", primaryLink);
-	}
-	let r: Response;
-	let j: any;
-	try {
-		r = await fetch(endpoint, { method: "POST", body, signal: AbortSignal.timeout(20000) });
-		j = await r.json();
-	} catch (e) {
-		throw new Error("Gagal menghubungi server Facebook: " + (e instanceof Error ? e.message : String(e)).slice(0, 200));
-	}
-	if (!r.ok || (!j.id && !j.post_id)) {
-		throw new Error("Facebook post gagal: " + JSON.stringify(j?.error || j).slice(0, 300));
-	}
-	return String(j.post_id || j.id);
-}
-
-// ---------------------------------------------------------------------------
-// FACEBOOK LANGSUNG — jalur terpisah dari Blogger. Ambil artikel dari kolam
-// yang sama (news_article) tapi dilacak lewat kolom fb_direct_posted_at
-// sendiri, jadi TIDAK terganggu kalau Blogger sedang kena rate-limit, dan
-// TIDAK bentrok dgn newsProcessOne (keduanya boleh memproses artikel yg sama,
-// masing-masing independen).
-// ---------------------------------------------------------------------------
-
-/** Caption pendek & menarik ala media sosial — LEBIH RINGAN dari rewrite artikel penuh (hemat token & subrequest). */
-async function geminiFbCaption(env: Env, cfg: Record<string, string>, art: { title: string; excerpt: string; source: string }): Promise<string> {
-	const prompt =
-		`Buatkan caption Facebook yang singkat, menarik, dan mengundang rasa penasaran (gaya media sosial, ` +
-		`boleh pakai 1-2 emoji, MAKS 3 kalimat, JANGAN mengarang fakta baru di luar ringkasan). ` +
-		`Balas HANYA teks captionnya saja, tanpa tanda kutip, tanpa markdown.\n\n` +
-		`JUDUL: ${art.title}\nRINGKASAN: ${art.excerpt || "(tidak ada)"}\nSUMBER: ${art.source}`;
-	try {
-		// maxTokens longgar: model penalaran memakai sebagian batas untuk "berpikir" -- batas sempit = caption terpotong.
-		const { value } = await aiGenerate(env, cfg, { purpose: "fb-caption", messages: [{ role: "user", content: prompt }], temperature: 0.9, maxTokens: 1200 }, parseFbCaptionReply);
-		return value;
-	} catch {
-		// fallback tanpa AI kalau semua provider gagal/ditolak -- tetap bisa posting, cuma polos.
-		return fallbackCaption(art);
-	}
-}
-
-export async function fbDirectProcessOne(env: Env): Promise<{ done: boolean; title?: string; error?: string }> {
-	const cfg = await botCfg(env);
-	if (!cfg.fb_page_id || !cfg.fb_page_token) return { done: false, error: "Facebook belum tersambung." };
-	const row = await getTurso(env)
-		.prepare(`SELECT * FROM news_article WHERE fb_direct_posted_at = '' ORDER BY id ASC LIMIT 1`)
-		.first<Record<string, string>>();
-	if (!row) return { done: false };
-	const id = Number(row.id);
-	try {
-		const caption = await geminiFbCaption(env, cfg, { title: String(row.title), excerpt: String(row.excerpt), source: String(row.source) });
-		let imageUrl = String(row.image_url || "");
-		if (!imageUrl) imageUrl = await fetchOgImage(String(row.url));
-		// Kalau artikel ini SUDAH ada versi Blogger-nya, arahkan ke situ (bangun
-		// trafik blog); kalau belum, arahkan ke sumber asli sbg atribusi.
-		const linkUrl = row.post_url || row.url;
-		await fbPostToPage(cfg, {
-			title: String(row.title),
-			metaDescription: caption,
-			postUrl: String(linkUrl),
-			imageUrl,
-			siteUrl: `${newsSiteUrl()}/berita/artikel/?id=${id}`,
-			storeUrl: (cfg.promo_url || "").trim() || undefined,
-		});
-		await getTurso(env).prepare(`UPDATE news_article SET fb_direct_posted_at = ? WHERE id = ?`).bind(tsNow(), id).run();
-		return { done: true, title: String(row.title) };
-	} catch (e) {
-		const msg = e instanceof Error ? e.message : String(e);
-		// Transient (geo-block/rate-limit) -> JANGAN tandai selesai, biarkan dicoba lagi.
-		if (TRANSIENT_ERROR_RE.test(msg)) {
-			return { done: true, error: msg + " (akan dicoba lagi otomatis)" };
-		}
-		// Error lain (mis. token FB kadaluwarsa) -> tandai supaya tidak diulang
-		// tanpa henti, tapi catat alasannya di kolom error (dipakai bareng Blogger).
-		await getTurso(env).prepare(`UPDATE news_article SET fb_direct_posted_at = 'error' WHERE id = ?`).bind(id).run();
-		return { done: true, error: msg };
-	}
-}
-
 // ---------------------------------------------------------------------------
 // TEMPLATE FB — pengganti posting otomatis (Facebook API sering diblokir
 // Facebook untuk Page baru/kategori berita). Sama sekali TIDAK menyentuh
@@ -1136,14 +1027,6 @@ export function clipCaption(text: string, max = 500): string {
 	const head = t.slice(0, max);
 	const cut = Math.max(head.lastIndexOf(". "), head.lastIndexOf("! "), head.lastIndexOf("? "), head.lastIndexOf("\n"));
 	return (cut > max * 0.4 ? head.slice(0, cut + 1) : head.replace(/\s+\S*$/, "") + "…").trim();
-}
-
-/** Urai + validasi caption AI biasa (FB langsung). Melempar bila tidak layak supaya provider berikutnya dicoba. */
-export function parseFbCaptionReply(raw: string): string {
-	const text = stripEchoedPlaceholders(stripThinking(raw));
-	const why = captionRejectReason(text);
-	if (why) throw new Error("caption ditolak: " + why);
-	return clipCaption(text, 500);
 }
 
 /** Urai balasan AI template FB: "caption ===HASHTAG=== hashtag". Murni (tanpa I/O) supaya bisa diuji. */
@@ -1298,23 +1181,6 @@ async function fbDirectPostedToday(env: Env): Promise<number> {
 	return Number(r?.c ?? 0);
 }
 
-/** Entry cron: /__cron?job=fbdirect (disarankan tiap 10 menit -> 1 artikel/panggilan). */
-export async function fbDirectRun(env: Env): Promise<{ posted: number; message: string }> {
-	const cfg = await botCfg(env);
-	if (String(cfg.fb_direct_enabled || "0") !== "1") {
-		return { posted: 0, message: "Facebook Langsung dimatikan (fb_direct_enabled=0)." };
-	}
-	const capN = Number(cfg.fb_direct_daily_cap || "50");
-	const cap = Number.isFinite(capN) ? capN : 50; // nilai non-angka dulu = NaN -> batas harian mati
-	if ((await fbDirectPostedToday(env)) >= cap) {
-		return { posted: 0, message: "Batas harian Facebook Langsung tercapai." };
-	}
-	const r = await fbDirectProcessOne(env);
-	if (!r.done) return { posted: 0, message: r.error || "Tidak ada artikel baru untuk diposting." };
-	if (r.error) return { posted: 0, message: r.error };
-	return { posted: 1, message: `Terposting: ${r.title}` };
-}
-
 // ---------------------------------------------------------------------------
 // Proses 1 artikel: rewrite -> post -> tandai
 // ---------------------------------------------------------------------------
@@ -1450,7 +1316,7 @@ export async function newsProcessOne(
 		// Internal link acak ("Baca juga") -- diambil dari artikel yang SUDAH
 		// pernah terbit sebelumnya, gabungan dari 2 aset: yang posting ke Blogger
 		// (pakai post_url) MAUPUN yang cuma tayang di situs sendiri (pakai pola URL
-		// LapakStore88 yang sama seperti dipakai fbPostToPage di atas). Tujuannya
+		// LapakStore88). Tujuannya
 		// internal linking utk SEO -- link SELALU domain milik sendiri, tidak pernah
 		// link acak ke situs luar. Kalau belum ada artikel lain yg pernah tayang
 		// (situs baru), query ini balas kosong -> blok ini dilewati begitu saja,
@@ -1570,7 +1436,7 @@ export async function newsProcessOne(
 		for (const kw of rw.keywords.slice(0, 4)) {
 			if (!labels.some((l) => l.toLowerCase() === kw.toLowerCase())) labels.push(kw);
 		}
-		// Blogger (dan Facebook auto-share yang menyertainya) TETAP dibatasi
+		// Blogger TETAP dibatasi
 		// daily_cap milik pemilik akun -- kalau limit sudah tercapai, lewati
 		// langkah ini, tapi artikel TETAP disimpan & tersedia di situs sendiri
 		// (site_posted_at) lewat cabang else di bawah. Jadi situs sendiri tidak
@@ -1578,20 +1444,6 @@ export async function newsProcessOne(
 		let postUrl = "";
 		if (opts.postToBlogger) {
 			postUrl = await bloggerCreatePost(env, cfg, { title: rw.title, content, labels, searchDescription: rw.metaDescription });
-			if (String(cfg.fb_enabled || "0") === "1") {
-				try {
-					await fbPostToPage(cfg, {
-						title: rw.title,
-						metaDescription: rw.metaDescription,
-						postUrl,
-						imageUrl,
-						siteUrl: `${newsSiteUrl()}/berita/artikel/?id=${id}`,
-						storeUrl: promoUrl || undefined,
-					});
-				} catch (e) {
-					console.error("fbPostToPage gagal:", e instanceof Error ? e.message : e);
-				}
-			}
 		}
 		// site_posted_at HANYA diisi untuk artikel yang TIDAK diposting ke Blogger
 		// (postUrl kosong) -- pemilik minta 2 kumpulan ini benar-benar terpisah,
@@ -2027,9 +1879,24 @@ async function siteCounts(env: Env): Promise<{ today: number; total: number }> {
 // ---------------------------------------------------------------------------
 // Untuk panel (API)
 // ---------------------------------------------------------------------------
+/** Kunci posting otomatis ke Facebook Page yang sudah dihapus (pemilik beralih ke Make.com lewat umpan RSS). */
+export const FB_REMOVED_KEYS = ["fb_enabled", "fb_page_id", "fb_page_token", "fb_direct_enabled", "fb_direct_daily_cap"];
+
+/** Token Page Facebook yang tidak dipakai lagi tidak boleh tertinggal di database: dihapus sekali saat dasbor BOT dibuka. */
+async function purgeRemovedFbKeys(env: Env, cfg: Record<string, string>): Promise<void> {
+	const left = FB_REMOVED_KEYS.filter((k) => k in cfg);
+	if (!left.length) return;
+	await getTurso(env)
+		.prepare(`DELETE FROM bot_kv WHERE k IN (${left.map(() => "?").join(",")})`)
+		.bind(...left)
+		.run();
+	for (const k of left) delete cfg[k];
+}
+
 export async function botNewsSnapshot(env: Env) {
 	await ensureNewsCategoryColumns(env);
 	const cfg = await botCfg(env);
+	await purgeRemovedFbKeys(env, cfg);
 	const sources =
 		(await getTurso(env).prepare(`SELECT id, name, kind, url, active, category FROM news_source ORDER BY id`).all()).results ?? [];
 	const counts =
@@ -2111,11 +1978,6 @@ export async function botNewsSnapshot(env: Env) {
 			blog_id: cfg.blogger_blog_id || "",
 			blogger_site_url: cfg.blogger_site_url || "",
 			site_url: newsSiteUrl(), // alamat web berita sendiri (Admin > Integrasi) -- dipakai tautan riwayat di UI
-			fb_enabled: String(cfg.fb_enabled || "0") === "1",
-			fb_page_id: cfg.fb_page_id || "",
-			has_facebook: !!(cfg.fb_page_id && cfg.fb_page_token),
-			fb_direct_enabled: String(cfg.fb_direct_enabled || "0") === "1",
-			fb_direct_daily_cap: Number(cfg.fb_direct_daily_cap || "50"),
 			fb_page_url: cfg.fb_page_url || "",
 			wa_channel_url: cfg.wa_channel_url || "",
 			tg_channel_enabled: String(cfg.tg_channel_enabled || "0") === "1",
