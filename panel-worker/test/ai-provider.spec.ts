@@ -344,8 +344,13 @@ describe("proses artikel ujung-ke-ujung (situs sendiri)", () => {
 		expect([cfg.para_min, cfg.para_max, cfg.images_per_article, cfg.content_v2]).toEqual(["12", "18", "4", "1"]);
 	});
 
-	it("batas harian situs sendiri: setelah N artikel hari ini, loop situs berhenti (antrean tidak disentuh)", async () => {
+	it("batas harian situs sendiri (bila admin mengisinya): setelah N artikel hari ini, loop situs berhenti (antrean tidak disentuh)", async () => {
 		const { botNewsRun, publicNewsExport } = await import("../src/lib/bot-news");
+		const { saveSys, SYS_SETTINGS } = await import("../src/lib/settings");
+		const { env } = fakeEnv();
+		expect(SYS_SETTINGS.find((d) => d.key === "sys_news_site_daily_cap")?.def).toBe(0); // bawaan: tanpa batas (situs diperbarui terus)
+		await saveSys(env, { sys_news_site_daily_cap: 40 }); // batas hanya berlaku bila admin sengaja mengisinya
+		await env.DB.prepare(`INSERT INTO settings (key, value) VALUES ('mig_site_cap_nolimit', '1')`).run(); // diisi sengaja (sesudah migrasi)
 		await botCfgSet(env, { ai_providers: JSON.stringify([prov()]), site_per_run: "3", per_run: "0" });
 		const today = new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 19).replace("T", " ");
 		const ins = turso.current!.raw.prepare(`INSERT INTO news_article (id, source, url, url_hash, title, status, found_at, site_posted_at, rewritten_html) VALUES (?, 'X', ?, ?, ?, 'site', ?, ?, '<p>isi</p>')`);
@@ -364,6 +369,22 @@ describe("proses artikel ujung-ke-ujung (situs sendiri)", () => {
 		expect(ex.articles[0]).toMatchObject({ rewritten_html: "<p>isi</p>" });
 		const v = turso.current!.raw.prepare(`SELECT SUM(views) AS s FROM news_article`).get() as { s: number };
 		expect(Number(v.s)).toBe(0);
+	});
+
+	it("angka 40 lama yang tertanam (bawaan lama, bukan pilihan pemilik) dikembalikan ke tanpa batas sekali saja", async () => {
+		const { botNewsRun } = await import("../src/lib/bot-news");
+		const { saveSys, getSys } = await import("../src/lib/settings");
+		const { env, db } = fakeEnv();
+		await saveSys(env, { sys_news_site_daily_cap: 40 }); // tersimpan karena tombol Simpan menyimpan semua nilai
+		await botCfgSet(env, { ai_providers: JSON.stringify([prov()]), site_per_run: "1", per_run: "0" });
+		const today = new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 19).replace("T", " ");
+		const ins = turso.current!.raw.prepare(`INSERT INTO news_article (id, source, url, url_hash, title, status, found_at, site_posted_at, rewritten_html) VALUES (?, 'X', ?, ?, ?, 'site', ?, ?, '<p>isi</p>')`);
+		for (let i = 0; i < 40; i++) ins.run(300 + i, "https://m.test/" + i, "mm" + i, "Judul " + i, today, today);
+		mockFetch(() => chatOk("x"));
+		const r = await botNewsRun(env, { force: true, mode: "site" });
+		expect(r.message).not.toMatch(/batas harian situs tercapai/);
+		expect(await getSys(env, "sys_news_site_daily_cap")).toBe(0);
+		expect(db.prepare(`SELECT value FROM settings WHERE key = 'mig_site_cap_nolimit'`).get()).toEqual({ value: "1" });
 	});
 
 	it("tanpa AI provider aktif: antrean tidak disentuh sama sekali", async () => {

@@ -1,7 +1,7 @@
 // Modul NEWS untuk Role BOT: tarik feed berita -> rewrite via Gemini ->
 // posting ke Blogger. Semua state di Turso (bot_kv / news_source / news_article).
 import { newsSiteUrl } from "./integrations";
-import { getSys } from "./settings";
+import { getSys, saveSys } from "./settings";
 import { getTurso } from "./turso";
 import { aiGenerate, aiNextReadyInMs, aiUsableProviders, AiUnavailableError, legacyProviders, parseProviders } from "./ai-provider";
 import { tsNow, tsNowIndonesianDate, tsPlusMinutes } from "./time";
@@ -1914,7 +1914,7 @@ export async function botNewsRun(
 	// Batas harian situs sendiri (Admin > Pengaturan Sistem > Bot News). 1 query, hanya bila loop situs memang akan jalan.
 	let siteCapped = false;
 	if (sitePerRun > 0) {
-		const siteCap = await getSys(env, "sys_news_site_daily_cap");
+		const siteCap = await siteDailyCap(env);
 		if (siteCap > 0) {
 			const left = Math.max(0, siteCap - (await siteCounts(env)).today);
 			if (left < sitePerRun) siteCapped = left === 0;
@@ -1991,6 +1991,25 @@ export async function tgChannelStats(env: Env): Promise<{ postedToday: number; q
 		};
 	} catch {
 		return { postedToday: 0, queue: 0, lastAt: "", total: 0, cap: 0, gapMin: 0 };
+	}
+}
+
+/**
+ * Batas artikel situs per hari (0 = tanpa batas, bawaan). Bawaan lama 40 dipasang tanpa diminta pemilik dan membuat situs
+ * berhenti terisi sejak pagi; tombol Simpan di Pengaturan Sistem menyimpan SEMUA nilai, jadi angka 40 itu bisa sudah
+ * tertanam di database. Sekali saja: nilai tersimpan 40 dikembalikan ke 0 (ditandai mig_site_cap_nolimit supaya batas
+ * yang nanti SENGAJA diisi admin -- termasuk 40 -- tidak ikut dihapus).
+ */
+async function siteDailyCap(env: Env): Promise<number> {
+	const cap = await getSys(env, "sys_news_site_daily_cap");
+	if (cap !== 40) return cap;
+	try {
+		if (await env.DB.prepare(`SELECT 1 FROM settings WHERE key = 'mig_site_cap_nolimit'`).first()) return cap;
+		await saveSys(env, { sys_news_site_daily_cap: 0 });
+		await env.DB.prepare(`INSERT INTO settings (key, value) VALUES ('mig_site_cap_nolimit', '1') ON CONFLICT(key) DO NOTHING`).run();
+		return 0;
+	} catch {
+		return cap;
 	}
 }
 
