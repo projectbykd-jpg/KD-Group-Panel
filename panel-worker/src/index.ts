@@ -105,10 +105,8 @@ import {
 	botAiTopUp,
 	botAiTest,
 	botAiModels,
-	botFbTest,
 	botTgChannelSendNow,
 	botTgChannelTest,
-	botFbRunNow,
 	botFbTemplateGenerate,
 	botNewsAddSource,
 	dispatchNewsTurbo,
@@ -123,7 +121,7 @@ import {
 	botNewsToggleSource,
 } from "./api/bot";
 import { tgChannelRun } from "./lib/tg-channel";
-import { botNewsRun, disableGnewsSources, fbDirectRun, newsPruneQueueDaily, newsPullSources, publicNewsBanner, publicNewsDetail, publicNewsExport, publicNewsList, publicNewsPopular, publicNewsRandom, publicNewsRssXml, publicNewsSitemapXml, seedCategorySources } from "./lib/bot-news";
+import { botNewsRun, disableGnewsSources, newsPruneQueueDaily, newsPullSources, publicNewsBanner, publicNewsDetail, publicNewsExport, publicNewsList, publicNewsPopular, publicNewsRandom, publicNewsRssXml, publicNewsSitemapXml, seedCategorySources } from "./lib/bot-news";
 import {
 	livechatBotPull,
 	livechatBotReport,
@@ -336,7 +334,6 @@ const ROUTES: Record<string, Handler> = {
 	botNewsRunSiteNow: (env, b) => botNewsRunSiteNow(env, s(b.token), b.count != null ? Number(b.count) : undefined),
 	botNewsRunViaGithub: (env, b) => botNewsRunViaGithub(env, s(b.token), b.count != null ? Number(b.count) : undefined, b.target != null ? s(b.target) : undefined),
 	botNewsGithubRunStatus: (env, b) => botNewsGithubRunStatus(env, s(b.token)),
-	botFbRunNow: (env, b) => botFbRunNow(env, s(b.token)),
 	botFbTemplateGenerate: (env, b) => botFbTemplateGenerate(env, s(b.token)),
 	botNewsSkip: (env, b) => botNewsSkip(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
 	botBloggerAuthUrl: (env, b) => botBloggerAuthUrl(env, s(b.token)),
@@ -349,7 +346,6 @@ const ROUTES: Record<string, Handler> = {
 	botAiReorder: (env, b) => botAiReorder(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
 	botAiTopUp: (env, b) => botAiTopUp(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
 	botAiTest: (env, b) => botAiTest(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
-	botFbTest: (env, b) => botFbTest(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
 	botTgChannelTest: (env, b) => botTgChannelTest(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
 	botTgChannelSendNow: (env, b) => botTgChannelSendNow(env, s(b.token)),
 	botAiModels: (env, b) => botAiModels(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
@@ -739,11 +735,6 @@ export default {
 					const qCount = url.searchParams.get("count");
 					const qTarget = url.searchParams.get("target") || undefined;
 					out.githubnews = await dispatchNewsTurbo(env, qCount ? Number(qCount) : undefined, qTarget);
-				}
-				// Job TERPISAH sengaja TIDAK ikut "all" -- dipanggil cron sendiri tiap
-				// 10 menit (1 artikel/panggilan), independen dari jadwal Blogger.
-				if (job === "fbdirect") {
-					out.fbdirect = await fbDirectRun(env);
 				}
 				// One-shot: suntik 8 sumber RSS per-kategori Liputan6. Idempotent (aman
 				// dipanggil berkali²) -- TIDAK ikut "all", dipanggil manual sekali saja.

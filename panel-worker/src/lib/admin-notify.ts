@@ -371,7 +371,7 @@ export async function buildDailyReport(env: Env, day: string): Promise<string> {
 				return [
 					`📰 <b>BOT News</b> — ${fmt(n("found"))} artikel baru terkumpul · antrean sekarang ${fmt(n("queue"))}`,
 					`   ▸ Website: <b>${fmt(n("site"))}</b> · Blogger: <b>${fmt(n("blogger"))}</b>`,
-					`   ▸ Facebook Page: <b>${fmt(n("fb"))}</b> · Channel Telegram: <b>${fmt(n("tg"))}</b>`,
+					`   ▸ Template FB: <b>${fmt(n("fb"))}</b> · Channel Telegram: <b>${fmt(n("tg"))}</b>`,
 				].join("\n");
 			}),
 		);

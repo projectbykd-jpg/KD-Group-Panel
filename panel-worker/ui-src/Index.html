@@ -1023,7 +1023,7 @@
             <div class="page-head-text">
               <div class="page-eyebrow">Bot</div>
               <h2 class="page-title">Bot News</h2>
-              <p class="page-sub">Berita &rarr; tulis ulang AI (provider pilihanmu) &rarr; posting otomatis ke Blogger, situs sendiri &amp; Facebook.</p>
+              <p class="page-sub">Berita &rarr; tulis ulang AI (provider pilihanmu) &rarr; posting otomatis ke Blogger &amp; situs sendiri (Facebook lewat Make.com).</p>
             </div>
             <div class="page-head-actions">
               <div id="botAutoChip" class="glass-inner rounded-2xl px-4 py-2 flex items-center gap-2.5 border-2 border-transparent transition-colors">
@@ -1411,17 +1411,9 @@
             <!-- TAB: SOSIAL & PROMO -->
             <div class="bot-cfg-panel" data-cfg-panel="social">
               <div class="cfg-group">
-                <div class="cfg-group-title flex items-center justify-between w-full"><span><i class="fa-brands fa-facebook text-cyan-300"></i>Facebook Page</span><span id="botFbHint" class="text-[10px] text-slate-500 font-normal normal-case"></span></div>
-                <label class="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" id="botFbEnabled"> Auto-share tiap post ke Facebook Page</label>
-                <div class="grid sm:grid-cols-2 gap-3">
-                  <label class="cfg-field">Page ID<input id="botFbPageId" class="cfg-input"></label>
-                  <label class="cfg-field">Ganti Page Access Token<input id="botFbToken" class="cfg-input" placeholder="kosongkan = tidak diubah"></label>
-                </div>
-                <div class="flex items-center gap-3 flex-wrap">
-                  <button type="button" id="botFbTestBtn" onclick="botFbTest()" class="btn-secondary text-xs font-bold px-4 py-2.5 rounded-xl"><i class="fa-solid fa-stethoscope mr-1"></i>TES FACEBOOK</button>
-                  <span class="cfg-hint">Memeriksa Page ID &amp; token (yang Anda ketik, atau yang tersimpan bila kosong) dan menyebut penyebab pastinya bila gagal. Membuat 1 posting tersembunyi lalu langsung menghapusnya.</span>
-                </div>
+                <div class="cfg-group-title"><i class="fa-brands fa-facebook text-cyan-300"></i>Fanspage Facebook</div>
                 <label class="cfg-field">Link Fanspage Facebook<input id="botFbPageUrl" class="cfg-input" placeholder="https://www.facebook.com/profile.php?id=..."></label>
+                <span class="cfg-hint">Hanya link promosi di artikel &amp; posting Telegram. Panel tidak lagi memposting ke Facebook; posting ke Page dilakukan Make.com dari umpan RSS panel.</span>
               </div>
 
               <div class="cfg-group">

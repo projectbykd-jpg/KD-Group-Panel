@@ -25,7 +25,6 @@ import {
 	type AiProvider,
 } from "../lib/ai-provider";
 import { tsNow } from "../lib/time";
-import { fbDiagnose } from "../lib/fb-check";
 import {
 	BloggerAuthError,
 	bloggerAuthUrl,
@@ -37,7 +36,6 @@ import {
 	botNewsRun,
 	botNewsSnapshot,
 	ensureNewsCategoryColumns,
-	fbDirectProcessOne,
 	fbTemplateGenerate,
 	NEWS_CATEGORIES,
 	requeueBloggerAuthFailures,
@@ -66,21 +64,21 @@ export async function botNewsSaveConfig(env: Env, token: string, data: Record<st
 		// API key AI TIDAK lewat sini lagi -- dikelola per provider (botAiSave).
 		"enabled", "per_run", "daily_cap", "site_per_run", "attribution", "rewrite_style", "images_per_article",
 		"blogger_blog_id", "para_min", "para_max", "promo_url", "promo_text", "post_labels",
-		"fb_enabled", "fb_page_id", "fb_page_token", "fb_direct_enabled", "fb_direct_daily_cap", "fb_page_url", "wa_channel_url", "blogger_site_url", "tg_channel_enabled", "tg_channel_id", "tg_channel_url",
+		"fb_page_url", "wa_channel_url", "blogger_site_url", "tg_channel_enabled", "tg_channel_id", "tg_channel_url",
 		"news_banner_enabled", "news_banner_image", "news_banner_url", "news_banner_text", "auto_interval_minutes",
 		"blogger_client_id", "blogger_client_secret", "blogger_redirect_uri",
 	];
 	for (const k of allow) {
 		if (Object.prototype.hasOwnProperty.call(data, k)) {
 			let v = String((data as any)[k] ?? "").trim();
-			if (k === "enabled" || k === "attribution" || k === "fb_enabled" || k === "fb_direct_enabled" || k === "news_banner_enabled") v = v === "1" || v === "true" ? "1" : "0";
+			if (k === "enabled" || k === "attribution" || k === "news_banner_enabled") v = v === "1" || v === "true" ? "1" : "0";
 			if (k === "tg_channel_enabled") v = v === "1" || v === "true" ? "1" : "0";
 			if (k === "tg_channel_id" && v && !TG_CHAT_RE.test(v)) throw new Error("Chat ID channel tidak valid. Contoh: -1001234567890 atau @namakanal.");
 			if (k === "tg_channel_url" && v && !/^https:\/\/(t\.me|telegram\.me)\/[^\s]{3,200}$/i.test(v)) throw new Error("Link channel Telegram harus berupa https://t.me/… (salin dari info channel).");
 			if (k === "para_min" || k === "para_max") v = v ? String(Math.min(40, Math.max(1, Math.floor(Number(v) || 0)))) : "";
 			if (k === "images_per_article") v = v ? String(Math.min(8, Math.max(1, Math.floor(Number(v) || 1)))) : "";
 			// kosongkan input token/secret TIDAK menghapus yg tersimpan
-			if ((k === "fb_page_token" || k === "blogger_client_secret" || k === "blogger_client_id") && !v) continue;
+			if ((k === "blogger_client_secret" || k === "blogger_client_id") && !v) continue;
 			patch[k] = v;
 		}
 	}
@@ -283,20 +281,6 @@ export async function botNewsGithubRunStatus(env: Env, token: string) {
 			runNumber: Number(run.run_number || 0),
 		},
 	};
-}
-
-export async function botFbRunNow(env: Env, token: string) {
-	const s = await gate(env, token);
-	const r = await fbDirectProcessOne(env);
-	await logActivity(
-		env,
-		s.username,
-		"BOT FB LANGSUNG RUN",
-		r.title ? `Terposting: ${r.title}` : r.error || "Tidak ada artikel baru.",
-		r.error && !/akan dicoba lagi/i.test(r.error) ? "SEBAGIAN" : "BERHASIL",
-		"",
-	);
-	return { success: true, ...r, snapshot: await botNewsSnapshot(env) };
 }
 
 export async function botFbTemplateGenerate(env: Env, token: string) {
@@ -529,20 +513,6 @@ export async function botAiTopUp(env: Env, token: string, data: Record<string, u
 	await aiSaveProviders(env, cfg, list);
 	await logActivity(env, s.username, "BOT AI PROVIDER", `Top-up ${p.name}: +${add} token, masa aktif mulai ulang`, "BERHASIL", "");
 	return aiListPayload(env, cfg);
-}
-
-/** Tes Facebook: periksa Page ID + token (yang diketik di form, atau yang tersimpan bila dikosongkan) dan jelaskan penyebab bila gagal. */
-export async function botFbTest(env: Env, token: string, data: Record<string, unknown>) {
-	const s = await gate(env, token);
-	const cfg = await botCfg(env);
-	const pageId = String(data.page_id ?? "").trim() || String(cfg.fb_page_id ?? "").trim();
-	const pageToken = String(data.page_token ?? "").trim() || String(cfg.fb_page_token ?? "").trim();
-	if (!/^\d{5,25}$/.test(pageId)) return { success: false, message: "Page ID harus berupa angka (5-25 digit). Isi Page ID lalu coba lagi." };
-	if (!pageToken) return { success: false, message: "Page Access Token belum diisi. Tempel token di kolom token lalu klik TES FACEBOOK." };
-	if (pageToken.length < 20 || pageToken.length > 700 || /\s/.test(pageToken)) return { success: false, message: "Format token tidak wajar (20-700 karakter tanpa spasi). Salin ulang token dengan utuh." };
-	const r = await fbDiagnose(pageId, pageToken);
-	await logActivity(env, s.username, "BOT FACEBOOK TES", r.ok ? `Tes Facebook OK (${r.page?.name ?? pageId})` : `Tes Facebook gagal: ${r.verdict}`.slice(0, 300), r.ok ? "BERHASIL" : "GAGAL", "");
-	return { success: true, ...r };
 }
 
 /** Tes koneksi: 1 panggilan kecil + daftar model yang tersedia (kalau provider mendukung /models). */

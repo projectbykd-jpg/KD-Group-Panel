@@ -246,7 +246,7 @@ describe("laporan harian", () => {
 		expect(msg).toContain("✅ 🎯 <b>Auto Prediksi</b> — 1 berhasil");
 		expect(msg).toContain("📰 <b>BOT News</b>");
 		expect(msg).toContain("Website: <b>0</b> · Blogger: <b>0</b>");
-		expect(msg).toContain("Facebook Page: <b>0</b> · Channel Telegram: <b>0</b>");
+		expect(msg).toContain("Template FB: <b>0</b> · Channel Telegram: <b>0</b>");
 		expect(msg).toContain("<b>Error &amp; Bug</b>");
 	});
 

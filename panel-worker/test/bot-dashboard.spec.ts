@@ -76,3 +76,20 @@ describe("Dashboard Bot: jalur punya hitungan harian yang setara", () => {
 		expect(s.config.tg_channel_enabled).toBe(false);
 	});
 });
+
+describe("Facebook Page otomatis dihapus (pemilik beralih ke Make.com)", () => {
+	it("token & saklar Facebook lama dibuang dari database saat dasbor dibuka; link Fanspage (promosi) tetap", async () => {
+		const { botCfg, botCfgSet } = await import("../src/lib/bot-news");
+		const env = fakeEnv().env;
+		await ensureNewsCategoryColumns(env);
+		await botCfgSet(env, { fb_enabled: "1", fb_page_id: "123456789", fb_page_token: "EAAB-rahasia-lama", fb_direct_enabled: "1", fb_direct_daily_cap: "50", fb_page_url: "https://facebook.com/lapak" });
+		const s = (await botNewsSnapshot(env)) as unknown as { config: Record<string, unknown> };
+		const cfg = await botCfg(env);
+		for (const k of ["fb_enabled", "fb_page_id", "fb_page_token", "fb_direct_enabled", "fb_direct_daily_cap"]) {
+			expect(cfg[k], k).toBeUndefined();
+			expect(s.config[k], k).toBeUndefined();
+		}
+		expect(cfg.fb_page_url).toBe("https://facebook.com/lapak");
+		expect(JSON.stringify(s)).not.toContain("rahasia-lama");
+	});
+});
