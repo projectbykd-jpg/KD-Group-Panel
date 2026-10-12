@@ -160,8 +160,10 @@ export interface PanelZHandle {
 	push(rowId: string, angka: string): Promise<string>;
 	/** jawaban Panel-Z terakhir per baris yang dikirim (untuk diagnosis) */
 	notes?: Map<string, string>;
-	/** baca ulang; rowIds = baris yang baru dikirim -> hanya halaman yang memuat baris itu */
+	/** baca ulang; rowIds = baris yang baru dikirim -> halaman yang memuat baris itu (lanjut ke halaman berikutnya bila bergeser) */
 	reload(rowIds?: string[]): Promise<string>;
+	/** halaman yang dibaca pada reload terakhir (untuk keterangan & hitungan subrequest) */
+	lastReload?: number[];
 }
 
 export const PANELZ_MAX_PAGES = 6;
@@ -213,7 +215,8 @@ export async function openPanelZ(cfg: PanelZCfg, opts: { sinceDate?: string; max
 		const first = await load(1);
 		fetches++;
 		remember(1, first);
-		const total = Math.min(panelZPageCount(first), opts.maxPages ?? PANELZ_MAX_PAGES);
+		const realTotal = panelZPageCount(first);
+		const total = Math.min(realTotal, opts.maxPages ?? PANELZ_MAX_PAGES);
 		let last = first;
 		for (let p = 2; p <= total; p++) {
 			if (opts.sinceDate) {
@@ -226,7 +229,7 @@ export async function openPanelZ(cfg: PanelZCfg, opts: { sinceDate?: string; max
 		}
 		const notes = new Map<string, string>();
 		const joined = (): string => [...pages.entries()].sort((a, b) => a[0] - b[0]).map((e) => e[1]).join("\n");
-		return {
+		const handle: PanelZHandle = {
 			html: joined(),
 			fetches,
 			notes,
@@ -235,15 +238,36 @@ export async function openPanelZ(cfg: PanelZCfg, opts: { sinceDate?: string; max
 				return r === "Terkirim" ? "Berhasil dikirim" : r;
 			},
 			reload: async (rowIds) => {
-				// Halaman daftar bergeser bila Panel-Z membuat baris baru (mis. pukul 00:25 tiap hari): baris yang tadi di halaman n bisa pindah ke n+1,
-				// jadi baca juga halaman berikutnya -- dulu angka yang SUDAH masuk dianggap "belum tampil" lalu dikirim ulang berkali-kali.
-				const base = rowIds?.length ? [...new Set(rowIds.map((id) => pageOf.get(id) ?? 1))] : [...pages.keys()];
-				const want = rowIds?.length ? [...new Set(base.flatMap((n) => (n < total ? [n, n + 1] : [n])))].slice(0, 4) : base;
+				if (!rowIds?.length) {
+					const out: string[] = [];
+					handle.lastReload = [...pages.keys()].sort((a, b) => a - b);
+					for (const n of handle.lastReload) out.push(await load(n));
+					return out.join("\n");
+				}
+				// Daftar bergeser ke BAWAH tiap Panel-Z membuat baris baru (±00:25 sekaligus satu hari penuh, bisa >1 halaman): mulai dari halaman
+				// tempat baris itu tadi terbaca, lanjut ke halaman berikutnya, lalu halaman 1 (jaga-jaga baris yang diubah naik ke atas); berhenti
+				// begitu semua baris ketemu. Dulu hanya halaman n & n+1 -> baris yang bergeser lebih jauh dianggap "tidak ditemukan".
+				const want = new Set(rowIds);
+				const start = Math.min(...rowIds.map((id) => pageOf.get(id) ?? 1));
+				const order = [...new Set([start, start + 1, start + 2, 1])].filter((n) => n >= 1 && n <= realTotal + 1);
 				const out: string[] = [];
-				for (const n of want.sort((a, b) => a - b)) out.push(await load(n));
+				handle.lastReload = [];
+				for (const n of order) {
+					let h: string;
+					try {
+						h = await load(n);
+					} catch {
+						continue; // satu halaman gagal dibuka -> halaman lain tetap dibaca
+					}
+					handle.lastReload.push(n);
+					out.push(h);
+					for (const r of parsePanelZRows(h)) want.delete(r.id);
+					if (!want.size) break;
+				}
 				return out.join("\n");
 			},
 		};
+		return handle;
 	} catch (e) {
 		return "Error: " + (e instanceof Error ? e.message : String(e));
 	}

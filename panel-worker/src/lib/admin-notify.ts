@@ -272,7 +272,7 @@ export async function scanFinalFailures(env: Env): Promise<number> {
 		const ids: number[] = [];
 		for (const t of r.results ?? []) {
 			const market = String(t.market || (t.game === "m51" ? "TOTO MACAO 5D" : "TOTO MACAU"));
-			const what = t.status === "CONFLICT" ? "Beda angka dengan admin" : "Gagal dikirim ke Panel-Z";
+			const what = t.status === "CONFLICT" ? "Beda angka dengan admin" : "Angka belum masuk ke Panel-Z";
 			const item = {
 				r: `${what}${t.detail ? " — " + String(t.detail).slice(0, 200) : ""}`,
 				m: `${market} ${String(t.row_at || "").slice(5, 16)}`.trim(),

@@ -4811,7 +4811,7 @@
           <td class="p-2 text-xs font-bold text-cyan-300" data-label="Website">${esc(r.website)}</td>
           <td class="p-2 text-xs whitespace-nowrap" data-label="Pasaran tujuan">${esc(r.market || '-')}<div class="text-[10px] text-slate-500">periode ${esc(r.period)}</div></td>
           <td class="p-2 text-xs font-mono font-extrabold text-amber-300" data-label="Angka">${esc(r.number)}</td>
-          <td class="p-2 text-[10px] font-extrabold whitespace-nowrap ${stCls[r.status] || ''}" data-label="Status">${stTxt[r.status] || esc(r.status)}</td>
+          <td class="p-2 text-[10px] font-extrabold whitespace-nowrap ${stCls[r.status] || ''}" data-label="Status">${r.status === 'PENDING' && Number(r.attempts) > 0 ? 'DIPASTIKAN' : (stTxt[r.status] || esc(r.status))}</td>
           <td class="p-2 text-[11px] text-slate-300 stack-full" data-label="Keterangan">${esc(r.detail)}${r.attempts ? ' <span class="text-slate-500">(' + Number(r.attempts) + '/' + Number(d.maxAttempts) + ' percobaan)</span>' : ''}</td></tr>`).join('') || '<tr><td colspan="7" class="p-3 text-center text-slate-500">' + (aiTotoFilter === 'all' ? 'Belum ada draw tercatat.' : 'Tidak ada baris di filter ini.') + '</td></tr>';
       const keepScroll = ['aiTotoLogScroll', 'aiTotoTblScroll'].map(id => { const el = document.getElementById(id); return [id, el ? el.scrollTop : 0]; });
       const evCol = { OK: 'text-emerald-300', WARN: 'text-amber-300', ERR: 'text-rose-400', INFO: 'text-slate-300' };
