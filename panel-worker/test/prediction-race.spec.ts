@@ -47,4 +47,25 @@ describe("Smart Lock prediksi: tidak boleh terkirim dua kali", () => {
 		expect(r.websiteResults[0].status).toBe("BERHASIL");
 		expect(sends).toBe(2);
 	});
+
+	it("Telegram tidak menjawab untuk satu website -> website lain langsung dilewati (tidak menunggu 25 dtk lagi), status GAGAL = aman dikirim ulang", async () => {
+		const { env, db } = fakeEnv();
+		db.exec(`INSERT INTO site_accounts (website, tg_pred_token, tg_pred_chat_id) VALUES ('HUGO','t','c'), ('FOLA','t','c'), ('ZETA','t','c')`);
+		let sends = 0;
+		vi.stubGlobal("fetch", async (_u: unknown, init?: RequestInit) => {
+			sends++;
+			expect(init?.signal).toBeInstanceOf(AbortSignal); // terikat tenggat keras
+			throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+		});
+		const base = { env, websites: ["HUGO", "FOLA", "ZETA"], scheduleId: "CLOSING-1600", predictionName: "X", kind: "closing" as const, logAction: "T" };
+		const r = await sendPredictionJob({ ...base, username: "OP", messageForWebsite: async () => "msg" });
+		expect(sends).toBe(1);
+		expect(r.websiteResults.map((x) => x.status)).toEqual(["GAGAL", "GAGAL", "GAGAL"]);
+		expect(r.websiteResults[0].reason).toContain("mungkin tetap terkirim");
+		expect(r.websiteResults[1].reason).toMatch(/^Dilewati: Telegram tidak menjawab/);
+		// Telegram pulih -> kirim ulang berjalan normal
+		vi.stubGlobal("fetch", async () => { sends++; return new Response("ok", { status: 200 }); });
+		const again = await sendPredictionJob({ ...base, username: "OP", messageForWebsite: async () => "msg" });
+		expect(again.websiteResults.map((x) => x.status)).toEqual(["BERHASIL", "BERHASIL", "BERHASIL"]);
+	});
 });

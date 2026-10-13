@@ -1,19 +1,21 @@
 // Port loginPanelZInternal_ / getPanelRowAutoInternal_ / sendToPanelZInternal_ / sendCustomPanelZInternal_.
 import type { PanelZCfg } from "../lib/site";
 import { convertMarketToPanel } from "../lib/parser";
+import { guardSignal } from "../lib/fetch-guard";
 
 interface PanelSession {
 	basicAuth: string;
 	cookie: string;
 }
 
-async function loginPanelZ(cfg: PanelZCfg): Promise<PanelSession | string> {
+async function loginPanelZ(cfg: PanelZCfg, deadline?: AbortSignal): Promise<PanelSession | string> {
 	const basicAuth = "Basic " + btoa(`${cfg.user}:${cfg.pass}`);
 	const res = await fetch(cfg.url + "/assets/sys-tmbet/authentication.php", {
 		method: "POST",
 		redirect: "manual",
 		headers: { Authorization: basicAuth, "content-type": "application/x-www-form-urlencoded" },
 		body: new URLSearchParams({ username: cfg.user2, password: cfg.pass2 }),
+		signal: guardSignal(deadline),
 	});
 	const many = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [];
 	const raw = many[0] || res.headers.get("set-cookie") || "";
@@ -27,9 +29,11 @@ async function getPanelRow(
 	session: PanelSession,
 	cfg: PanelZCfg,
 	market: string,
+	deadline?: AbortSignal,
 ): Promise<string | null> {
 	const res = await fetch(cfg.url + "/dashboard.php?hal=result", {
 		headers: { Authorization: session.basicAuth, Cookie: session.cookie },
+		signal: guardSignal(deadline),
 	});
 	const html = await res.text();
 	const key = convertMarketToPanel(market);
@@ -45,6 +49,7 @@ async function pushAngka(
 	rowId: string,
 	angka: string,
 	onNote?: (note: string) => void,
+	deadline?: AbortSignal,
 ): Promise<string> {
 	const res = await fetch(cfg.url + "/config/update-resultlotto.php?row=" + rowId, {
 		method: "POST",
@@ -55,6 +60,7 @@ async function pushAngka(
 			"content-type": "application/x-www-form-urlencoded",
 		},
 		body: new URLSearchParams({ updangka: angka }),
+		signal: guardSignal(deadline),
 	});
 	if (onNote) {
 		// bahan diagnosis bila angka tidak tampil sesudah dikirim: status + cuplikan jawaban Panel-Z (tanpa tag HTML). Tidak pernah melempar.
@@ -70,8 +76,8 @@ async function pushAngka(
 	return "Gagal (" + res.status + ")";
 }
 
-/** Kirim hasil result (parse Pasaran + Prize 1 dari rawText). */
-export async function sendPanelZ(rawText: string, cfg: PanelZCfg): Promise<string> {
+/** Kirim hasil result (parse Pasaran + Prize 1 dari rawText). `deadline` = tenggat bersama (opsional) di atas batas per panggilan. */
+export async function sendPanelZ(rawText: string, cfg: PanelZCfg, deadline?: AbortSignal): Promise<string> {
 	try {
 		if (!cfg.url || !cfg.user) return "Error: Konfigurasi Panel-Z kosong";
 		const marketMatch = rawText.match(/Pasaran\s+(.+)/i) || rawText.match(/Hasil Pengeluaran Pasaran\s+(.+)/i);
@@ -81,25 +87,25 @@ export async function sendPanelZ(rawText: string, cfg: PanelZCfg): Promise<strin
 		const market = marketMatch[1].trim().toUpperCase();
 		const prize1 = prize1Match[1];
 
-		const session = await loginPanelZ(cfg);
+		const session = await loginPanelZ(cfg, deadline);
 		if (typeof session === "string") return session;
-		const rowId = await getPanelRow(session, cfg, market);
+		const rowId = await getPanelRow(session, cfg, market, deadline);
 		if (!rowId) return "Row tidak ditemukan : " + market;
-		return pushAngka(session, cfg, rowId, prize1);
+		return await pushAngka(session, cfg, rowId, prize1, undefined, deadline);
 	} catch (e) {
 		return "Error: " + (e instanceof Error ? e.message : String(e));
 	}
 }
 
 /** Kirim angka custom (dipakai fitur Send Panel-Z / TOTOMACAU manual). */
-export async function sendCustomPanelZ(market: string, angka: string, cfg: PanelZCfg): Promise<string> {
+export async function sendCustomPanelZ(market: string, angka: string, cfg: PanelZCfg, deadline?: AbortSignal): Promise<string> {
 	try {
 		if (!cfg.url || !cfg.user) return "Error: Konfigurasi Panel-Z kosong";
-		const session = await loginPanelZ(cfg);
+		const session = await loginPanelZ(cfg, deadline);
 		if (typeof session === "string") return session;
-		const rowId = await getPanelRow(session, cfg, String(market).toUpperCase());
+		const rowId = await getPanelRow(session, cfg, String(market).toUpperCase(), deadline);
 		if (!rowId) return "Row tidak ditemukan";
-		const r = await pushAngka(session, cfg, rowId, angka);
+		const r = await pushAngka(session, cfg, rowId, angka, undefined, deadline);
 		return r === "Terkirim" ? "Berhasil dikirim" : r;
 	} catch (e) {
 		return "Error : " + (e instanceof Error ? e.message : String(e));
