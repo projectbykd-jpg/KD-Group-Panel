@@ -2,14 +2,16 @@
 import type { LinktreeCfg } from "../lib/site";
 import type { Processed } from "../lib/parser";
 import { linktreeCfg } from "../lib/integrations";
+import { guardSignal } from "../lib/fetch-guard";
 
 
-async function loginLinktree(cfg: LinktreeCfg): Promise<string> {
+async function loginLinktree(cfg: LinktreeCfg, deadline?: AbortSignal): Promise<string> {
 	const res = await fetch(linktreeCfg().loginUrl, {
 		method: "POST",
 		redirect: "manual",
 		headers: { "content-type": "application/x-www-form-urlencoded" },
 		body: new URLSearchParams({ email: cfg.email, password: cfg.pass }),
+		signal: guardSignal(deadline),
 	});
 	const many = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [];
 	if (many.length) return many.map((c) => c.split(";")[0]).join("; ");
@@ -18,10 +20,10 @@ async function loginLinktree(cfg: LinktreeCfg): Promise<string> {
 	return single.split(";")[0];
 }
 
-export async function sendLinktree(cfg: LinktreeCfg, processed: Processed): Promise<string> {
+export async function sendLinktree(cfg: LinktreeCfg, processed: Processed, deadline?: AbortSignal): Promise<string> {
 	try {
 		if (!cfg.email || !cfg.pass) return "Error: Kredensial LinkTree kosong";
-		const cookie = await loginLinktree(cfg);
+		const cookie = await loginLinktree(cfg, deadline);
 		if (cookie.startsWith("Error:")) return cookie;
 
 		const marketName = processed.market && processed.market !== "UNKNOWN" ? processed.market : "LAOS SIANG";
@@ -35,6 +37,7 @@ export async function sendLinktree(cfg: LinktreeCfg, processed: Processed): Prom
 			redirect: "manual",
 			headers: { "content-type": "application/x-www-form-urlencoded", Cookie: cookie },
 			body: new URLSearchParams({ apikey: linktreeCfg().apiKey, title, body }),
+			signal: guardSignal(deadline),
 		});
 		const respBody = await res.text();
 		if (respBody.includes("LinkTree System")) return "Session Login Gagal";

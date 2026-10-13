@@ -6,6 +6,7 @@ import { tsPlusMinutes } from "./time";
 import { sha256Hex } from "./crypto";
 import { getSiteAccount } from "./site";
 import { sendTelegram } from "../senders/telegram";
+import { NET_FAIL_RE, netFailWhy, startSendDeadline, TIME_UP_NOT_SENT } from "./send-deadline";
 import { logActivity } from "./activity";
 
 const OFFSET_MS = 7 * 60 * 60 * 1000;
@@ -454,20 +455,41 @@ export async function sendPredictionJob(opts: PredJobOptions) {
 		}
 	}
 
-	// Kirim Telegram Prediksi per website
-	for (const r of reservations) {
-		const acc = await getSiteAccount(env, r.website);
-		if (!acc || !acc.telegramPred.token || !acc.telegramPred.chatId) {
-			resultMap[r.website] = {
-				website: r.website,
-				status: "GAGAL",
-				reason: "TOKEN atau CHAT_ID Telegram Prediksi tidak ditemukan pada data website.",
-			};
-			continue;
+	// Kirim Telegram Prediksi per website. Pengaman "menggantung" (sama seperti Kirim Semua, lihat lib/send-deadline.ts):
+	// Telegram yang tidak menjawab untuk satu website -> website lain di putaran ini langsung dilewati (dulu menunggu 25 dtk
+	// lagi per website), dan semua panggilan terikat tenggat keras sebelum batas tunggu panel. Yang dilewati/belum dikirim
+	// tercatat GAGAL (bukan BERHASIL) sehingga aman dikirim ulang.
+	const run = startSendDeadline();
+	let tgDown = "";
+	try {
+		for (const r of reservations) {
+			const acc = await getSiteAccount(env, r.website);
+			if (!acc || !acc.telegramPred.token || !acc.telegramPred.chatId) {
+				resultMap[r.website] = {
+					website: r.website,
+					status: "GAGAL",
+					reason: "TOKEN atau CHAT_ID Telegram Prediksi tidak ditemukan pada data website.",
+				};
+				continue;
+			}
+			if (run.signal.aborted || tgDown) {
+				resultMap[r.website] = {
+					website: r.website,
+					status: "GAGAL",
+					reason: tgDown ? `Dilewati: Telegram ${tgDown} untuk website lain di putaran ini. Kirim ulang sebentar lagi.` : TIME_UP_NOT_SENT,
+				};
+				continue;
+			}
+			const resp = await sendTelegram(r.content, acc.telegramPred, run.signal);
+			const n = normalizePred(resp);
+			if (n.status !== "BERHASIL" && NET_FAIL_RE.test(resp)) {
+				tgDown = run.signal.aborted ? "belum menjawab saat batas waktu kirim habis" : netFailWhy(resp);
+				n.reason = `Telegram ${tgDown} — mungkin tetap terkirim; cek channel dulu sebelum kirim ulang. (${resp.slice(0, 120)})`;
+			}
+			resultMap[r.website] = { website: r.website, status: n.status, reason: n.reason };
 		}
-		const resp = await sendTelegram(r.content, acc.telegramPred);
-		const n = normalizePred(resp);
-		resultMap[r.website] = { website: r.website, status: n.status, reason: n.reason };
+	} finally {
+		run.stop();
 	}
 
 	// Tulis hasil akhir (hanya kalau request_id masih milik kita)

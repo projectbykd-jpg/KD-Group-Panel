@@ -8,6 +8,15 @@ export function setFetchTimeoutMs(ms: number): void {
 	if (Number.isFinite(ms) && ms >= 1000) timeoutMs = ms;
 }
 
+/**
+ * Signal untuk fetch yang juga terikat TENGGAT bersama (mis. satu permintaan "Kirim Semua" harus selesai sebelum batas tunggu
+ * panel): batal saat tenggat tiba ATAU batas bawaan per panggilan habis, mana yang lebih dulu. Tanpa tenggat -> undefined, jadi
+ * guard memasang batas bawaannya seperti biasa.
+ */
+export function guardSignal(deadline?: AbortSignal): AbortSignal | undefined {
+	return deadline ? AbortSignal.any([deadline, AbortSignal.timeout(timeoutMs)]) : undefined;
+}
+
 type Guarded = typeof globalThis & { __kdFetchGuard?: boolean };
 
 export function installFetchGuard(): void {

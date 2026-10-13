@@ -10,8 +10,12 @@ import { sendTelegram } from "../senders/telegram";
 import { sendLinktree } from "../senders/linktree";
 import { sendCustomPanelZ, sendPanelZ } from "../senders/panelz";
 import { autoInputAfterSend } from "./auto-input";
+import { linktreeCfg } from "../lib/integrations";
+import { NET_FAIL_RE, netFailWhy, startSendDeadline, TIME_UP_NOT_SENT } from "../lib/send-deadline";
 
 type SystemKey = "telegram" | "linktree" | "panelz";
+/** Website yang dikirimi bersamaan (tiap website 1 koneksi aktif; Cloudflare membuka maks 6 koneksi keluar sekaligus). */
+const SEND_POOL = 6;
 const SYSTEMS: SystemKey[] = ["telegram", "linktree", "panelz"];
 
 interface SysResult {
@@ -76,7 +80,27 @@ async function runSend(env: Env, session: Session, rawText: string, opts: SendOp
 	const websiteResults: WebsiteResult[] = [];
 	const registryWarnings: string[] = [];
 
-	for (const website of websites) {
+	// Kirim ke semua website PARALEL (maks SEND_POOL sekaligus; tiap website tetap berurutan Telegram -> LinkTree -> Panel-Z).
+	// Dulu bergiliran: satu server lambat x batas 25 dtk per panggilan x beberapa website = >100 dtk -> "Permintaan menggantung
+	// lebih dari 100 dtk" (smartAutoSendFast 14 Okt 02:04) dan operator tidak melihat hasil apa pun. Pengaman sekarang:
+	//  1. server yang tidak menjawab (timeout/jaringan) untuk satu website langsung DILEWATI untuk website lain di putaran ini;
+	//  2. TENGGAT KERAS: semua panggilan keluar terikat satu signal yang putus sebelum batas tunggu panel (sisa ±12 dtk untuk
+	//     mencatat registry + log). Kiriman yang belum mulai dihentikan rapi ("belum dikirim"); yang sedang jalan diputus dan
+	//     dilaporkan "mungkin tetap terkirim". Yang sudah BERHASIL tercatat di registry anti-duplikat -> kirim ulang tidak dobel.
+	const run = startSendDeadline();
+	const deadHosts = new Map<string, string>();
+	const hostOf = (k: SystemKey, acc: Awaited<ReturnType<typeof getSiteAccount>>): string => {
+		try {
+			if (k === "telegram") return "api.telegram.org";
+			if (k === "linktree") return new URL(linktreeCfg().loginUrl).host;
+			return acc?.panelz.url ? new URL(acc.panelz.url).host : "";
+		} catch {
+			return "";
+		}
+	};
+	const LABEL: Record<SystemKey, string> = { telegram: "Telegram", linktree: "LinkTree", panelz: "Panel-Z" };
+
+	const sendWebsite = async (website: string): Promise<WebsiteResult> => {
 		const wr: WebsiteResult = {
 			website,
 			telegram: { status: "SKIP", reason: "Tidak diproses" },
@@ -92,8 +116,7 @@ async function runSend(env: Env, session: Session, rawText: string, opts: SendOp
 			const why = "Pengecekan anti-duplikat (database) tidak tersedia — tidak dikirim demi mencegah kirim ganda. Coba lagi sebentar atau hubungi admin.";
 			for (const k of SYSTEMS) if (requested[k]) wr[k] = profile.permissions[k] ? { status: "GAGAL", reason: why } : { status: "DIBLOKIR", reason: "Tidak diizinkan pada data Users" };
 			registryWarnings.push(`${website}: registry tidak terbaca (${e instanceof Error ? e.message.slice(0, 80) : "error"})`);
-			websiteResults.push(wr);
-			continue;
+			return wr;
 		}
 		const acc = await getSiteAccount(env, website);
 
@@ -118,20 +141,37 @@ async function runSend(env: Env, session: Session, rawText: string, opts: SendOp
 				wr[k] = { status: "GAGAL", reason: "Konfigurasi website " + website + " tidak ditemukan" };
 				continue;
 			}
+			if (run.signal.aborted) {
+				wr[k] = { status: "GAGAL", reason: TIME_UP_NOT_SENT };
+				continue;
+			}
+			const host = hostOf(k, acc);
+			const dead = host ? deadHosts.get(host) : undefined;
+			if (dead) {
+				wr[k] = { status: "GAGAL", reason: `Dilewati: ${LABEL[k]} tidak menjawab untuk website lain di putaran ini (${dead}). Kirim ulang sebentar lagi.` };
+				continue;
+			}
 			let r: string;
 			try {
 				if (k === "telegram") {
 					const cfg = opts.isPrediksiAuto ? acc.telegramPred : acc.telegram;
-					r = await sendTelegram(textToSend, cfg);
+					r = await sendTelegram(textToSend, cfg, run.signal);
 				} else if (k === "linktree") {
-					r = await sendLinktree(acc.linktree, processed);
+					r = await sendLinktree(acc.linktree, processed, run.signal);
 				} else {
-					r = await sendPanelZ(textToSend, acc.panelz);
+					r = await sendPanelZ(textToSend, acc.panelz, run.signal);
 				}
 			} catch (e) {
 				r = "Error: " + (e instanceof Error ? e.message : String(e));
 			}
 			wr[k] = normalizeSendResult(r);
+			if (wr[k].status === "GAGAL" && run.signal.aborted && NET_FAIL_RE.test(r)) {
+				wr[k] = { status: "GAGAL", reason: `${LABEL[k]} belum menjawab saat batas waktu kirim habis — mungkin tetap terkirim; cek dulu sebelum kirim ulang.` };
+			} else if (wr[k].status === "GAGAL" && NET_FAIL_RE.test(r)) {
+				const why = netFailWhy(r);
+				if (host) deadHosts.set(host, why);
+				wr[k] = { status: "GAGAL", reason: `${LABEL[k]} ${why} — mungkin tetap terkirim; cek dulu sebelum kirim ulang. (${String(r).slice(0, 120)})` };
+			}
 		}
 
 		const merged = {
@@ -152,8 +192,20 @@ async function runSend(env: Env, session: Session, rawText: string, opts: SendOp
 				}
 			}
 		}
-		websiteResults.push(wr);
+		return wr;
+	};
+
+	const queue = websites.map((w, i) => ({ w, i }));
+	const slots: WebsiteResult[] = new Array(websites.length);
+	const worker = async () => {
+		for (let job = queue.shift(); job; job = queue.shift()) slots[job.i] = await sendWebsite(job.w);
+	};
+	try {
+		await Promise.all(Array.from({ length: Math.min(SEND_POOL, websites.length) }, worker));
+	} finally {
+		run.stop();
 	}
+	websiteResults.push(...slots);
 
 	// hitung counter per sistem seluruh website
 	const counters = { success: 0, failed: 0, blocked: 0, already: 0, skipped: 0 };
@@ -263,12 +315,36 @@ export async function sendToPanelZOnly(env: Env, token: string, market: string, 
 	if (!profile.permissions.panelz) return { success: false, message: "Akun ini tidak diizinkan memakai Panel-Z (atur di Admin → Users)." };
 	// Hasil SETIAP website dikumpulkan -- dulu cuma hasil website terakhir yang
 	// disimpan, jadi kegagalan di website sebelumnya tertutup "Berhasil".
-	const results: { website: string; msg: string }[] = [];
+	// Website dikirimi PARALEL dengan tenggat keras yang sama seperti Kirim Semua (dulu bergiliran: login + baca + kirim per
+	// website x 25 dtk bila Panel-Z lambat -> bisa melewati batas tunggu panel dan operator tidak melihat hasil apa pun).
+	const targets: { website: string; acc: NonNullable<Awaited<ReturnType<typeof getSiteAccount>>> }[] = [];
 	for (const website of profile.websites) {
 		const acc = await getSiteAccount(env, website);
 		// Website tanpa Panel-Z memang tidak dikirimi -- bukan kegagalan.
-		if (!acc || !acc.panelz.url || !acc.panelz.user) continue;
-		results.push({ website, msg: await sendCustomPanelZ(market, angka, acc.panelz) });
+		if (acc && acc.panelz.url && acc.panelz.user) targets.push({ website, acc });
+	}
+	const run = startSendDeadline();
+	const results: { website: string; msg: string }[] = new Array(targets.length);
+	const queue = targets.map((t, i) => ({ ...t, i }));
+	const worker = async () => {
+		for (let job = queue.shift(); job; job = queue.shift()) {
+			if (run.signal.aborted) {
+				results[job.i] = { website: job.website, msg: TIME_UP_NOT_SENT };
+				continue;
+			}
+			const msg = await sendCustomPanelZ(market, angka, job.acc.panelz, run.signal);
+			results[job.i] = {
+				website: job.website,
+				msg: run.signal.aborted && !msg.includes("Berhasil") && NET_FAIL_RE.test(msg)
+					? "Panel-Z belum menjawab saat batas waktu kirim habis — mungkin tetap terkirim; cek dulu sebelum kirim ulang."
+					: msg,
+			};
+		}
+	};
+	try {
+		await Promise.all(Array.from({ length: Math.min(SEND_POOL, targets.length) }, worker));
+	} finally {
+		run.stop();
 	}
 	const success = results.length > 0 && results.every((r) => r.msg.includes("Berhasil"));
 	const last = !results.length
