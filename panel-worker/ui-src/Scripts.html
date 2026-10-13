@@ -3015,25 +3015,6 @@
           <span class="sys-input"><input type="number" inputmode="numeric" data-key="${escapeHtml(i.key)}" min="${i.min}" max="${i.max}" value="${i.value}"><em>${escapeHtml(i.unit || '')}</em></span>
           <span class="sys-range">${i.min}–${i.max} · default ${i.def}</span>
         </label>`).join('')}</div>`).join('');
-      sysFilter();
-    }
-    // Saring 59+ pengaturan berdasarkan kata (label, keterangan, atau nama grup); grup tanpa hasil disembunyikan.
-    function sysFilter() {
-      const q = String((document.getElementById('sysSearch') || {}).value || '').trim().toLowerCase();
-      let shown = 0, total = 0;
-      document.querySelectorAll('#sysGroups .sys-group').forEach(g => {
-        const gName = (g.querySelector('.sys-group-title') || {}).textContent || '';
-        let any = 0;
-        g.querySelectorAll('.sys-field').forEach(f => {
-          total++;
-          const hit = !q || (gName + ' ' + f.textContent).toLowerCase().includes(q);
-          f.style.display = hit ? '' : 'none';
-          if (hit) { any++; shown++; }
-        });
-        g.style.display = any ? '' : 'none';
-      });
-      const c = document.getElementById('sysSearchCount');
-      if (c) c.textContent = q ? shown + ' dari ' + total : '';
     }
     function sysLoad() {
       const st = document.getElementById('sysStatus');
@@ -3273,13 +3254,6 @@
       }).withFailureHandler(e => { if (btn) btn.disabled = false; toast('Gagal menyimpan: ' + ((e && e.message) || e)); }).lapSaveSpecialOps(currentSessionToken, list);
     }
 
-    // Kelompok & judul tiap panel admin (judul kecil di atas isi panel; sama dengan menu kiri).
-    const ADMIN_PANEL_META = {
-      users: ['Akun & akses', 'Users'], sesi: ['Akun & akses', 'Sesi Aktif'],
-      sites: ['Website & otomatis', 'Website'], autopost: ['Website & otomatis', 'Auto Posting'],
-      lapops: ['Konfigurasi', 'Pengaturan Sistem'], datamaster: ['Konfigurasi', 'Data Master'], integrasi: ['Konfigurasi', 'Integrasi'],
-      errors: ['Pemantauan', 'Error & Bug'], maintenance: ['Pemantauan', 'Maintenance & Log'],
-    };
     function switchAdminPanel(key, fromNav) {
       // Tab lama yang tersimpan di localStorage: 'backup' kini bagian dari
       // Maintenance, 'dashboard' sudah jadi menu Aktivitas.
@@ -3294,9 +3268,6 @@
         p.classList.toggle('active', p.dataset.adminPanel === key));
       const sel = document.getElementById('adminTabSelect');
       if (sel && sel.value !== key) sel.value = key;
-      const meta = ADMIN_PANEL_META[key];
-      const crumb = document.getElementById('adminCrumb');
-      if (crumb && meta) crumb.innerHTML = `<span class="adm-crumb-group">${escapeHtml(meta[0])}</span><i class="fa-solid fa-chevron-right"></i><span class="adm-crumb-title">${escapeHtml(meta[1])}</span>`;
 
       // Muat data panel yang dibuka (pakai cache/freshness di masing-masing loader).
       if (key === 'users') {
@@ -5992,19 +5963,11 @@
         .adminListActiveSessions(currentSessionToken);
     }
 
-    // Izin kirim (Telegram / LinkTree / Panel-Z) dalam satu kolom: hijau = boleh, abu dicoret = tidak.
-    function permBadge(v,short,full){return `<span class="adm-perm ${v?'on':'off'}" title="${full}: ${v?'boleh':'tidak'}">${short}</span>`;}
     function boolBadge(v,label){return `<span class="px-2 py-1 rounded-full text-[9px] font-bold ${v?'bg-emerald-500/15 text-emerald-300':'bg-rose-500/10 text-rose-300'}">${v?'✓':'✕'} ${label}</span>`;}
     function loadUsers(force){
       const status=document.getElementById('userManageStatus'); if(!status)return;
       status.textContent='Memuat daftar user...';
       google.script.run.withSuccessHandler(data=>{if(!Array.isArray(data)){status.textContent='Gagal memuat user: '+apiMessage(data);return;}adminUsersData=data;renderUserRows(adminUsersData);status.textContent=`${adminUsersData.length} akun berhasil dimuat.`;}).withFailureHandler(e=>{status.textContent='Gagal memuat users: '+((e&&e.message)||e);toast('Gagal memuat daftar user');}).adminListUsers(currentSessionToken);
-    }
-    // Website user ringkas: website pertama + "+N" (daftar lengkap di tooltip kolom & tetap bisa dicari) -- baris tabel tidak lagi setinggi daftar website.
-    function userSiteChips(list){
-      const all=String(list||'').split(',').map(x=>x.trim()).filter(Boolean);
-      if(!all.length) return '<span class="text-slate-600">-</span>';
-      return `<span class="adm-site-chips"><span class="adm-site-chip">${escapeHtml(all[0])}</span>${all.length>1?`<span class="adm-site-chip more">+${all.length-1}</span>`:''}</span>`;
     }
     function renderUserRows(rows){
       const body=document.getElementById('userTableBody');
@@ -6023,11 +5986,14 @@
         <tr data-search="${escapeHtml([u.username,u.displayName,u.websites,u.role,u.status].join(' ').toLowerCase())}"
             data-role="${escapeHtml(u.role)}"
             data-status="${escapeHtml(u.status)}">
-          <td class="font-extrabold text-white" data-label="Username" title="${escapeHtml(u.username)}">${escapeHtml(u.username)}${u.displayName&&u.displayName!=='-'?`<small class="adm-user-name">${escapeHtml(u.displayName)}</small>`:''}</td>
-          <td class="stack-full" data-label="Website" title="${escapeHtml(u.websites||'-')}">${userSiteChips(u.websites)}</td>
+          <td class="font-extrabold text-white" data-label="Username" title="${escapeHtml(u.username)}">${escapeHtml(u.username)}</td>
+          <td data-label="Nama" title="${escapeHtml(u.displayName||'-')}">${escapeHtml(u.displayName||'-')}</td>
+          <td class="stack-full" data-label="Website" title="${escapeHtml(u.websites||'-')}">${escapeHtml(String(u.websites||'-').replace(/,\s*/g, ', '))}</td>
           <td data-label="Role"><span class="px-2 py-1 rounded-full bg-amber-500/10 text-amber-300 text-[9px] font-bold">${escapeHtml(u.role)}</span><div class="user-menu-chip" title="Menu yang boleh dibuka"><i class="fa-solid fa-key"></i>Menu ${escapeHtml(userMenuSummary(u))}</div></td>
           <td data-label="Status"><span class="px-2 py-1 rounded-full ${u.status==='AKTIF'?'bg-emerald-500/10 text-emerald-300':'bg-rose-500/10 text-rose-300'} text-[9px] font-bold">${escapeHtml(u.status)}</span></td>
-          <td data-label="Izin"><span class="adm-perms">${permBadge(u.telegram,'TG','Kirim Telegram')}${permBadge(u.linktree,'LT','Kirim LinkTree')}${permBadge(u.panelz,'PZ','Kirim Panel-Z')}</span></td>
+          <td data-label="Telegram">${boolBadge(u.telegram,'')}</td>
+          <td data-label="LinkTree">${boolBadge(u.linktree,'')}</td>
+          <td data-label="Panel-Z">${boolBadge(u.panelz,'')}</td>
           <td data-label="Login terakhir">${formatLogin(u.lastLogin)}</td>
           <td class="stack-full stack-actions">
             <div class="admin-action-group">
@@ -6042,7 +6008,7 @@
               </button>
             </div>
           </td>
-        </tr>`).join('')||'<tr><td colspan="7" class="table-empty-cell"><span class="table-empty-inner"><i class="fa-solid fa-users-slash"></i>Belum ada user</span></td></tr>';
+        </tr>`).join('')||'<tr><td colspan="10" class="table-empty-cell"><span class="table-empty-inner"><i class="fa-solid fa-users-slash"></i>Belum ada user</span></td></tr>';
     }
     function filterUserRows(){const q=(document.getElementById('userSearch').value||'').toLowerCase();const role=document.getElementById('userRoleFilter').value;const status=document.getElementById('userStatusFilter').value;document.querySelectorAll('#userTableBody tr[data-search]').forEach(tr=>{tr.style.display=(!q||tr.dataset.search.includes(q))&&(!role||tr.dataset.role===role)&&(!status||tr.dataset.status===status)?'':'none';});}
 
