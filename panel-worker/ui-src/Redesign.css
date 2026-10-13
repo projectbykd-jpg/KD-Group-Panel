@@ -655,7 +655,7 @@ tbody tr:last-child > td { border-bottom: 0 !important; }
 .ai-usage-table thead th { font-size: 11px !important; }
 
 /* Tabel user & sesi aktif: role/status sebagai lencana seragam (warna menurut data, bukan kelas Tailwind) */
-.admin-users-table td:nth-child(4) > span.rounded-full, .admin-users-table td:nth-child(5) > span.rounded-full,
+.admin-users-table td[data-label="Role"] > span.rounded-full, .admin-users-table td[data-label="Status"] > span.rounded-full,
 #activeSessionsBody td:nth-child(2) > span.rounded-full, #activeSessionsBody td:last-child > span.rounded-full {
   display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 3px 10px !important;
   font-size: 11.5px !important; font-weight: 600 !important; letter-spacing: .02em; border-radius: 999px !important;
@@ -664,9 +664,9 @@ tbody tr:last-child > td { border-bottom: 0 !important; }
 tr[data-role="ADMIN"] > td:nth-child(4) > span.rounded-full, #activeSessionsBody tr[data-role="ADMIN"] > td:nth-child(2) > span.rounded-full { background: rgba(var(--ui-warning-rgb), .12) !important; color: var(--ui-warning) !important; border-color: rgba(var(--ui-warning-rgb), .28); }
 tr[data-role="OPERATOR"] > td:nth-child(4) > span.rounded-full, #activeSessionsBody tr[data-role="OPERATOR"] > td:nth-child(2) > span.rounded-full { background: rgba(var(--ui-info-rgb), .12) !important; color: #8ec9ff !important; border-color: rgba(var(--ui-info-rgb), .28); }
 tr[data-role="BOT"] > td:nth-child(4) > span.rounded-full, #activeSessionsBody tr[data-role="BOT"] > td:nth-child(2) > span.rounded-full { background: rgba(var(--ui-success-rgb), .12) !important; color: var(--ui-success) !important; border-color: rgba(var(--ui-success-rgb), .28); }
-.admin-users-table td:nth-child(5) > span.rounded-full::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
-.admin-users-table tr[data-status="AKTIF"] td:nth-child(5) > span.rounded-full { background: rgba(var(--ui-success-rgb), .12) !important; color: var(--ui-success) !important; border-color: rgba(var(--ui-success-rgb), .28); }
-.admin-users-table tr[data-status="TERKUNCI"] td:nth-child(5) > span.rounded-full { background: rgba(var(--ui-warning-rgb), .12) !important; color: var(--ui-warning) !important; border-color: rgba(var(--ui-warning-rgb), .28); }
+.admin-users-table td[data-label="Status"] > span.rounded-full::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+.admin-users-table tr[data-status="AKTIF"] td[data-label="Status"] > span.rounded-full { background: rgba(var(--ui-success-rgb), .12) !important; color: var(--ui-success) !important; border-color: rgba(var(--ui-success-rgb), .28); }
+.admin-users-table tr[data-status="TERKUNCI"] td[data-label="Status"] > span.rounded-full { background: rgba(var(--ui-warning-rgb), .12) !important; color: var(--ui-warning) !important; border-color: rgba(var(--ui-warning-rgb), .28); }
 #activeSessionsBody td:last-child > span.rounded-full[class*="emerald"] { background: rgba(var(--ui-success-rgb), .12) !important; color: var(--ui-success) !important; border-color: rgba(var(--ui-success-rgb), .28); }
 #activeSessionsBody td { font-size: 13px !important; }
 #activeSessionsBody td.font-mono { font-family: inherit !important; color: var(--ui-text) !important; font-variant-numeric: tabular-nums; }
@@ -1055,7 +1055,7 @@ thead th:last-child, tbody td:last-child { padding-right: 14px !important; }
 .lap-jobs-table-wrap { margin: 2px 0 0; }
 .log-details summary { padding: 6px 9px !important; }
 .user-menu-chip { margin-top: 3px !important; }
-.admin-users-table td:nth-child(4) > span.rounded-full, .admin-users-table td:nth-child(5) > span.rounded-full { min-height: 22px; padding: 2px 9px !important; }
+.admin-users-table td[data-label="Role"] > span.rounded-full, .admin-users-table td[data-label="Status"] > span.rounded-full { min-height: 22px; padding: 2px 9px !important; }
 /* ringkasan Lap & kartu statistik */
 .lap-stat-grid > div:not(.lap-stat-empty) { padding: 8px 12px !important; }
 .lap-stat-grid .text-\[19px\] { font-size: 18px !important; margin-top: 2px !important; }
@@ -1587,3 +1587,95 @@ th.ai-sel, td.ai-sel { width: 36px; padding-right: 0 !important; }
   .dash-heat .hc { height: 16px; border-radius: 3px; }
   .dash-tcol .bw { height: 100px; }
 }
+
+/* ============================================================
+   13. ADMIN — menu kiri bergrup (pengganti 9 tab sebaris)
+   Hanya tata letak: tombol tetap .admin-tab + data-admin-tab, jadi
+   switchAdminPanel() dan semua loader panel tidak berubah.
+   ============================================================ */
+#admin-page .adm-shell { display: grid; grid-template-columns: 228px minmax(0, 1fr); gap: 20px; align-items: start; }
+#admin-page .adm-nav {
+  position: sticky; top: 80px; display: flex; flex-direction: column; gap: 14px; padding: 12px 10px;
+  background: var(--ui-surface-2); border: 1px solid var(--ui-line); border-radius: var(--ui-radius);
+}
+#admin-page .adm-nav-group { display: flex; flex-direction: column; gap: 2px; }
+#admin-page .adm-nav-group + .adm-nav-group { padding-top: 12px; border-top: 1px solid var(--ui-line); }
+#admin-page .adm-nav-label { padding: 0 10px 6px; font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ui-text-3); }
+#admin-page .adm-nav .admin-tab {
+  display: flex !important; align-items: center; gap: 11px; width: 100%; margin: 0 !important; padding: 8px 10px !important;
+  text-align: left; white-space: normal; border: 0 !important; border-left: 2px solid transparent !important; border-radius: 8px !important;
+  background: transparent !important; color: var(--ui-text-2) !important; font-size: 13px !important; transition: background .15s ease, color .15s ease;
+}
+#admin-page .adm-nav .admin-tab > i { width: 18px; flex: none; text-align: center; color: var(--ui-text-3) !important; }
+#admin-page .adm-nav .admin-tab:hover { background: var(--ui-surface-3) !important; color: var(--ui-text) !important; }
+#admin-page .adm-nav .admin-tab.active { background: rgba(var(--ui-accent-rgb), .11) !important; border-left-color: var(--ui-accent) !important; color: var(--ui-text) !important; }
+#admin-page .adm-nav .admin-tab.active > i { color: var(--ui-accent) !important; }
+#admin-page .adm-nav .ai-badge { margin-left: auto; flex: none; }
+.adm-nav-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.adm-nav-text b { font-weight: 600; color: inherit; }
+.adm-nav-text small { margin-top: 1px; font-size: 11px; font-weight: 400; color: var(--ui-text-3); }
+#admin-page .adm-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+#admin-page .adm-crumb { display: flex; align-items: center; gap: 8px; min-height: 20px; font-size: 12px; color: var(--ui-text-3); }
+#admin-page .adm-crumb i { font-size: 9px; }
+#admin-page .adm-crumb-title { font-weight: 600; color: var(--ui-text); }
+#admin-page .admin-tab-select { display: none; }
+/* Layar menengah (laptop 1366/1440): menu jadi deretan ikon saja (nama tampil di tooltip) supaya tabel lebar tetap muat */
+@media (min-width: 1101px) and (max-width: 1499px) {
+  #admin-page .adm-shell { grid-template-columns: 60px minmax(0, 1fr); gap: 16px; }
+  #admin-page .adm-nav { padding: 8px 6px; gap: 8px; }
+  #admin-page .adm-nav-label, #admin-page .adm-nav .adm-nav-text { display: none; }
+  #admin-page .adm-nav-group + .adm-nav-group { padding-top: 8px; }
+  #admin-page .adm-nav .admin-tab { position: relative; justify-content: center; padding: 10px 0 !important; }
+  #admin-page .adm-nav .admin-tab > i { width: auto; font-size: 15px !important; }
+  #admin-page .adm-nav .ai-badge { position: absolute; top: 2px; right: 2px; margin: 0; }
+}
+@media (max-width: 1100px) {
+  #admin-page .adm-shell { grid-template-columns: minmax(0, 1fr); }
+  #admin-page .adm-nav { display: none; }
+  #admin-page .admin-tab-select { display: block; min-height: 44px; padding: 0 12px; font-size: 13px; }
+}
+
+/* Users: website sebagai chip ringkas; kolom Aksi tetap terlihat saat tabel digeser */
+.adm-site-chips { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; min-width: 0; }
+.adm-site-chips .adm-site-chip:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.adm-site-chip {
+  padding: 2px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 600; white-space: nowrap;
+  background: var(--ui-surface-3); border: 1px solid var(--ui-line); color: var(--ui-text-2);
+}
+.adm-site-chip.more { color: var(--ui-accent); border-color: rgba(var(--ui-accent-rgb), .35); }
+@media (min-width: 721px) {
+  .admin-users-table thead th:last-child, .admin-users-table tbody td:last-child {
+    position: sticky; right: 0; z-index: 1; background: var(--ui-surface) !important; box-shadow: -1px 0 0 var(--ui-line);
+  }
+}
+
+/* Pengaturan Sistem: kotak cari */
+.sys-search {
+  display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 12px;
+  background: var(--ui-surface-2); border: 1px solid var(--ui-line-strong); border-radius: var(--ui-radius-sm);
+}
+.sys-search:focus-within { border-color: rgba(var(--ui-accent-rgb), .6); }
+.sys-search i { font-size: 13px; color: var(--ui-text-3); }
+.sys-search input { flex: 1; min-width: 0; background: transparent; border: 0; outline: none; color: var(--ui-text); font-size: 13px; }
+.sys-search span { font-size: 11px; color: var(--ui-text-3); white-space: nowrap; }
+
+/* Users: 7 kolom (Nama di bawah username, 3 izin digabung) — muat tanpa geser di layar 1366+ */
+.admin-users-table { min-width: 860px !important; }
+.admin-users-table th:nth-child(1), .admin-users-table td:nth-child(1) { width: 130px; }
+.admin-users-table th:nth-child(2), .admin-users-table td:nth-child(2) { width: auto; }
+.admin-users-table th:nth-child(3), .admin-users-table td:nth-child(3) { width: 116px; }
+.admin-users-table th:nth-child(4), .admin-users-table td:nth-child(4) { width: 96px; }
+.admin-users-table th:nth-child(5), .admin-users-table td:nth-child(5) { width: 140px; text-align: left; }
+.admin-users-table th:nth-child(6), .admin-users-table td:nth-child(6) { width: 128px; }
+.admin-users-table th:nth-child(7), .admin-users-table td:nth-child(7) { width: 124px; }
+.admin-users-table td:nth-child(1) { white-space: normal !important; overflow-wrap: anywhere; }
+/* Halaman Admin: kartu luar polos (tidak "kartu di dalam kartu") supaya isi panel lebih lebar & lebih bersih */
+#admin-page > .glass-card { padding: 0 !important; background: transparent !important; border: 0 !important; box-shadow: none !important; }
+.adm-user-name { display: block; margin-top: 2px; font-size: 11px; font-weight: 400; color: var(--ui-text-3); }
+.adm-perms { display: inline-flex; gap: 4px; }
+.adm-perm {
+  min-width: 28px; padding: 2px 6px; border-radius: 6px; text-align: center; font-size: 10.5px; font-weight: 700; letter-spacing: .02em;
+  border: 1px solid var(--ui-line); background: var(--ui-surface-2); color: var(--ui-text-3);
+}
+.adm-perm.on { color: var(--ui-success); border-color: rgba(var(--ui-success-rgb), .35); background: rgba(var(--ui-success-rgb), .1); }
+.adm-perm.off { text-decoration: line-through; opacity: .7; }
