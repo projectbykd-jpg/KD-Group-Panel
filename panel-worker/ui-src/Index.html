@@ -664,7 +664,7 @@
             <div class="page-head-text">
               <div class="page-eyebrow">Admin Control Center</div>
               <h2 class="page-title">Pengaturan Panel</h2>
-              <p class="page-sub">Pilih bagian dari menu di bawah. Riwayat aktivitas semua user ada di menu <b>Aktivitas</b>.</p>
+              <p class="page-sub">Pengaturan panel dikelompokkan per bagian: Akun &amp; akses, Website &amp; otomatis, Konfigurasi, Pemantauan. Riwayat aktivitas semua user ada di menu <b>Aktivitas</b>.</p>
             </div>
           </div>
 
@@ -692,35 +692,29 @@
           <nav class="adm-nav" id="adminTabs" aria-label="Menu admin">
             <div class="adm-nav-group">
               <div class="adm-nav-label">Akun &amp; akses</div>
-              <div class="adm-nav-items">
               <button title="Users" class="admin-tab active" data-admin-tab="users" onclick="switchAdminPanel('users')"><i class="fa-solid fa-users-gear"></i><span class="adm-nav-text"><b>Users</b><small>Akun &amp; hak akses menu</small></span></button>
               <button title="Sesi Aktif" class="admin-tab" data-admin-tab="sesi" onclick="switchAdminPanel('sesi')"><i class="fa-solid fa-users-viewfinder"></i><span class="adm-nav-text"><b>Sesi Aktif</b><small>Siapa yang sedang login</small></span></button>
-              </div>
             </div>
             <div class="adm-nav-group">
               <div class="adm-nav-label">Website &amp; otomatis</div>
-              <div class="adm-nav-items">
               <button title="Website" class="admin-tab" data-admin-tab="sites" onclick="switchAdminPanel('sites')"><i class="fa-solid fa-globe"></i><span class="adm-nav-text"><b>Website</b><small>Telegram, LinkTree, Panel-Z</small></span></button>
               <button title="Auto Posting" class="admin-tab" data-admin-tab="autopost" onclick="switchAdminPanel('autopost')"><i class="fa-solid fa-robot"></i><span class="adm-nav-text"><b>Auto Posting</b><small>Kirim prediksi terjadwal</small></span></button>
-              </div>
             </div>
             <div class="adm-nav-group">
               <div class="adm-nav-label">Konfigurasi</div>
-              <div class="adm-nav-items">
               <button title="Pengaturan Sistem" class="admin-tab" data-admin-tab="lapops" onclick="switchAdminPanel('lapops')"><i class="fa-solid fa-sliders"></i><span class="adm-nav-text"><b>Pengaturan Sistem</b><small>Batas, durasi, Asisten KD</small></span></button>
               <button title="Data Master" class="admin-tab" data-admin-tab="datamaster" onclick="switchAdminPanel('datamaster')"><i class="fa-solid fa-database"></i><span class="adm-nav-text"><b>Data Master</b><small>Jadwal, shio, pasaran</small></span></button>
               <button title="Integrasi" class="admin-tab" data-admin-tab="integrasi" onclick="switchAdminPanel('integrasi')"><i class="fa-solid fa-plug-circle-bolt"></i><span class="adm-nav-text"><b>Integrasi</b><small>GitHub, LinkTree, alamat</small></span></button>
-              </div>
             </div>
             <div class="adm-nav-group">
               <div class="adm-nav-label">Pemantauan</div>
-              <div class="adm-nav-items">
               <button title="Error &amp; Bug" class="admin-tab" data-admin-tab="errors" onclick="switchAdminPanel('errors')"><i class="fa-solid fa-bug"></i><span class="adm-nav-text"><b>Error &amp; Bug</b><small>Galat yang tercatat otomatis</small></span><span id="errTabBadge" class="ai-badge" hidden></span></button>
               <button title="Maintenance &amp; Log" class="admin-tab" data-admin-tab="maintenance" onclick="switchAdminPanel('maintenance')"><i class="fa-solid fa-screwdriver-wrench"></i><span class="adm-nav-text"><b>Maintenance &amp; Log</b><small>Mode perawatan, retensi log</small></span></button>
-              </div>
             </div>
           </nav>
           <div class="adm-main">
+          <div class="adm-crumb" id="adminCrumb" aria-live="polite"><span class="adm-crumb-group">Akun &amp; akses</span><i class="fa-solid fa-chevron-right"></i><span class="adm-crumb-title">Users</span></div>
+
           <div class="admin-panel" data-admin-panel="lapops">
           <div class="mini-card flex flex-col gap-3 mb-3" id="asstCfgCard">
             <div>

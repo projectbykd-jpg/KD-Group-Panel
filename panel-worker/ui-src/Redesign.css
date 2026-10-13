@@ -1589,33 +1589,48 @@ th.ai-sel, td.ai-sel { width: 36px; padding-right: 0 !important; }
 }
 
 /* ============================================================
-   13. ADMIN — menu atas berkelompok (semua nama selalu terlihat, sekali klik)
-   Tombol tetap .admin-tab + data-admin-tab, jadi switchAdminPanel() & loader
-   panel tidak berubah. Grup turun ke baris berikutnya bila layar sempit
-   (tidak ada mode ikon-saja, tidak ada geser samping).
+   13. ADMIN — menu kiri bergrup (pengganti 9 tab sebaris)
+   Hanya tata letak: tombol tetap .admin-tab + data-admin-tab, jadi
+   switchAdminPanel() dan semua loader panel tidak berubah.
    ============================================================ */
-#admin-page .adm-shell { display: flex; flex-direction: column; gap: 18px; }
-#admin-page .adm-nav { display: flex; flex-wrap: wrap; gap: 8px; }
-#admin-page .adm-nav-group {
-  display: flex; flex-direction: column; gap: 3px; padding: 5px;
-  background: var(--ui-surface-2); border: 1px solid var(--ui-line); border-radius: 10px;
+#admin-page .adm-shell { display: grid; grid-template-columns: 228px minmax(0, 1fr); gap: 20px; align-items: start; }
+#admin-page .adm-nav {
+  position: sticky; top: 80px; display: flex; flex-direction: column; gap: 14px; padding: 12px 10px;
+  background: var(--ui-surface-2); border: 1px solid var(--ui-line); border-radius: var(--ui-radius);
 }
-#admin-page .adm-nav-label { padding: 0 6px; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ui-text-3); }
-#admin-page .adm-nav-items { display: flex; flex-wrap: wrap; gap: 2px; }
+#admin-page .adm-nav-group { display: flex; flex-direction: column; gap: 2px; }
+#admin-page .adm-nav-group + .adm-nav-group { padding-top: 12px; border-top: 1px solid var(--ui-line); }
+#admin-page .adm-nav-label { padding: 0 10px 6px; font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ui-text-3); }
 #admin-page .adm-nav .admin-tab {
-  display: inline-flex !important; align-items: center; gap: 7px; margin: 0 !important; padding: 7px 10px !important;
-  border: 0 !important; border-radius: 7px !important; background: transparent !important;
-  color: var(--ui-text-2) !important; font-size: 13px !important; white-space: nowrap; transition: background .15s ease, color .15s ease;
+  display: flex !important; align-items: center; gap: 11px; width: 100%; margin: 0 !important; padding: 8px 10px !important;
+  text-align: left; white-space: normal; border: 0 !important; border-left: 2px solid transparent !important; border-radius: 8px !important;
+  background: transparent !important; color: var(--ui-text-2) !important; font-size: 13px !important; transition: background .15s ease, color .15s ease;
 }
-#admin-page .adm-nav .admin-tab > i { font-size: 13px !important; color: var(--ui-text-3) !important; }
+#admin-page .adm-nav .admin-tab > i { width: 18px; flex: none; text-align: center; color: var(--ui-text-3) !important; }
 #admin-page .adm-nav .admin-tab:hover { background: var(--ui-surface-3) !important; color: var(--ui-text) !important; }
-#admin-page .adm-nav .admin-tab.active { background: var(--ui-accent) !important; color: var(--ui-on-accent) !important; }
-#admin-page .adm-nav .admin-tab.active > i { color: var(--ui-on-accent) !important; }
-#admin-page .adm-nav .ai-badge { margin-left: 2px; }
+#admin-page .adm-nav .admin-tab.active { background: rgba(var(--ui-accent-rgb), .11) !important; border-left-color: var(--ui-accent) !important; color: var(--ui-text) !important; }
+#admin-page .adm-nav .admin-tab.active > i { color: var(--ui-accent) !important; }
+#admin-page .adm-nav .ai-badge { margin-left: auto; flex: none; }
+.adm-nav-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
 .adm-nav-text b { font-weight: 600; color: inherit; }
-.adm-nav-text small { display: none; }
+.adm-nav-text small { margin-top: 1px; font-size: 11px; font-weight: 400; color: var(--ui-text-3); }
+#admin-page .adm-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+#admin-page .adm-crumb { display: flex; align-items: center; gap: 8px; min-height: 20px; font-size: 12px; color: var(--ui-text-3); }
+#admin-page .adm-crumb i { font-size: 9px; }
+#admin-page .adm-crumb-title { font-weight: 600; color: var(--ui-text); }
 #admin-page .admin-tab-select { display: none; }
-@media (max-width: 720px) {
+/* Layar menengah (laptop 1366/1440): menu jadi deretan ikon saja (nama tampil di tooltip) supaya tabel lebar tetap muat */
+@media (min-width: 1101px) and (max-width: 1499px) {
+  #admin-page .adm-shell { grid-template-columns: 60px minmax(0, 1fr); gap: 16px; }
+  #admin-page .adm-nav { padding: 8px 6px; gap: 8px; }
+  #admin-page .adm-nav-label, #admin-page .adm-nav .adm-nav-text { display: none; }
+  #admin-page .adm-nav-group + .adm-nav-group { padding-top: 8px; }
+  #admin-page .adm-nav .admin-tab { position: relative; justify-content: center; padding: 10px 0 !important; }
+  #admin-page .adm-nav .admin-tab > i { width: auto; font-size: 15px !important; }
+  #admin-page .adm-nav .ai-badge { position: absolute; top: 2px; right: 2px; margin: 0; }
+}
+@media (max-width: 1100px) {
+  #admin-page .adm-shell { grid-template-columns: minmax(0, 1fr); }
   #admin-page .adm-nav { display: none; }
   #admin-page .admin-tab-select { display: block; min-height: 44px; padding: 0 12px; font-size: 13px; }
 }
