@@ -286,7 +286,7 @@ const ROUTES: Record<string, Handler> = {
 
 	// wd listed -- lihat src/lib/wd-listed.ts
 	wdListedSync: (env, b) => wdListedSync(env, s(b.token), b.rows),
-	wdListedGetList: (env, b) => wdListedGetList(env, s(b.token)),
+	wdListedGetList: (env, b) => wdListedGetList(env, s(b.token), b.rev),
 	wdListedCheck: (env, b) => wdListedCheck(env, s(b.token), rowId(b.id)),
 	wdListedRemove: (env, b) => wdListedRemove(env, s(b.token), rowId(b.id)),
 

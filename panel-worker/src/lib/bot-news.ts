@@ -125,6 +125,8 @@ async function ensureNewsCategoryColumnsOnce(env: Env): Promise<void> {
 		// Index tambahan utk jalur Facebook Langsung (pilih artikel belum diposting) & "Terpopuler".
 		`CREATE INDEX IF NOT EXISTS ix_news_fb ON news_article(fb_direct_posted_at, id)`,
 		`CREATE INDEX IF NOT EXISTS ix_news_views ON news_article(views DESC, id DESC)`,
+		// jumlah posting Blogger hari ini (tiap putaran bot): rentang posted_at, bukan membaca semua artikel Blogger
+		`CREATE INDEX IF NOT EXISTS ix_news_status_posted ON news_article(status, posted_at)`,
 	]) {
 		const alt = /^ALTER TABLE (\w+) ADD COLUMN (\w+)/.exec(stmt);
 		if (alt) {
@@ -143,8 +145,14 @@ async function ensureNewsCategoryColumnsOnce(env: Env): Promise<void> {
 	// Sekarang pemilik tegas minta 2 jalur ini TIDAK BOLEH dobel -- artikel yang
 	// posting ke Blogger TIDAK tampil di situs sendiri. Bersihkan sisa dari
 	// backfill lama itu (idempotent: no-op begitu semuanya sudah bersih).
+	// SEKALI saja (penanda di bot_kv): dulu jalan di SETIAP cold start + tiap putaran turbo dan membaca semua artikel
+	// Blogger tiap kali -- ikut menghabiskan kuota baca Turso yang lalu memblokir semua baca (17 Okt 2026).
 	try {
-		await getTurso(env).prepare(`UPDATE news_article SET site_posted_at = '' WHERE status = 'posted' AND site_posted_at != ''`).run();
+		const done = await getTurso(env).prepare(`SELECT v FROM bot_kv WHERE k = 'mig_site_posted_cleanup'`).first<{ v: string }>();
+		if (!done) {
+			await getTurso(env).prepare(`UPDATE news_article SET site_posted_at = '' WHERE status = 'posted' AND site_posted_at != ''`).run();
+			await getTurso(env).prepare(`INSERT OR REPLACE INTO bot_kv (k, v) VALUES ('mig_site_posted_cleanup', '1')`).run();
+		}
 	} catch {
 		/* abaikan */
 	}
@@ -1506,10 +1514,11 @@ export async function newsProcessOne(
 	}
 }
 
+const nextDayKey = (day: string): string => new Date(Date.parse(day + "T00:00:00Z") + 86_400_000).toISOString().slice(0, 10);
 async function postedToday(env: Env): Promise<number> {
 	const r = await getTurso(env)
-		.prepare(`SELECT COUNT(*) AS c FROM news_article WHERE status='posted' AND substr(posted_at,1,10) = ?`)
-		.bind(todayKey())
+		.prepare(`SELECT COUNT(*) AS c FROM news_article WHERE status='posted' AND posted_at >= ? AND posted_at < ?`)
+		.bind(todayKey(), nextDayKey(todayKey()))
 		.first<{ c: number }>();
 	return Number(r?.c ?? 0);
 }
@@ -2016,6 +2025,34 @@ export async function botNewsSnapshot(env: Env) {
 // (status='site') meski belum/tidak pernah diposting ke Blogger. Tetap tidak
 // pernah menampilkan artikel 'new'/'error' yang isinya masih mentah/gagal.
 // ---------------------------------------------------------------------------
+// Jumlah artikel per kategori untuk pagination situs publik, disimpan 5 menit (cache tepi + memori isolate). Beranda situs
+// memanggil ±10 daftar sekaligus (terbaru, per kategori, ...) dan dulu SETIAP daftar menghitung ulang SELURUH artikel tayang
+// tiap cache halaman habis -- ikut menghabiskan kuota baca Turso yang lalu memblokir semua baca (17 Okt 2026).
+const COUNT_TTL_MS = 300_000;
+const countMemo = new Map<string, { c: number; at: number }>();
+export function resetNewsCountCache(): void {
+	countMemo.clear();
+}
+async function cachedCount(cat: string, query: () => Promise<{ c: number } | null>): Promise<{ c: number }> {
+	const k = cat || "*";
+	const m = countMemo.get(k);
+	if (m && Date.now() - m.at < COUNT_TTL_MS) return { c: m.c };
+	const cache = (globalThis as unknown as { caches?: { default: Cache } }).caches?.default;
+	const ck = "https://panel-cache.internal/news-count/" + encodeURIComponent(k);
+	if (cache) {
+		const hit = await cache.match(ck).catch(() => undefined);
+		const v = hit ? Number(await hit.text()) : NaN;
+		if (Number.isFinite(v)) {
+			countMemo.set(k, { c: v, at: Date.now() });
+			return { c: v };
+		}
+	}
+	const c = Number((await query())?.c ?? 0);
+	countMemo.set(k, { c, at: Date.now() });
+	if (cache) await cache.put(ck, new Response(String(c), { headers: { "cache-control": `public, max-age=${COUNT_TTL_MS / 1000}` } })).catch(() => {});
+	return { c };
+}
+
 export async function publicNewsList(env: Env, category: string, page: number, pageSize: number) {
 	await ensureNewsCategoryColumns(env);
 	const size = Math.min(30, Math.max(1, pageSize || 20));
@@ -2033,7 +2070,7 @@ export async function publicNewsList(env: Env, category: string, page: number, p
 			)
 			.bind(...args, size, offset)
 			.all<{ id: number; title: string; excerpt: string; image_url: string; category: string; source: string; posted_at: string }>(),
-		getTurso(env).prepare(`SELECT COUNT(*) AS c FROM news_article ${where}`).bind(...args).first<{ c: number }>(),
+		cachedCount(cat, () => getTurso(env).prepare(`SELECT COUNT(*) AS c FROM news_article ${where}`).bind(...args).first<{ c: number }>()),
 	]);
 	const rows = rowsRes.results ?? [];
 	const total = Number(totalRow?.c ?? 0);
@@ -2178,13 +2215,25 @@ export async function publicNewsRandom(env: Env, category: string, limit: number
 	const cat = category && (NEWS_CATEGORIES as readonly string[]).includes(category) ? category : "";
 	const where = cat ? `WHERE site_posted_at != '' AND category=?` : `WHERE site_posted_at != ''`;
 	const args = cat ? [cat] : [];
-	const rows =
-		(
-			await getTurso(env)
-				.prepare(`SELECT id, title, image_url, category FROM news_article ${where} ORDER BY RANDOM() LIMIT ?`)
-				.bind(...args, n)
-				.all<{ id: number; title: string; image_url: string; category: string }>()
-		).results ?? [];
+	// Acak TANPA ORDER BY RANDOM(): itu membaca SELURUH artikel tayang tiap panggilan (kuota baca Turso, 17 Okt 2026).
+	// Ambil id acak di rentang id tabel, lalu baris tayang pertama mulai dari id itu (pencarian rowid -> beberapa baris saja).
+	const db = getTurso(env);
+	// MIN/MAX terpisah = pencarian ujung rowid (1 baris); digabung dalam satu SELECT malah memindai seluruh index.
+	const span = await db
+		.prepare(`SELECT (SELECT MIN(id) FROM news_article) AS lo, (SELECT MAX(id) FROM news_article) AS hi`)
+		.first<{ lo: number | null; hi: number | null }>();
+	const lo = Number(span?.lo ?? 0), hi = Number(span?.hi ?? 0);
+	if (!hi) return { success: true, articles: [] };
+	const picks = Array.from({ length: n * 2 }, () => lo + Math.floor(Math.random() * (hi - lo + 1)));
+	// unary "+" mematikan index kolom filter supaya SQLite menelusuri rowid dari id acak (bukan memindai index kategori/tayang)
+	const pickWhere = cat ? `WHERE +site_posted_at != '' AND +category = ?` : `WHERE +site_posted_at != ''`;
+	const one = `SELECT * FROM (SELECT id, title, image_url, category FROM news_article ${pickWhere} AND id >= ? ORDER BY id LIMIT 1)`;
+	const res = await db
+		.prepare(picks.map(() => one).join(" UNION ALL "))
+		.bind(...picks.flatMap((p) => [...args, p]))
+		.all<{ id: number; title: string; image_url: string; category: string }>();
+	const seen = new Set<number>();
+	const rows = (res.results ?? []).filter((r) => !seen.has(Number(r.id)) && seen.add(Number(r.id))).slice(0, n);
 	return { success: true, articles: rows };
 }
 

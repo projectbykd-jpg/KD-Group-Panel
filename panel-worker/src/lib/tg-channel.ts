@@ -121,13 +121,18 @@ export async function tgChannelRun(env: Env, opts: { force?: boolean } = {}): Pr
 	await ensureNewsCategoryColumns(env);
 	const db = getTurso(env);
 	if (!force) {
-		const last = await db.prepare(`SELECT MAX(tg_posted_at) AS m FROM news_article WHERE tg_posted_at LIKE '20%'`).first<{ m: string | null }>();
+		// Rentang (bukan LIKE/substr) supaya memakai index ix_news_tg: dulu kedua query ini membaca SELURUH tabel artikel tiap
+		// 5 menit -- ikut menghabiskan kuota baca Turso yang lalu memblokir semua baca (17 Okt 2026).
+		const last = await db
+			.prepare(`SELECT tg_posted_at AS m FROM news_article WHERE tg_posted_at >= '20' AND tg_posted_at < '21' ORDER BY tg_posted_at DESC LIMIT 1`)
+			.first<{ m: string | null }>();
 		const lastMs = last?.m ? parseWib(last.m) : 0;
 		// Toleransi 90 dtk: cron berdetak tiap 5 menit dan jam posting tercatat beberapa detik SETELAH detak sebelumnya, jadi tanpa
 		// toleransi jeda 5 menit selalu "kurang sedikit" dan posting baru jalan di detak berikutnya (efektif 10 menit).
 		if (lastMs && Date.now() - lastMs < (await getSys(env, "sys_tgch_gap_min")) * 60_000 - 90_000) return { posted: 0, message: "Menunggu jeda antar posting." };
 	}
-	const done = await db.prepare(`SELECT COUNT(*) AS c FROM news_article WHERE substr(tg_posted_at,1,10) = ? AND tg_posted_at LIKE '20%'`).bind(wibToday()).first<{ c: number }>();
+	const today = wibToday();
+	const done = await db.prepare(`SELECT COUNT(*) AS c FROM news_article WHERE tg_posted_at >= ? AND tg_posted_at < ?`).bind(today, nextDay(today)).first<{ c: number }>();
 	if (Number(done?.c ?? 0) >= (await getSys(env, "sys_tgch_daily_cap"))) return { posted: 0, message: "Batas posting channel hari ini tercapai." };
 	const cutoff = wibCutoff(await getSys(env, "sys_tgch_max_age_h"));
 	const row = await db
@@ -188,4 +193,9 @@ export async function tgChannelTest(env: Env, chatIdInput = ""): Promise<{ ok: b
 	const r = await sendTelegram("✅ Tes dari panel KD-Group: bot terhubung ke channel ini dan siap memposting berita otomatis.", { token, chatId });
 	if (r === "Terkirim") return { ok: true, message: "Pesan uji terkirim ke channel. Cek channel Anda." };
 	return { ok: false, message: explainTgError(r.split(token).join("***")) };
+}
+
+/** 'YYYY-MM-DD' berikutnya (batas atas rentang satu hari; nilai tg_posted_at 'YYYY-MM-DD HH:MM:SS' < hari berikutnya). */
+export function nextDay(day: string): string {
+	return new Date(Date.parse(day + "T00:00:00Z") + 86_400_000).toISOString().slice(0, 10);
 }

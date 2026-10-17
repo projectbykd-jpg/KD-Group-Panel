@@ -265,8 +265,9 @@ export async function scanFinalFailures(env: Env): Promise<number> {
 	}
 	if (wantToto) {
 		const r = await db
-			.prepare(`SELECT id, website, game, market, number, status, detail, attempts, row_at FROM toto_macau_log WHERE ((status = 'FAILED' AND attempts >= ?) OR status = 'CONFLICT') AND tg_sent = 0 AND updated_at >= ? ORDER BY id ASC LIMIT 20`)
-			.bind(TOTO_MAX_ATTEMPTS, since)
+			// bentuk status IN + rentang updated_at -> memakai index ix_toto_log_state (dulu memindai seluruh log tiap 5 menit)
+			.prepare(`SELECT id, website, game, market, number, status, detail, attempts, row_at FROM toto_macau_log WHERE status IN ('FAILED', 'CONFLICT') AND updated_at >= ? AND (status = 'CONFLICT' OR attempts >= ?) AND tg_sent = 0 ORDER BY id ASC LIMIT 20`)
+			.bind(since, TOTO_MAX_ATTEMPTS)
 			.all<Record<string, unknown>>()
 			.catch(() => ({ results: [] as Record<string, unknown>[] }));
 		const ids: number[] = [];

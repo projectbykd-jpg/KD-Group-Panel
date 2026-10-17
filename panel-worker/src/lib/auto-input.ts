@@ -638,10 +638,12 @@ export async function dueRetryJobs(env: Env, maxRetries: number, gapMin: number,
 	const res = await getTurso(env)
 		.prepare(
 			`SELECT j.* FROM auto_input_job j JOIN auto_input_config c ON c.username = j.username AND c.enabled = 1
-			 WHERE j.status = 'FAILED' AND j.hidden = 0 AND j.attempts < ? AND j.updated_at <= ? AND j.created_at >= ? AND NOT ${noRetrySql("j")}
+			 WHERE j.status = 'FAILED' AND j.updated_at >= ? AND j.updated_at <= ? AND j.hidden = 0 AND j.attempts < ? AND j.created_at >= ? AND NOT ${noRetrySql("j")}
 			 ORDER BY j.updated_at ASC, j.id ASC LIMIT ?`,
 		)
-		.bind(maxRetries, tsPlusMinutes(-gapMin), tsPlusMinutes(-RETRY_WINDOW_MIN), limit)
+		// batas bawah updated_at (= awal jendela; updated_at >= created_at selalu) membuat rentang index ix_auto_input_job_retry
+		// sempit: dulu tiap menit membaca SEMUA job GAGAL selama masa simpan riwayat (kuota baca Turso, 17 Okt 2026).
+		.bind(tsPlusMinutes(-RETRY_WINDOW_MIN), tsPlusMinutes(-gapMin), maxRetries, tsPlusMinutes(-RETRY_WINDOW_MIN), limit)
 		.all<Record<string, unknown>>();
 	return (res.results ?? []).map(rowToJob);
 }

@@ -97,6 +97,13 @@ async function ensureTablesOnce(env: Env): Promise<void> {
 		livechat_template: [["owner", "TEXT NOT NULL DEFAULT ''"]],
 		livechat_log: [["owner", "TEXT NOT NULL DEFAULT ''"]],
 	});
+	// Index per pemilik: userscript menarik sesi + template tiap 5 dtk dan menyinkron Kotak Masuk; tanpa index setiap
+	// panggilan memindai SELURUH tabel (ikut menghabiskan kuota baca Turso yang lalu memblokir semua baca, 17 Okt 2026).
+	await db.batch([
+		db.prepare(`CREATE INDEX IF NOT EXISTS ix_livechat_session_owner ON livechat_session(owner, bot_enabled)`),
+		db.prepare(`CREATE INDEX IF NOT EXISTS ix_livechat_template_owner ON livechat_template(owner, active, sort_order)`),
+		db.prepare(`CREATE INDEX IF NOT EXISTS ix_livechat_log_owner ON livechat_log(owner, id)`),
+	] as never);
 }
 
 export interface LivechatSessionRow {

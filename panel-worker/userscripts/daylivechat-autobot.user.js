@@ -218,6 +218,8 @@
 
 	// ===================== Data chat (REST resmi DayLiveChat, dari browser CS sendiri) =====================
 	const inboxCache = new Map();
+	let lastSyncSig = "";
+	let lastSyncAt = 0;
 
 	async function refreshInbox() {
 		const token = getToken();
@@ -240,7 +242,15 @@
 			// Kirim daftar ini APA ADANYA (termasuk kalau kosong) -- panel memakai
 			// daftar ini sbg sumber kebenaran Kotak Masuk saat ini utk membuang
 			// sesi manual yang sudah ditutup/diarsipkan, bukan cuma buat nambah.
-			await panelApi("livechatBotSync", { rows: syncRows });
+			// Kotak Masuk sama persis dengan sinkron terakhir -> cukup tiap 30 dtk (tanda "bot hidup" untuk panel);
+			// dulu dikirim tiap 5 dtk walau tidak berubah (boros kuota database panel).
+			const sig = JSON.stringify(syncRows);
+			if (sig === lastSyncSig && Date.now() - lastSyncAt < 30000) return;
+			const r = await panelApi("livechatBotSync", { rows: syncRows });
+			if (r && r.success) {
+				lastSyncSig = sig;
+				lastSyncAt = Date.now();
+			}
 		} catch (e) {
 			log("Sync inbox gagal: " + (e && e.message ? e.message : e));
 		}
