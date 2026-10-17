@@ -12,6 +12,8 @@ vi.mock("@libsql/client/web", () => ({ createClient: ({ url }: { url: string }) 
 
 import { getTurso, onTursoFailover, resetTursoForTest, tursoStatus } from "../src/lib/turso";
 import { runSync } from "../scripts/turso-sync";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const BLOCKED = "BLOCKED: Operation was blocked: SQL read operations are forbidden (reads are blocked, do you need to upgrade your plan?)";
 let dir: string;
@@ -48,12 +50,12 @@ beforeEach(async () => {
 	resetTursoForTest();
 	await primary.batch(
 		[
-			`CREATE TABLE news_article (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'new')`,
-			`CREATE INDEX ix_news_status ON news_article(status, id)`,
-			`CREATE TABLE bot_kv (k TEXT PRIMARY KEY, v TEXT NOT NULL DEFAULT '')`,
-			`INSERT INTO news_article (title) VALUES ('a'), ('b'), ('c')`,
-			`DELETE FROM news_article WHERE id = 2`, // celah id: salinan harus mempertahankan id 1 & 3
-			`INSERT INTO bot_kv (k, v) VALUES ('daily_cap', '5')`,
+			`CREATE TABLE app_item (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'new')`,
+			`CREATE INDEX ix_app_status ON app_item(status, id)`,
+			`CREATE TABLE app_kv (k TEXT PRIMARY KEY, v TEXT NOT NULL DEFAULT '')`,
+			`INSERT INTO app_item (title) VALUES ('a'), ('b'), ('c')`,
+			`DELETE FROM app_item WHERE id = 2`, // celah id: salinan harus mempertahankan id 1 & 3
+			`INSERT INTO app_kv (k, v) VALUES ('daily_cap', '5')`,
 		],
 		"write",
 	);
@@ -64,20 +66,20 @@ afterEach(() => {
 	rmSync(dir, { recursive: true, force: true });
 });
 
-const ids = async (c: Client) => (await c.execute(`SELECT id, title, status FROM news_article ORDER BY id`)).rows.map((r) => `${r.id}:${r.title}:${r.status}`);
+const ids = async (c: Client) => (await c.execute(`SELECT id, title, status FROM app_item ORDER BY id`)).rows.map((r) => `${r.id}:${r.title}:${r.status}`);
 
 describe("sinkron utama -> cadangan", () => {
 	it("menyalin skema, index & isi dengan id IDENTIK; kedua kalinya hanya menulis yang berubah", async () => {
 		const r1 = await runSync({ primary, spare, mode: "sync", exclude: [] });
 		expect(await ids(spare)).toEqual(["1:a:new", "3:c:new"]);
-		expect((await spare.execute(`SELECT name FROM sqlite_master WHERE name = 'ix_news_status'`)).rows.length).toBe(1);
-		expect(r1.tables.find((t) => t.name === "news_article")).toMatchObject({ written: 2, deleted: 0 });
-		await primary.batch([`UPDATE news_article SET status = 'posted' WHERE id = 3`, `DELETE FROM news_article WHERE id = 1`, `INSERT INTO news_article (title) VALUES ('d')`], "write");
-		await primary.execute(`ALTER TABLE news_article ADD COLUMN views INTEGER NOT NULL DEFAULT 0`);
+		expect((await spare.execute(`SELECT name FROM sqlite_master WHERE name = 'ix_app_status'`)).rows.length).toBe(1);
+		expect(r1.tables.find((t) => t.name === "app_item")).toMatchObject({ written: 2, deleted: 0 });
+		await primary.batch([`UPDATE app_item SET status = 'posted' WHERE id = 3`, `DELETE FROM app_item WHERE id = 1`, `INSERT INTO app_item (title) VALUES ('d')`], "write");
+		await primary.execute(`ALTER TABLE app_item ADD COLUMN views INTEGER NOT NULL DEFAULT 0`);
 		const r2 = await runSync({ primary, spare, mode: "sync", exclude: [] });
 		expect(await ids(spare)).toEqual(["3:c:posted", "4:d:new"]);
-		expect(r2.tables.find((t) => t.name === "news_article")).toMatchObject({ written: 2, deleted: 1 });
-		expect((await spare.execute(`SELECT views FROM news_article WHERE id = 4`)).rows[0].views).toBe(0); // kolom baru ikut
+		expect(r2.tables.find((t) => t.name === "app_item")).toMatchObject({ written: 2, deleted: 1 });
+		expect((await spare.execute(`SELECT views FROM app_item WHERE id = 4`)).rows[0].views).toBe(0); // kolom baru ikut
 		expect((await spare.execute(`SELECT v FROM kd_failover WHERE k = 'synced_at'`)).rows.length).toBe(1);
 	});
 });
@@ -85,12 +87,12 @@ describe("sinkron utama -> cadangan", () => {
 describe("panel pindah ke cadangan saat utama kena kuota", () => {
 	it("tanpa cadangan diatur: galat kuota diteruskan seperti dulu", async () => {
 		primaryBlocked = true;
-		await expect(getTurso(env(false)).prepare(`SELECT * FROM bot_kv`).all()).rejects.toThrow(/BLOCKED/);
+		await expect(getTurso(env(false)).prepare(`SELECT * FROM app_kv`).all()).rejects.toThrow(/BLOCKED/);
 	});
 
 	it("cadangan BELUM pernah disalin: TIDAK pindah (spare kosong akan merusak data), pesannya jelas", async () => {
 		primaryBlocked = true;
-		await expect(getTurso(env()).prepare(`SELECT * FROM bot_kv`).all()).rejects.toThrow(/belum pernah disalin/);
+		await expect(getTurso(env()).prepare(`SELECT * FROM app_kv`).all()).rejects.toThrow(/belum pernah disalin/);
 		expect((await tursoStatus(env())).active).toBe("primary");
 	});
 
@@ -100,15 +102,15 @@ describe("panel pindah ke cadangan saat utama kena kuota", () => {
 		onTursoFailover(hook);
 		primaryBlocked = true;
 		const db = getTurso(env());
-		const r = await db.prepare(`SELECT v FROM bot_kv WHERE k = ?`).bind("daily_cap").first<{ v: string }>();
+		const r = await db.prepare(`SELECT v FROM app_kv WHERE k = ?`).bind("daily_cap").first<{ v: string }>();
 		expect(r?.v).toBe("5");
 		expect(hook).toHaveBeenCalledTimes(1);
 		expect((await tursoStatus(env())).active).toBe("spare");
 		// tulis setelah pindah: ke cadangan, id melanjutkan id yang sama dengan utama (tidak bertabrakan)
-		const ins = await db.prepare(`INSERT INTO news_article (title) VALUES (?)`).bind("baru").run();
+		const ins = await db.prepare(`INSERT INTO app_item (title) VALUES (?)`).bind("baru").run();
 		expect(ins.meta.last_row_id).toBe(4);
 		const before = primaryCalls;
-		await db.prepare(`SELECT COUNT(*) AS n FROM news_article`).first();
+		await db.prepare(`SELECT COUNT(*) AS n FROM app_item`).first();
 		expect(primaryCalls).toBe(before); // utama tidak disentuh lagi
 		expect(hook).toHaveBeenCalledTimes(1);
 	});
@@ -123,7 +125,7 @@ describe("panel pindah ke cadangan saat utama kena kuota", () => {
 		await runSync({ primary, spare, mode: "sync", exclude: [] });
 		primaryBlocked = true;
 		const db = getTurso(env());
-		await db.prepare(`INSERT INTO news_article (title) VALUES ('saat-gangguan')`).run();
+		await db.prepare(`INSERT INTO app_item (title) VALUES ('saat-gangguan')`).run();
 		primaryBlocked = false; // kuota pulih
 		const skip = await runSync({ primary, spare, mode: "sync", exclude: [] });
 		expect(skip.skipped).toMatch(/dilewati/);
@@ -137,5 +139,47 @@ describe("panel pindah ke cadangan saat utama kena kuota", () => {
 		expect((await tursoStatus(env())).active).toBe("primary");
 		const again = await runSync({ primary, spare, mode: "failback", exclude: [] });
 		expect(again.skipped).toMatch(/tidak diperlukan/); // failback dua kali tidak menimpa utama
+	});
+});
+
+describe("mulai-baru di cadangan kosong (utama diblokir): news tetap di utama, sisanya jalan di cadangan", () => {
+	const MIG = fileURLToPath(new URL("../../migration/", import.meta.url).href);
+	const readSql = (f: string): string => readFileSync(MIG + f, "utf8");
+
+	it("fresh: skema Lap/Invest dibuat di cadangan TANPA membaca utama; panel pindah; news ditolak (tetap utama); non-news jalan; sinkron & failback dikunci", async () => {
+		primaryBlocked = true; // utama mati total selama proses
+		const r = await runSync({ spare, mode: "fresh", exclude: [], readSql });
+		expect(r.skipped).toBeUndefined();
+		expect(primaryCalls).toBe(0); // utama tidak disentuh sama sekali
+		const names = (await spare.execute(`SELECT name FROM sqlite_master WHERE type = 'table'`)).rows.map((x) => String(x.name));
+		expect(names).toEqual(expect.arrayContaining(["lap_credentials", "lap_job", "invest_config", "invest_raw", "kd_failover"]));
+		expect(names).not.toContain("news_article");
+
+		resetTursoForTest();
+		dbs.map.set("libsql://primary", blockable(primary));
+		dbs.map.set("libsql://spare", spare);
+		const db = getTurso(env());
+		expect((await tursoStatus(env())).active).toBe("spare");
+		await db.prepare(`INSERT INTO lap_credentials (username, link_admin) VALUES ('op', 'x')`).run(); // non-news -> cadangan
+		expect((await db.prepare(`SELECT link_admin FROM lap_credentials WHERE username = 'op'`).first<{ link_admin: string }>())?.link_admin).toBe("x");
+		const before = primaryCalls;
+		await expect(db.prepare(`SELECT * FROM news_article`).all()).rejects.toThrow(/BLOCKED/); // news tetap ke utama
+		await expect(db.prepare(`SELECT k, v FROM bot_kv`).all()).rejects.toThrow(/BLOCKED/);
+		expect(primaryCalls).toBeGreaterThan(before);
+		expect((await spare.execute(`SELECT name FROM sqlite_master WHERE name IN ('news_article', 'bot_kv')`)).rows.length).toBe(0); // tidak pernah dibuat di cadangan
+
+		const again = await runSync({ spare, mode: "fresh", exclude: [], readSql });
+		expect(again.skipped).toMatch(/sudah pernah/);
+		primaryBlocked = false;
+		expect((await runSync({ primary, spare, mode: "sync", exclude: [] })).skipped).toMatch(/KOSONG/);
+		expect((await runSync({ primary, spare, mode: "failback", exclude: [] })).skipped).toMatch(/KOSONG/);
+	});
+
+	it("tanpa mulai-baru, news tetap tidak pernah dilayani cadangan walau sudah disalin", async () => {
+		await runSync({ primary, spare, mode: "sync", exclude: [] });
+		primaryBlocked = true;
+		const db = getTurso(env());
+		await expect(db.prepare(`SELECT * FROM news_article`).all()).rejects.toThrow(/BLOCKED/);
+		expect(await db.prepare(`SELECT v FROM bot_kv`).all().catch(() => "err")).toBe("err");
 	});
 });
