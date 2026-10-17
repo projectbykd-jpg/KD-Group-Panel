@@ -22,6 +22,9 @@ import { botCfg, botCfgSet, botNewsRun } from "../src/lib/bot-news";
 const env = {
 	TURSO_URL: process.env.TURSO_URL,
 	TURSO_TOKEN: process.env.TURSO_TOKEN,
+	// cadangan (opsional): bila utama kena kuota dan panel sudah pindah, skrip ini ikut menulis ke cadangan (lib/turso.ts)
+	TURSO_SPARE_URL: process.env.TURSO_SPARE_URL,
+	TURSO_SPARE_TOKEN: process.env.TURSO_SPARE_TOKEN,
 } as any;
 
 const MAX_ROUNDS = Number(process.env.MAX_ROUNDS || 12);

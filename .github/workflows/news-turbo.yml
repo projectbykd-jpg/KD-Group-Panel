@@ -56,6 +56,8 @@ jobs:
         env:
           TURSO_URL: ${{ secrets.TURSO_URL }}
           TURSO_TOKEN: ${{ secrets.TURSO_TOKEN }}
+          TURSO_SPARE_URL: ${{ secrets.TURSO_SPARE_URL }}
+          TURSO_SPARE_TOKEN: ${{ secrets.TURSO_SPARE_TOKEN }}
           RUN_COUNT: ${{ github.event.inputs.count }}
           RUN_TARGET: ${{ github.event.inputs.target }}
           FULL_DRAIN: ${{ github.event.inputs.full }}

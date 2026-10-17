@@ -9,7 +9,7 @@ import { adminGetMasterData, adminSaveMasterData, shioMapGet, adminGetIntegratio
 import { assistantAsk, assistantClearGaps, assistantGetConfig, assistantModels, assistantSaveConfig, assistantStatus, assistantTest } from "./api/assistant";
 import { CORS_HEADERS, json } from "./lib/respond";
 import { loadSession, migrateKvSessionsOnce, pruneExpiredSessions } from "./lib/session";
-import { getTurso } from "./lib/turso";
+import { getTurso, onTursoFailover } from "./lib/turso";
 import { constEq } from "./lib/crypto";
 import { checkLogin, logout, resumeSession } from "./api/auth";
 import { deepHealth } from "./lib/health";
@@ -385,6 +385,21 @@ const ROUTES: Record<string, Handler> = {
 const INVEST_PUMP_ACTIONS = new Set(["investStartScan", "investContinueScan", "investGetStatus"]);
 
 installFetchGuard();
+// Turso utama kena kuota -> panel pindah ke database cadangan: catat di Error & Bug (+ Telegram admin) supaya pemilik tahu.
+onTursoFailover(async (env, reason) => {
+	await recordError(
+		env,
+		{
+			source: "cron",
+			level: "warn",
+			impact: "background",
+			loc: "turso-failover",
+			message: "Turso utama kena batas kuota — panel PINDAH ke database cadangan (spare). Kembalikan lewat workflow GitHub 'Turso sinkron cadangan' mode failback setelah utama pulih.",
+			detail: reason,
+		},
+		{ force: true },
+	);
+});
 
 export default {
 	async fetch(request, env, ctx): Promise<Response> {
