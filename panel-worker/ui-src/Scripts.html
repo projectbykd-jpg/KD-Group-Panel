@@ -2109,6 +2109,7 @@
     // berdasarkan WEBSITE yang sama, bukan cuma yang menambahkan.
     let wdListedRows = [];
     let wdListedTimer = null;
+    let wdListedRev = '', wdListedRevUser = null; // revisi daftar yang sudah dipegang (per akun)
     let wdListedSig = '';
 
     function pgaPendingConsoleScript() {
@@ -2393,12 +2394,14 @@
       google.script.run.withSuccessHandler(res => {
         wdListedBusy = false;
         if (!res || !res.success) return;
+        if (res.unchanged) return; // revisi sama -> server tidak membaca daftar (hemat kuota baca Turso)
+        wdListedRev = res.rev; wdListedRevUser = currentUser;
         const sig = JSON.stringify(res.rows || []);
         if (sig === wdListedSig && wdListedRows.length) return; // sama -> jangan bangun ulang tabel
         wdListedSig = sig;
         wdListedRows = res.rows || [];
         if (lapTblState['wd_listed']) { lapTblState['wd_listed'].rows = wdListedRows; lapTblRepaint('wd_listed'); }
-      }).withFailureHandler(() => { wdListedBusy = false; }).wdListedGetList(currentSessionToken);
+      }).withFailureHandler(() => { wdListedBusy = false; }).wdListedGetList(currentSessionToken, wdListedRevUser === currentUser ? wdListedRev : '');
     }
     function wdListedCheckClick(id, btn) {
       if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }

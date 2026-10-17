@@ -1,6 +1,6 @@
 // Endpoint publik menu "WD LISTED" (lihat src/lib/wd-listed.ts untuk arsitektur).
 import { requireSession } from "./auth";
-import { wdListedAdd, wdListedCheckStatus, wdListedDelete, wdListedList, WdListedInput } from "../lib/wd-listed";
+import { wdListedAdd, wdListedCheckStatus, wdListedDelete, wdListedList, wdListedRev, WdListedInput } from "../lib/wd-listed";
 
 function toInput(r: Record<string, unknown>): WdListedInput {
 	return {
@@ -22,10 +22,13 @@ export async function wdListedSync(env: Env, token: string, rows: unknown) {
 	return { success: true, added };
 }
 
-export async function wdListedGetList(env: Env, token: string) {
+/** `rev` = revisi yang sudah dipegang browser: sama dengan revisi sekarang -> balas `unchanged` tanpa membaca daftar. */
+export async function wdListedGetList(env: Env, token: string, rev?: unknown) {
 	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: "pga-pending" });
+	const current = await wdListedRev(env);
+	if (rev !== undefined && rev !== null && rev !== "" && Number(rev) === current) return { success: true, unchanged: true, rev: current };
 	const rows = await wdListedList(env, s.profile.websites || []);
-	return { success: true, rows };
+	return { success: true, rows, rev: current };
 }
 
 export async function wdListedCheck(env: Env, token: string, id: number) {

@@ -79,7 +79,7 @@ const ARG_MAP = {
 	pgaPendingSync: ["token", "rows"],
 	pgaPendingStatus: ["token"],
 	wdListedSync: ["token", "rows"],
-	wdListedGetList: ["token"],
+	wdListedGetList: ["token", "rev"],
 	wdListedCheck: ["token", "id"],
 	wdListedRemove: ["token", "id"],
 	lapGetConfig: ["token"],

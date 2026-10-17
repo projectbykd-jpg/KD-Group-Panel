@@ -176,8 +176,10 @@ describe("retensi & batas baris", () => {
 		ctx.db.prepare(`INSERT INTO settings (key, value) VALUES ('sys_errorlog_max_rows', '50')`).run();
 		resetSysCache();
 		await rec("pertama");
+		// tanggal relatif (kemarin WIB): tanggal tertulis mati sempat membuat tes ini gagal begitu lewat masa simpan log
+		const day = new Date(Date.now() + 7 * 3600_000 - 86_400_000).toISOString().slice(0, 10);
 		for (let i = 0; i < 60; i++) {
-			ctx.db.prepare(`INSERT INTO error_log (fp, source, message, first_at, last_at) VALUES (?, 'api', ?, '2026-10-01 00:00:00', ?)`).run("fp" + i, "m" + i, `2026-10-01 00:${String(i).padStart(2, "0")}:00`);
+			ctx.db.prepare(`INSERT INTO error_log (fp, source, message, first_at, last_at) VALUES (?, 'api', ?, ?, ?)`).run("fp" + i, "m" + i, `${day} 00:00:00`, `${day} 00:${String(i).padStart(2, "0")}:00`);
 		}
 		await pruneErrorLog(ctx.env);
 		expect(rows().length).toBe(50);

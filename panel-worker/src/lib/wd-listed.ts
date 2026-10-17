@@ -42,6 +42,10 @@ export interface WdListedInput {
 }
 
 let ensured = false;
+/** Hanya untuk test. */
+export function resetWdListedTableFlag(): void {
+	ensured = false;
+}
 async function ensureTable(env: Env): Promise<void> {
 	if (ensured) return;
 	await getTurso(env)
@@ -64,7 +68,22 @@ async function ensureTable(env: Env): Promise<void> {
 			)`,
 		)
 		.run();
+	await getTurso(env).prepare(`CREATE TABLE IF NOT EXISTS wd_listed_rev (k INTEGER PRIMARY KEY CHECK (k = 1), rev INTEGER NOT NULL DEFAULT 0)`).run();
 	ensured = true;
+}
+
+// Nomor revisi daftar: naik setiap ada tambah/ubah/hapus. Halaman PGA Pending memeriksa daftar tiap 8 dtk; dulu SETIAP
+// periksa membaca 1.000 baris (= ±10 juta baris/hari per tab terbuka -- ikut menghabiskan kuota baca Turso yang lalu
+// memblokir semua baca, 17 Okt 2026). Kini periksa membaca SATU baris revisi; daftar lengkap hanya diambil bila berubah.
+export async function wdListedRev(env: Env): Promise<number> {
+	await ensureTable(env);
+	const r = await getTurso(env).prepare(`SELECT rev FROM wd_listed_rev WHERE k = 1`).first<{ rev: number }>();
+	return Number(r?.rev ?? 0);
+}
+async function bumpRev(env: Env): Promise<void> {
+	await getTurso(env)
+		.prepare(`INSERT INTO wd_listed_rev (k, rev) VALUES (1, 1) ON CONFLICT(k) DO UPDATE SET rev = wd_listed_rev.rev + 1`)
+		.run();
 }
 
 function mapRow(row: Record<string, unknown>): WdListedRow {
@@ -157,6 +176,7 @@ export async function wdListedAdd(env: Env, addedBy: string, rows: WdListedInput
 			.run();
 		if (res.meta.changes > 0) added++;
 	}
+	if (added) await bumpRev(env);
 	return added;
 }
 
@@ -203,6 +223,7 @@ export async function wdListedCheckStatus(env: Env, id: number, websites: string
 	if (!status) throw new Error("Struk tidak dikenali (mungkin ref salah, atau format halaman berubah).");
 	const now = tsNow();
 	await db.prepare(`UPDATE wd_listed SET check_status = ?, check_date = ?, updated_at = ? WHERE id = ?`).bind(status, date, now, id).run();
+	await bumpRev(env);
 	return mapRow({ ...row, check_status: status, check_date: date, updated_at: now });
 }
 
@@ -213,4 +234,5 @@ export async function wdListedDelete(env: Env, id: number, websites: string[]): 
 	if (!row) return; // sudah terhapus -- anggap sukses
 	if (!hasWebsite(websites, String(row.website ?? ""))) throw new Error("Kamu tidak punya akses ke website " + row.website + ".");
 	await db.prepare(`DELETE FROM wd_listed WHERE id = ?`).bind(id).run();
+	await bumpRev(env);
 }

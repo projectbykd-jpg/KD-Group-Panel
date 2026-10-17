@@ -131,9 +131,13 @@ async function ensureTables(env: Env): Promise<void> {
 		)
 		.run();
 	await db.prepare(`CREATE INDEX IF NOT EXISTS ix_toto_log_slot ON toto_macau_log(website, game, slot_key)`).run();
+	// Peringatan (dipoll browser tiap 20 dtk per operator) & pindai notifikasi admin (tiap 5 menit) mencari baris
+	// FAILED/CONFLICT terbaru; tanpa index ini tiap panggilan memindai seluruh log (kuota baca Turso, 17 Okt 2026).
+	await db.prepare(`CREATE INDEX IF NOT EXISTS ix_toto_log_state ON toto_macau_log(status, updated_at)`).run();
 	await db
 		.prepare(`CREATE TABLE IF NOT EXISTS toto_macau_event (id INTEGER PRIMARY KEY AUTOINCREMENT, website TEXT NOT NULL DEFAULT '', ts TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT 'info', level TEXT NOT NULL DEFAULT 'INFO', msg TEXT NOT NULL DEFAULT '')`)
 		.run();
+	await db.prepare(`CREATE INDEX IF NOT EXISTS ix_toto_event_ts ON toto_macau_event(ts)`).run();
 	await db
 		.prepare(`CREATE TABLE IF NOT EXISTS toto_macau_dismissed (website TEXT NOT NULL, game TEXT NOT NULL, period INTEGER NOT NULL, at TEXT NOT NULL DEFAULT '', by TEXT NOT NULL DEFAULT '', PRIMARY KEY (website, game, period))`)
 		.run();
@@ -190,9 +194,9 @@ export async function pendingTotoAlerts(env: Env, websites: string[]): Promise<T
 	if (!ws.length) return [];
 	const res = await getTurso(env)
 		.prepare(
-			`SELECT * FROM toto_macau_log WHERE website IN (${ws.map(() => "?").join(",")}) AND ((status = 'FAILED' AND attempts >= ?) OR status = 'CONFLICT') AND alerted = 0 AND updated_at >= ? ORDER BY id ASC LIMIT 20`,
+			`SELECT * FROM toto_macau_log WHERE status IN ('FAILED', 'CONFLICT') AND updated_at >= ? AND (status = 'CONFLICT' OR attempts >= ?) AND alerted = 0 AND website IN (${ws.map(() => "?").join(",")}) ORDER BY id ASC LIMIT 20`,
 		)
-		.bind(...ws, TOTO_MAX_ATTEMPTS, tsPlusMinutes(-6 * 60))
+		.bind(tsPlusMinutes(-6 * 60), TOTO_MAX_ATTEMPTS, ...ws)
 		.all<Record<string, unknown>>();
 	return (res.results ?? []).map(toLog);
 }
