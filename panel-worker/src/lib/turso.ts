@@ -118,15 +118,20 @@ export async function tursoStatus(env: Env): Promise<{ active: TursoTarget; spar
 	return { active: st.active, spareConfigured: spareConfigured(env), spareSyncedAt: st.syncedAt, spareSince: st.since };
 }
 
+/** Tabel BOT News: SELALU di Turso utama, tidak pernah dipindah ke cadangan (perintah pemilik 17 Okt 2026: "spare tidak pernah
+ *  dipakai untuk news"). Saat utama diblokir, jalur news gagal apa adanya sedangkan fitur lain berjalan di cadangan. */
+const NEWS_TABLES_RE = /\b(news_article|news_source|bot_kv|ai_usage)\b/i;
+export const touchesNews = (sqls: string[]): boolean => sqls.some((q) => NEWS_TABLES_RE.test(q));
+
 /** Jalankan satu operasi di database yang aktif; utama kena kuota -> pindah ke spare (bila sudah disalin) lalu ulangi. */
-async function onActive<T>(env: Env, fn: (c: Client) => Promise<T>): Promise<T> {
+async function onActive<T>(env: Env, sqls: string[], fn: (c: Client) => Promise<T>): Promise<T> {
 	const st = await readState(env);
-	if (st.active === "spare") return withTransientRetry(() => fn(client(env, "spare")));
+	if (st.active === "spare" && !touchesNews(sqls)) return withTransientRetry(() => fn(client(env, "spare")));
 	try {
 		return await withTransientRetry(() => fn(client(env, "primary")));
 	} catch (e) {
 		const msg = String(e instanceof Error ? e.message : e);
-		if (!spareConfigured(env) || !TURSO_QUOTA_RE.test(msg)) throw e;
+		if (!spareConfigured(env) || !TURSO_QUOTA_RE.test(msg) || touchesNews(sqls)) throw e; // news tidak pernah ke cadangan
 		const now = await readState(env, true);
 		if (now.active !== "spare") {
 			if (!now.syncedAt) {
@@ -179,15 +184,15 @@ class TStmt {
 		return new TStmt(this.env, this.sql, args);
 	}
 	async run(): Promise<{ success: true; meta: { changes: number; last_row_id: number; duration: number } }> {
-		const rs = await onActive(this.env, (c) => c.execute({ sql: this.sql, args: clean(this.args) }));
+		const rs = await onActive(this.env, [this.sql], (c) => c.execute({ sql: this.sql, args: clean(this.args) }));
 		return { success: true, meta: { changes: rs.rowsAffected ?? 0, last_row_id: Number(rs.lastInsertRowid ?? 0), duration: 0 } };
 	}
 	async all<T = Record<string, unknown>>(): Promise<{ results: T[]; success: true; meta: Record<string, unknown> }> {
-		const rs = await onActive(this.env, (c) => c.execute({ sql: this.sql, args: clean(this.args) }));
+		const rs = await onActive(this.env, [this.sql], (c) => c.execute({ sql: this.sql, args: clean(this.args) }));
 		return { results: rs.rows as unknown as T[], success: true, meta: {} };
 	}
 	async first<T = Record<string, unknown>>(): Promise<T | null> {
-		const rs = await onActive(this.env, (c) => c.execute({ sql: this.sql, args: clean(this.args) }));
+		const rs = await onActive(this.env, [this.sql], (c) => c.execute({ sql: this.sql, args: clean(this.args) }));
 		return (rs.rows[0] as unknown as T) ?? null;
 	}
 }
@@ -198,7 +203,7 @@ class TDB {
 		return new TStmt(this.env, sql);
 	}
 	async batch(stmts: TStmt[]): Promise<{ success: true; meta: { changes: number; last_row_id: number } }[]> {
-		const rs = await onActive(this.env, (c) =>
+		const rs = await onActive(this.env, stmts.map((x) => x.sql), (c) =>
 			c.batch(
 				stmts.map((s) => ({ sql: s.sql, args: clean(s.args) })),
 				"write",

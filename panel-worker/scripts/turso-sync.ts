@@ -12,6 +12,8 @@
 // Env: TURSO_URL, TURSO_TOKEN (utama), TURSO_SPARE_URL, TURSO_SPARE_TOKEN (cadangan), MODE, TURSO_SYNC_EXCLUDE
 // (tabel dipisah koma yang tidak disalin; bawaan invest_raw = data mentah sementara scan Invest).
 import { createClient, type Client, type InValue } from "@libsql/client";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const MARKER = "kd_failover";
 const scrub = (v: string | undefined) => String(v ?? "").replace(/^﻿/, "").trim();
@@ -111,8 +113,21 @@ export async function copyDatabase(src: Client, dst: Client, exclude: string[], 
 	return out;
 }
 
-export async function runSync(opts: { primary: Client; spare: Client; mode: "sync" | "failback"; exclude: string[] }): Promise<SyncReport> {
+/** Tabel non-news yang dibuat lewat file migrasi (bukan lazy di kode): Lap + Invest. Skema saja, tanpa data. */
+const FRESH_MIGRATIONS = ["turso_001_schema.sql", "turso_002_invest_raw_dedup.sql"];
+
+export async function runSync(opts: { primary?: Client; spare: Client; mode: "sync" | "failback" | "fresh"; exclude: string[]; migrationsDir?: string; readSql?: (f: string) => string }): Promise<SyncReport> {
 	const m = await marker(opts.spare);
+	if (opts.mode === "fresh") {
+		// MULAI BARU di cadangan (Turso utama diblokir & belum pernah disalin): tidak membaca utama sama sekali. Hanya skema
+		// non-news; panel pindah ke cadangan kosong, news tetap di utama. failback DIKUNCI (cadangan kosong akan menimpa utama).
+		if (m.fresh_start) return { tables: [], skipped: "Mulai-baru sudah pernah dijalankan (" + m.fresh_start + ")." };
+		for (const f of FRESH_MIGRATIONS) await opts.spare.executeMultiple(opts.readSql!(f));
+		await setMarker(opts.spare, { fresh_start: wibNow(), synced_at: "fresh-start " + wibNow(), active: "spare" });
+		return { tables: [] };
+	}
+	if (!opts.primary) throw new Error("Klien utama diperlukan untuk mode " + opts.mode);
+	if (m.fresh_start) return { tables: [], skipped: "Cadangan dimulai dari KOSONG (mulai-baru): sinkron/failback DIKUNCI supaya data utama yang lama tidak tertimpa isi cadangan. Pilih satu database secara manual." };
 	if (opts.mode === "sync") {
 		if (m.active === "spare") return { tables: [], skipped: "Panel sedang memakai database CADANGAN — sinkron utama->cadangan dilewati (akan menghapus data selama gangguan). Jalankan mode failback setelah utama pulih." };
 		const tables = await copyDatabase(opts.primary, opts.spare, opts.exclude, async () => (await marker(opts.spare)).active === "spare");
@@ -126,23 +141,24 @@ export async function runSync(opts: { primary: Client; spare: Client; mode: "syn
 }
 
 async function main(): Promise<void> {
+	const rawMode = String(process.env.MODE || "sync").trim().toLowerCase();
+	const mode = rawMode === "failback" ? "failback" : rawMode === "fresh" ? "fresh" : "sync";
 	const p = { url: scrub(process.env.TURSO_URL), authToken: scrub(process.env.TURSO_TOKEN) };
 	const s = { url: scrub(process.env.TURSO_SPARE_URL), authToken: scrub(process.env.TURSO_SPARE_TOKEN) };
 	if (!s.url || !s.authToken) {
 		console.log("::notice::TURSO_SPARE_URL / TURSO_SPARE_TOKEN belum diisi (Settings > Secrets and variables > Actions) — tidak ada yang disalin.");
 		return;
 	}
-	if (!p.url || !p.authToken) throw new Error("TURSO_URL / TURSO_TOKEN (utama) belum diisi sebagai GitHub secret.");
-	const mode = String(process.env.MODE || "sync").trim().toLowerCase() === "failback" ? "failback" : "sync";
+	if (mode !== "fresh" && (!p.url || !p.authToken)) throw new Error("TURSO_URL / TURSO_TOKEN (utama) belum diisi sebagai GitHub secret.");
 	const exclude = String(process.env.TURSO_SYNC_EXCLUDE ?? "invest_raw").split(",").map((x) => x.trim()).filter(Boolean);
 	const t0 = Date.now();
-	const r = await runSync({ primary: createClient(p), spare: createClient(s), mode, exclude });
+	const r = await runSync({ primary: mode === "fresh" ? undefined : createClient(p), spare: createClient(s), mode, exclude, readSql: (f) => readFileSync(fileURLToPath(new URL("../../migration/" + f, import.meta.url).href), "utf8") });
 	if (r.skipped) {
 		console.log("::notice::" + r.skipped);
 		return;
 	}
 	for (const t of r.tables) console.log(`${t.name.padEnd(28)} ${String(t.total).padStart(7)} baris  ditulis ${t.written}  dihapus ${t.deleted}`);
-	console.log(`=== ${mode === "sync" ? "utama -> cadangan" : "FAILBACK cadangan -> utama"} selesai dalam ${Math.round((Date.now() - t0) / 1000)} dtk ===`);
+	console.log(`=== ${mode === "sync" ? "utama -> cadangan" : mode === "fresh" ? "MULAI-BARU cadangan (news tetap di utama)" : "FAILBACK cadangan -> utama"} selesai dalam ${Math.round((Date.now() - t0) / 1000)} dtk ===`);
 }
 
 if (process.argv[1] && /turso-sync\.ts$/.test(process.argv[1])) {

@@ -57,6 +57,13 @@ export async function deepHealth(env: Env, nowMs = Date.now()): Promise<DeepHeal
 		}),
 		tursoOn
 			? timed(async () => {
+					const st0 = await tursoStatus(env);
+					if (st0.active === "spare") {
+						// news (bot_kv) sengaja tetap di utama yang sedang diblokir; yang dicek di sini kesehatan database aktif (cadangan)
+						await getTurso(env).prepare(`SELECT 1 AS x`).first();
+						warnings.push(`Panel memakai database CADANGAN sejak ${st0.spareSince || "?"} (Turso utama kena kuota). BOT News tetap di utama, jadi berhenti sampai utama pulih.`);
+						return `aktif: CADANGAN sejak ${st0.spareSince || "?"} (news tetap di utama)`;
+					}
 					const r = await getTurso(env)
 						.prepare(`SELECT k, v FROM bot_kv WHERE k IN ('tg_channel_enabled', 'tg_channel_last_error')`)
 						.all<{ k: string; v: string }>();

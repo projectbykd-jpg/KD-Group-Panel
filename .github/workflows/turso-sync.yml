@@ -15,11 +15,11 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "sync = utama -> cadangan | failback = cadangan -> utama (hanya setelah utama pulih)"
+        description: "sync = utama->cadangan | failback = cadangan->utama | fresh = pindah ke cadangan KOSONG (utama diblokir; news tetap di utama; failback dikunci)"
         required: true
         type: choice
         default: sync
-        options: [sync, failback]
+        options: [sync, failback, fresh]
 
 concurrency:
   group: turso-sync
