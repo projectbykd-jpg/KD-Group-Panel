@@ -2,7 +2,7 @@
 // supaya "panel tidak jalan" bisa dibedakan: D1/KV/Turso mati, cron Cloudflare berhenti, atau Worker sehat tapi masalah di browser.
 // Dipakai pil status di Dashboard dan workflow GitHub "Penjaga panel" (.github/workflows/watchdog.yml).
 import { getSys } from "./settings";
-import { getTurso } from "./turso";
+import { getTurso, tursoStatus } from "./turso";
 
 type Check = { ok: boolean; ms: number; error?: string; note?: string };
 
@@ -65,6 +65,12 @@ export async function deepHealth(env: Env, nowMs = Date.now()): Promise<DeepHeal
 					if (kvs.tg_channel_enabled === "1" && kvs.tg_channel_last_error) {
 						warnings.push("Channel Telegram tidak bisa posting: " + kvs.tg_channel_last_error.slice(0, 160));
 					}
+					// database cadangan: sedang dipakai? sudah pernah disalin? salinan basi?
+					const ts = await tursoStatus(env);
+					if (ts.active === "spare") warnings.push(`Turso utama kena kuota — panel memakai database CADANGAN sejak ${ts.spareSince || "?"}. Kembalikan lewat workflow 'Turso sinkron cadangan' (mode failback) setelah utama pulih.`);
+					else if (ts.spareConfigured && !ts.spareSyncedAt) warnings.push("Database cadangan Turso belum pernah disalin — belum bisa dipakai bila utama kena kuota. Jalankan workflow 'Turso sinkron cadangan'.");
+					else if (ts.spareConfigured && cronAgeMin(ts.spareSyncedAt, nowMs) !== null && (cronAgeMin(ts.spareSyncedAt, nowMs) as number) > 180) warnings.push(`Salinan database cadangan Turso basi (terakhir ${ts.spareSyncedAt}). Cek workflow 'Turso sinkron cadangan'.`);
+					return ts.spareConfigured ? `aktif: ${ts.active === "spare" ? "CADANGAN" : "utama"}, cadangan disalin ${ts.spareSyncedAt || "belum pernah"}` : "aktif: utama (cadangan belum diatur)";
 				})
 			: Promise.resolve<Check>({ ok: true, ms: 0, note: "tidak dikonfigurasi" }),
 	]);
