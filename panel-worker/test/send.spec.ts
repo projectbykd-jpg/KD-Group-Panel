@@ -52,7 +52,10 @@ async function login(): Promise<string> {
 
 /** Tunggu (tanpa memajukan jam tiruan) sampai pengiriman benar-benar mulai -- login/hash memakai async asli. */
 async function untilSending(): Promise<void> {
-	for (let i = 0; i < 500 && !calls.length; i++) await new Promise((r) => setImmediate(r));
+	// Batas WAKTU NYATA (bukan jumlah putaran): hashing password memakai crypto asli, lama-nya bergantung beban mesin.
+	// setTimeout dipalsukan di tes ini, jadi tunggu lewat setImmediate; Date.now tidak dipalsukan.
+	const until = Date.now() + 10_000;
+	while (!calls.length && Date.now() < until) await new Promise((r) => setImmediate(r));
 	expect(calls.length).toBeGreaterThan(0);
 }
 
