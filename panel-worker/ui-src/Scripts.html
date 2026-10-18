@@ -4355,7 +4355,6 @@
 
     // ===== Result: Total Omset / Referal / Menang (dibaca Auto Prediksi dari menu Prediksi admin) =====
     let omsetState = { rows: [], websites: [], at: 0, loading: false };
-    let omsetTimer = null; // penyegar otomatis selama ada baris menunggu (di luar omsetState: objek itu diganti tiap muat)
     function omsetAllowed() {
       const role = String((currentProfile && currentProfile.role) || '').trim().toUpperCase();
       return (role === 'ADMIN' || role === 'OPERATOR') && menuAllowed('auto-input');
@@ -4394,16 +4393,9 @@
       body.innerHTML = rows.length ? rows.map(r => {
         const ok = omsetHas(r);
         const num = (v, label) => `<td data-label="${label}" class="omset-num">${ok ? esc(v) : '–'}</td>`;
-        // Menunggu = pasaran dihitung manual di admin: dicek otomatis (cron), tidak perlu tombol.
-        const wait = r.pending ? `<div class="text-sky-300 text-[10px] whitespace-normal" style="font-weight:600">Menunggu angka diinput &amp; dihitung di admin (dicek otomatis)${r.note ? ' — ' + esc(r.note) : ''}</div>` : '';
-        const why = ok || r.pending ? wait : `<div class="text-amber-300 text-[10px] whitespace-normal" style="font-weight:600">${esc(r.note || 'Belum terbaca')} <button type="button" class="retry-mini" onclick="omsetRefresh(${Number(r.id)}, this)">${r.manual ? 'Pantau lagi' : 'Ambil ulang'}</button></div>`;
-        return `<tr><td data-label="Website" class="font-bold text-cyan-300 whitespace-nowrap">${esc(r.website)}</td><td data-label="Pasaran">${esc(r.market)}${why}</td><td data-label="Periode" class="font-mono">${esc(r.period || '–')}</td>${num(r.omset, 'Total Omset')}${num(r.referal, 'Total Referal')}${num(r.menang, 'Total Menang')}</tr>`;
+        const why = ok ? '' : `<div class="text-amber-300 text-[10px] whitespace-normal" style="font-weight:600">${esc(r.note || 'Belum terbaca')} <button type="button" class="retry-mini" onclick="omsetRefresh(${Number(r.id)}, this)">Ambil ulang</button></div>`;
+        return `<tr><td data-label="Website" class="font-bold text-cyan-300 whitespace-nowrap">${esc(r.website)}</td><td data-label="Pasaran">${esc(r.market)}${why}</td><td data-label="Periode" class="font-mono">${esc(r.period)}</td>${num(r.omset, 'Total Omset')}${num(r.referal, 'Total Referal')}${num(r.menang, 'Total Menang')}</tr>`;
       }).join('') : '<tr><td colspan="6" class="text-center text-slate-500 py-4">Belum ada. Muncul otomatis setelah Auto Prediksi menghitung sebuah pasaran.</td></tr>';
-      // Selama ada baris MENUNGGU (pasaran manual) & menu Result terbuka: segarkan tiap 45 dtk supaya hasilnya muncul sendiri.
-      clearTimeout(omsetTimer);
-      if (rows.some(r => r.pending)) {
-        omsetTimer = setTimeout(() => { if (currentPage === 'result' && !document.hidden) { omsetState.at = 0; loadOmsetTable(true); } }, 45000);
-      }
       // Satu tombol salin per website (urutan website akun): "21,700<TAB>0<TAB>0" -> tempel langsung jadi 3 kolom.
       const tone = ['text-cyan-400', 'text-amber-400', 'text-emerald-400', 'text-pink-400'];
       copy.innerHTML = omsetState.websites.map((w, i) => {

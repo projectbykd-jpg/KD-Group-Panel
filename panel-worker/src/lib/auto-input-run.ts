@@ -482,25 +482,6 @@ export async function readPrediksiTotals(o: { f: Fetcher; sess: AdminSession; co
 	return totals;
 }
 
-/**
- * Satu putaran pemantauan untuk pasaran yang dihitung MANUAL di admin -- HANYA lewat menu Prediksi (hanya membaca):
- * buka Prediksi pasaran itu, lihat "Last Result"; selama angkanya BELUM sama dengan result yang dikirim, tunggu. Begitu sama,
- * Last Result -> Submit -> baris Result (readPrediksiTotals, dengan semua pengamannya). Periode dipakai dari Last Result itu sendiri.
- */
-export async function checkManualTotals(o: { f: Fetcher; sess: AdminSession; market: string; prizes: string[]; code?: string }): Promise<
-	{ state: "wait"; why: string; code: string } | { state: "done"; period: string; totals: PrediksiTotals; code: string }
-> {
-	const code = o.code || (await findMarketCode(o.f, o.sess, o.market));
-	const last = parseLastResult(await adminReq(o.f, o.sess, `admin_prediksifullbb.php?psr=${code}`));
-	if (!last) return { state: "wait", why: "'Last Result' belum terbaca di menu Prediksi admin", code };
-	const cmp = Math.min(o.prizes.length, last.numbers.length);
-	if (!cmp || o.prizes.slice(0, cmp).some((n, i) => last.numbers[i] !== n)) {
-		return { state: "wait", why: `Last Result di admin: periode ${last.period} angka ${last.numbers.join("/") || "-"}; menunggu ${o.prizes.join("/")} dihitung`, code };
-	}
-	const totals = await readPrediksiTotals({ f: o.f, sess: o.sess, code, market: o.market, period: String(last.period), numbers: o.prizes.slice(0, cmp) });
-	return { state: "done", period: String(last.period), totals, code };
-}
-
 // ---------------------------------------------------------------------------
 // HTTP
 // ---------------------------------------------------------------------------

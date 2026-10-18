@@ -129,22 +129,7 @@ async function ensureAutoInputTablesOnce(env: Env): Promise<void> {
 		],
 		// Pasaran yang TIDAK di-auto untuk akun ini (JSON array nama pasaran ternormalisasi). Kosong = semua pasaran auto.
 		auto_input_config: [["disabled_markets", "TEXT NOT NULL DEFAULT '[]'"]],
-		// Pantau Omset untuk pasaran yang dihitung MANUAL: rkey = kunci result (anti-dobel), pending = 1 selama menunggu angka diinput &
-		// dihitung di admin, manual = 1 untuk baris jenis ini, code = kode pasaran (pNNNN) hasil penemuan pertama, next_at/until_at = jadwal cek & batas tunggu.
-		auto_input_totals: [
-			["rkey", "TEXT NOT NULL DEFAULT ''"],
-			["pending", "INTEGER NOT NULL DEFAULT 0"],
-			["manual", "INTEGER NOT NULL DEFAULT 0"],
-			["code", "TEXT NOT NULL DEFAULT ''"],
-			["next_at", "TEXT NOT NULL DEFAULT ''"],
-			["until_at", "TEXT NOT NULL DEFAULT ''"],
-		],
 	});
-	// Index kolom baru (setelah kolomnya ada): cron tiap menit hanya membaca baris MENUNGGU, bukan seluruh tabel.
-	await db.batch([
-		db.prepare(`CREATE INDEX IF NOT EXISTS ix_auto_input_totals_pending ON auto_input_totals(pending, next_at)`),
-		db.prepare(`CREATE INDEX IF NOT EXISTS ix_auto_input_totals_rkey ON auto_input_totals(website, rkey)`),
-	]);
 }
 
 // ---------------------------------------------------------------------------
@@ -564,10 +549,6 @@ export interface TotalsRow {
 	/** alasan gagal baca (kosong bila angka terbaca) */
 	note: string;
 	at: string;
-	/** true selama menunggu pasaran manual diinput & dihitung di admin */
-	pending: boolean;
-	/** true = pasaran yang dihitung manual (bukan hasil Auto Prediksi) */
-	manual: boolean;
 }
 
 /** Simpan hasil baca menu Prediksi untuk job SELESAI (ulang = timpa). totals null = gagal baca, `note` berisi alasannya. */
@@ -611,8 +592,6 @@ function rowToTotals(r: Record<string, unknown>): TotalsRow {
 		menang: String(r.menang ?? ""),
 		note: String(r.note ?? ""),
 		at: String(r.at ?? ""),
-		pending: Number(r.pending ?? 0) === 1,
-		manual: Number(r.manual ?? 0) === 1,
 	};
 }
 
@@ -620,7 +599,7 @@ function rowToTotals(r: Record<string, unknown>): TotalsRow {
 export async function listTotals(env: Env, username: string): Promise<TotalsRow[]> {
 	await ensureAutoInputTables(env);
 	const res = await getTurso(env)
-		.prepare(`SELECT id, job_id, website, market, prizes, period, omset, referal, menang, note, at, pending, manual FROM auto_input_totals WHERE username = ? ORDER BY id DESC LIMIT ?`)
+		.prepare(`SELECT id, job_id, website, market, prizes, period, omset, referal, menang, note, at FROM auto_input_totals WHERE username = ? ORDER BY id DESC LIMIT ?`)
 		.bind(username, TOTALS_ROW_CAP)
 		.all<Record<string, unknown>>();
 	return (res.results ?? []).map(rowToTotals);
@@ -629,123 +608,10 @@ export async function listTotals(env: Env, username: string): Promise<TotalsRow[
 export async function getTotalsRow(env: Env, username: string, id: number): Promise<TotalsRow | null> {
 	await ensureAutoInputTables(env);
 	const r = await getTurso(env)
-		.prepare(`SELECT id, job_id, website, market, prizes, period, omset, referal, menang, note, at, pending, manual FROM auto_input_totals WHERE id = ? AND username = ?`)
+		.prepare(`SELECT id, job_id, website, market, prizes, period, omset, referal, menang, note, at FROM auto_input_totals WHERE id = ? AND username = ?`)
 		.bind(id, username)
 		.first<Record<string, unknown>>();
 	return r ? rowToTotals(r) : null;
-}
-
-// ---------------------------------------------------------------------------
-// Pasaran yang dihitung MANUAL di admin (tidak di-auto): panel tetap memantau Omset
-// ---------------------------------------------------------------------------
-export interface ManualTotalsRow {
-	id: number;
-	username: string;
-	website: string;
-	market: string;
-	prizes: string[];
-	resultDate: string;
-	rkey: string;
-	code: string;
-	untilAt: string;
-	period: string;
-}
-
-/**
- * Jadwalkan pemantauan Total Omset/Referal/Menang untuk hasil yang TIDAK dihitung Auto Prediksi. Tanpa PHPSESSID tersimpan tidak ada yang bisa dibaca:
- * baris langsung selesai dengan alasannya. Satu baris per (website, hasil) -- kirim ulang teks yang sama tidak membuat baris ganda.
- */
-export async function scheduleManualTotals(
-	env: Env,
-	username: string,
-	website: string,
-	plan: Extract<AutoInputPlan, { ok: true }>,
-	hasSession: boolean,
-): Promise<"dijadwalkan" | "sudah" | "tanpa-sesi"> {
-	await ensureAutoInputTables(env);
-	const db = getTurso(env);
-	const w = String(website).trim().toUpperCase();
-	const dup = await db.prepare(`SELECT id FROM auto_input_totals WHERE website = ? AND rkey = ? AND username = ? LIMIT 1`).bind(w, plan.key, username).first<{ id: number }>();
-	if (dup) return "sudah";
-	const wait = await getSys(env, "sys_totals_wait_min");
-	const now = tsNow();
-	const fakeJobId = -(Date.now() * 1000 + Math.floor(Math.random() * 1000)); // negatif = bukan job Auto Prediksi; unik per baris
-	await db
-		.prepare(
-			`INSERT INTO auto_input_totals (job_id, username, website, market, prizes, result_date, period, omset, referal, menang, note, at, rkey, pending, manual, code, next_at, until_at)
-			 VALUES (?, ?, ?, ?, ?, ?, '', '', '', '', ?, ?, ?, ?, 1, '', ?, ?)`,
-		)
-		.bind(fakeJobId, username, w, plan.market, JSON.stringify(plan.prizes), plan.date, hasSession ? "" : `PHPSESSID ${w} belum disimpan — Omset tidak bisa dicek otomatis`, now, plan.key, hasSession ? 1 : 0, now, tsPlusMinutes(wait))
-		.run();
-	return hasSession ? "dijadwalkan" : "tanpa-sesi";
-}
-
-/** Ambil SATU baris pantauan yang sudah waktunya dicek, atomik (dua tick bersamaan tidak mengambil baris yang sama). */
-export async function claimDueManualTotals(env: Env): Promise<ManualTotalsRow | null> {
-	await ensureAutoInputTables(env);
-	const db = getTurso(env);
-	const now = tsNow();
-	const r = await db
-		.prepare(`SELECT id, username, website, market, prizes, result_date, rkey, code, until_at, period, next_at FROM auto_input_totals WHERE pending = 1 AND next_at <= ? ORDER BY next_at ASC LIMIT 1`)
-		.bind(now)
-		.first<Record<string, unknown>>();
-	if (!r) return null;
-	const poll = await getSys(env, "sys_totals_poll_min");
-	const c = await db
-		.prepare(`UPDATE auto_input_totals SET next_at = ? WHERE id = ? AND pending = 1 AND next_at = ?`)
-		.bind(tsPlusMinutes(poll), Number(r.id), String(r.next_at))
-		.run();
-	if (c.meta.changes !== 1) return null; // diambil tick lain
-	let prizes: string[] = [];
-	try {
-		const a = JSON.parse(String(r.prizes ?? "[]"));
-		if (Array.isArray(a)) prizes = a.map(String);
-	} catch {
-		/* kosong */
-	}
-	return { id: Number(r.id), username: String(r.username), website: String(r.website), market: String(r.market), prizes, resultDate: String(r.result_date ?? ""), rkey: String(r.rkey ?? ""), code: String(r.code ?? ""), untilAt: String(r.until_at ?? ""), period: String(r.period ?? "") };
-}
-
-export async function setManualTotalsState(env: Env, id: number, patch: { code?: string; note?: string }): Promise<void> {
-	const db = getTurso(env);
-	if (patch.code !== undefined) await db.prepare(`UPDATE auto_input_totals SET code = ? WHERE id = ?`).bind(patch.code, id).run();
-	if (patch.note !== undefined) await db.prepare(`UPDATE auto_input_totals SET note = ? WHERE id = ? AND pending = 1`).bind(patch.note.slice(0, 300), id).run();
-}
-
-/**
- * Selesaikan pantauan: simpan angka (atau alasan), lalu catat di Riwayat Job (Keterangan) sebagai job SELESAI dengan kunci "<hasil>#manual" --
- * kunci beda dari result asli, jadi pagar anti-input-ganda Auto Prediksi untuk hasil yang sama tidak terpakai.
- */
-export async function finishManualTotals(
-	env: Env,
-	row: ManualTotalsRow,
-	period: string,
-	totals: { omset: string; referal: string; menang: string } | null,
-	note: string,
-): Promise<void> {
-	const db = getTurso(env);
-	const now = tsNow();
-	await db
-		.prepare(`UPDATE auto_input_totals SET pending = 0, period = ?, omset = ?, referal = ?, menang = ?, note = ?, at = ? WHERE id = ?`)
-		.bind(period, totals?.omset ?? "", totals?.referal ?? "", totals?.menang ?? "", totals ? "" : note.slice(0, 300), now, row.id)
-		.run();
-	const base = `Dihitung manual (pasaran tidak di-auto): ${row.market} angka ${row.prizes.join("/")}${period ? ` periode ${period}` : ""}.`;
-	await db
-		.prepare(
-			`INSERT OR IGNORE INTO auto_input_job (username, website, market, prizes, result_date, result_key, status, stage, detail, period, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, 'DONE', 'selesai', ?, ?, ?, ?)`,
-		)
-		.bind(row.username, row.website, row.market, JSON.stringify(row.prizes), row.resultDate, row.rkey + "#manual", withTotalsText(base, totals, note).slice(0, 600), period, now, now)
-		.run();
-}
-
-/** "Ambil ulang" pada baris manual: pantau lagi dari sekarang (cron yang membaca). */
-export async function rearmManualTotals(env: Env, id: number): Promise<void> {
-	const wait = await getSys(env, "sys_totals_wait_min");
-	await getTurso(env)
-		.prepare(`UPDATE auto_input_totals SET pending = 1, note = '', next_at = ?, until_at = ? WHERE id = ? AND manual = 1`)
-		.bind(tsNow(), tsPlusMinutes(wait), id)
-		.run();
 }
 
 /** Tahap terakhir yang dicapai (dipakai kalau eksekusi mati di tengah). */

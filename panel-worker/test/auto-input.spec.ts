@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: import("node:sqlite").DatabaseSync } }));
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
-import { autoInputAfterSend, autoInputRetryTick, autoInputTotals, autoInputTotalsRefresh, autoInputTotalsTick, runQueuedJob, type AutoInputNotice } from "../src/api/auto-input";
+import { autoInputAfterSend, autoInputRetryTick, autoInputTotals, autoInputTotalsRefresh, runQueuedJob, type AutoInputNotice } from "../src/api/auto-input";
 import { autoInputGetState, autoInputSetMarkets } from "../src/api/auto-input";
 import { checkLogin } from "../src/api/auth";
 import { hashPassword } from "../src/lib/crypto";
@@ -1073,109 +1073,5 @@ describe("Total Omset/Referal/Menang tersimpan & tampil di menu Result (DB + API
 		turso.current!.raw.prepare(`UPDATE auto_input_totals SET at = ?`).run(old);
 		await pruneAutoInputJobs(env);
 		expect(((await autoInputTotals(env, op)) as unknown as { rows: unknown[] }).rows).toHaveLength(0);
-	});
-});
-
-
-describe("pasaran yang TIDAK di-auto: Omset tetap dipantau lewat menu Prediksi (hanya membaca)", () => {
-	let env: Env;
-	let op: string;
-	const profile = { username: "Op", role: "OPERATOR", websites: ["HUGOTOGEL", "FOLATOTO"], menus: null } as unknown as UserProfile;
-	beforeEach(async () => {
-		setGlobalOffMarkets(["FLORIDAEVE"]); // saklar pasaran OFF = dihitung manual
-		turso.current = fakeD1([]);
-		resetAutoInputTablesFlag();
-		const ctx = fakeEnv();
-		env = ctx.env;
-		ctx.db.prepare(`INSERT INTO users (username, username_lc, password_hash, role, status, websites) VALUES ('Op', 'op', ?, 'OPERATOR', 'AKTIF', ?)`).run(await hashPassword("pw"), JSON.stringify(["HUGOTOGEL", "FOLATOTO"]));
-		op = ((await checkLogin(env, "Op", "pw", "")) as { sessionToken: string }).sessionToken;
-		await setEnabled(env, "Op", true);
-		await saveSession(env, "Op", "HUGOTOGEL", "https://ag.suksesbogil.com", "PHPSESSID=" + SID1);
-	});
-	const send = (sites = ["HUGOTOGEL"]) => autoInputAfterSend(env, profile, RAW, processText(RAW), sites);
-	const rows = async () => ((await autoInputTotals(env, op)) as unknown as { rows: { id: number; website: string; pending: boolean; manual: boolean; period: string; omset: string; referal: string; menang: string; note: string }[] }).rows;
-	const due = () => turso.current!.raw.exec(`UPDATE auto_input_totals SET next_at = '2000-01-01 00:00:00' WHERE pending = 1`);
-	const adminPaths = (m: ReturnType<typeof mockSite>) => m.st.posts.map((x) => x.path);
-
-	it("kirim: tidak menyentuh admin, hanya menjadwalkan; baris MENUNGGU tampil di Result; teks pemberitahuan menyebut pantauan", async () => {
-		const m = mockSite({ prediksi: {} });
-		const n = await send();
-		expect(n?.skippedReason).toMatch(/tidak di-auto.*tetap dicek otomatis/);
-		expect(m.st.posts).toHaveLength(0);
-		expect(await rows()).toMatchObject([{ website: "HUGOTOGEL", pending: true, manual: true, period: "", omset: "" }]);
-		await send(); // kirim ulang teks yang sama: tidak ada baris ganda
-		expect(await rows()).toHaveLength(1);
-	});
-	it("Auto Prediksi dimatikan total: tetap dipantau, tanpa pemberitahuan baru", async () => {
-		await setEnabled(env, "Op", false);
-		expect(await send()).toBeUndefined();
-		expect(await rows()).toMatchObject([{ website: "HUGOTOGEL", pending: true, manual: true }]);
-	});
-	it("tick: Last Result belum angka ini -> TUNGGU (jadwal maju, tidak dibaca ulang sebelum waktunya); begitu dihitung -> Submit & baca Total; hanya menu Prediksi yang disentuh", async () => {
-		const m = mockSite({ prediksi: { totals: ["21,700", "0", "0"] } });
-		await send();
-		expect(await autoInputTotalsTick(env, m.fetchFn)).toBe(true); // Last Result masih periode 1629 / 7283
-		expect(await rows()).toMatchObject([{ pending: true, omset: "" }]);
-		expect((await rows())[0].note).toMatch(/Last Result di admin: periode 1629 angka 7283; menunggu 9808/);
-		expect(await autoInputTotalsTick(env, m.fetchFn)).toBe(false); // belum waktunya
-		expect(m.st.posts.some((x) => x.path === "admin_prediksifullbb.php")).toBe(false); // belum cocok -> belum ada Submit
-		// operator menginput & menghitung di admin
-		m.rows.unshift({ period: 1630, date: "06-10-2026 21:00:00", nums: ["9808"] });
-		due();
-		expect(await autoInputTotalsTick(env, m.fetchFn)).toBe(true);
-		expect(await rows()).toMatchObject([{ pending: false, manual: true, period: "1630", omset: "21,700", referal: "0", menang: "0", note: "" }]);
-		const post = m.st.posts.find((x) => x.path === "admin_prediksifullbb.php")!;
-		expect(Object.fromEntries(post.body)).toMatchObject({ periode: "1630", nomor: "9808", submit: "Submit" });
-		// HANYA menu Prediksi: tidak ada Kirim / Hitung / halaman lain yang di-POST
-		expect(adminPaths(m).every((x) => x === "GET admin_prediksifullbb.php" || x === "admin_prediksifullbb.php")).toBe(true);
-		// tercatat di Riwayat Job (Keterangan) sebagai SELESAI; dipantau tidak berlanjut
-		const j = (await listJobs(env, "Op"))[0];
-		expect(j).toMatchObject({ status: "DONE", period: "1630" });
-		expect(j.detail).toBe("Dihitung manual (pasaran tidak di-auto): FLORIDAEVE angka 9808 periode 1630. [Omset 21,700 · Referal 0 · Menang 0]");
-		expect(await autoInputTotalsTick(env, m.fetchFn)).toBe(false);
-	});
-	it("pagar anti-input-ganda Auto Prediksi untuk hasil yang sama TIDAK terpakai oleh catatan manual", async () => {
-		const m = mockSite({ prediksi: {} });
-		await send();
-		m.rows.unshift({ period: 1630, date: "06-10-2026 21:00:00", nums: ["9808"] });
-		due();
-		await autoInputTotalsTick(env, m.fetchFn);
-		const keys = (turso.current!.raw.prepare(`SELECT result_key FROM auto_input_job`).all() as { result_key: string }[]).map((r) => r.result_key);
-		expect(keys).toEqual(["FLORIDAEVE|2026-10-06|9808#manual"]);
-		setGlobalOffMarkets([]); // pasaran di-auto lagi -> hasil yang sama masih boleh dijalankan Auto Prediksi
-		const again = await send();
-		expect(again?.results[0].status).toBe("ANTRI");
-	});
-	it("batas waktu habis -> berhenti dengan alasan, tercatat di Keterangan; 'Pantau lagi' mengaktifkan kembali", async () => {
-		const m = mockSite({ prediksi: {} });
-		await send();
-		turso.current!.raw.exec(`UPDATE auto_input_totals SET until_at = '2000-01-01 00:00:00', next_at = '2000-01-01 00:00:00'`);
-		await autoInputTotalsTick(env, m.fetchFn);
-		const [r] = await rows();
-		expect(r).toMatchObject({ pending: false, omset: "" });
-		expect(r.note).toMatch(/^Sampai batas waktu tunggu: Last Result di admin/);
-		expect((await listJobs(env, "Op"))[0].detail).toMatch(/\[Omset belum terbaca: Sampai batas waktu tunggu/);
-		expect(await autoInputTotalsRefresh(env, op, r.id, m.fetchFn)).toMatchObject({ success: true });
-		expect(await rows()).toMatchObject([{ pending: true, note: "" }]);
-	});
-	it("tanpa PHPSESSID: tidak bisa dibaca -> langsung selesai dengan alasan; website lain tetap dipantau", async () => {
-		await send(["HUGOTOGEL", "FOLATOTO"]);
-		const byWebsite = Object.fromEntries((await rows()).map((r) => [r.website, r]));
-		expect(byWebsite.HUGOTOGEL.pending).toBe(true);
-		expect(byWebsite.FOLATOTO).toMatchObject({ pending: false });
-		expect(byWebsite.FOLATOTO.note).toMatch(/PHPSESSID FOLATOTO belum disimpan/);
-	});
-	it("pasaran yang DI-AUTO tidak dipantau manual (alur Auto Prediksi seperti biasa)", async () => {
-		setGlobalOffMarkets([]);
-		const m = mockSite({ prediksi: {} });
-		const n = await send();
-		expect(n?.results[0].status).toBe("ANTRI");
-		expect(await rows()).toHaveLength(0);
-		expect(m.st.posts).toHaveLength(0);
-	});
-	it("tanpa baris menunggu: tick tidak menyentuh admin sama sekali", async () => {
-		let calls = 0;
-		expect(await autoInputTotalsTick(env, async () => (calls++, new Response("x")))).toBe(false);
-		expect(calls).toBe(0);
 	});
 });
