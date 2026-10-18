@@ -4379,6 +4379,13 @@
     const omsetHas = r => !!(r && (r.omset || r.referal || r.menang));
     // Baris TERBARU per website (urutan rows = terbaru dulu). Sengaja tidak melompat ke baris lama bila yang terbaru kosong: salah periode lebih buruk daripada kosong.
     function omsetLatest(site) { return omsetState.rows.find(r => r.website === site) || null; }
+    // Website yang SEDANG diproses sesudah KIRIM SEMUA (Auto Prediksi / baca menu Prediksi): baris tampil "Membaca…" seketika.
+    const omsetBusy = {};
+    function omsetMarkBusy(list, text) {
+      list.forEach(c => { omsetBusy[String(c.website).toUpperCase()] = { market: c.market || '', text }; });
+      renderOmsetTable();
+    }
+    function omsetDone(site) { delete omsetBusy[String(site).toUpperCase()]; }
     function renderOmsetTable() {
       const box = document.getElementById('omsetBox');
       const body = document.getElementById('omsetBody');
@@ -4388,9 +4395,12 @@
       const esc = escapeHtml;
       // Hanya hasil TERAKHIR per website (tanpa riwayat -- riwayat ada di Auto Prediksi > Riwayat Job > Keterangan).
       // Urutan mengikuti urutan website akun (Website 1, Website 2); hasil baru menggantikan yang lama.
-      const order = omsetState.websites.length ? omsetState.websites : [...new Set(omsetState.rows.map(r => r.website))];
+      const order = omsetState.websites.length ? omsetState.websites : [...new Set(omsetState.rows.map(r => r.website).concat(Object.keys(omsetBusy)))];
+      const busyRow = w => omsetBusy[w] ? `<tr><td data-label="Website" class="font-bold text-cyan-300 whitespace-nowrap">${esc(w)}</td><td data-label="Pasaran">${esc(omsetBusy[w].market)}<div class="text-sky-300 text-[10px] whitespace-normal" style="font-weight:600"><i class="fa-solid fa-spinner fa-spin"></i> ${esc(omsetBusy[w].text)}</div></td><td data-label="Periode" class="font-mono">–</td><td class="omset-num">–</td><td class="omset-num">–</td><td class="omset-num">–</td></tr>` : '';
       const rows = order.map(w => omsetLatest(w)).filter(Boolean);
-      body.innerHTML = rows.length ? rows.map(r => {
+      const busyOnly = order.filter(w => omsetBusy[w] && !omsetLatest(w));
+      body.innerHTML = rows.length || busyOnly.length ? busyOnly.map(busyRow).join('') + rows.map(r => {
+        if (omsetBusy[r.website]) return busyRow(r.website);
         const ok = omsetHas(r);
         const num = (v, label) => `<td data-label="${label}" class="omset-num">${ok ? esc(v) : '–'}</td>`;
         const why = ok ? (r.note ? `<div class="text-amber-300 text-[10px] whitespace-normal" style="font-weight:600">⚠ ${esc(r.note)} <button type="button" class="retry-mini" onclick="omsetRefresh(${Number(r.id)}, this)">Ambil ulang</button></div>` : '') : `<div class="text-amber-300 text-[10px] whitespace-normal" style="font-weight:600">${esc(r.note || 'Belum terbaca')} <button type="button" class="retry-mini" onclick="omsetRefresh(${Number(r.id)}, this)">Ambil ulang</button></div>`;
@@ -4431,10 +4441,13 @@
     // Pasaran yang dihitung MANUAL (tidak di-auto / Auto Prediksi OFF): langsung baca Total dari menu Prediksi admin
     // (Last Result -> Submit -> baris Result), satu panggilan per website. Hanya membaca; hasilnya ke tabel Result & Riwayat Job.
     function autoInputCheckTotals(list) {
+      if (!list.length) return;
+      omsetMarkBusy(list, 'Membaca menu Prediksi (Last Result → Submit)…');
       let left = list.length;
       const got = [], bad = [];
       const fin = () => {
         if (--left > 0) return;
+        list.forEach(c => omsetDone(c.website));
         omsetState.at = 0;
         loadOmsetTable(true);
         if (got.length) toast('Total Omset terbaca: ' + got.join(', '));
@@ -4461,12 +4474,23 @@
       const out = rs.filter(r => r.status !== 'ANTRI');
       if (!queued.length) { autoInputShow(out); return; }
       setTimeout(() => toast('Auto Prediksi: memproses ' + queued.map(q => q.website).join(', ') + '…'), 1500);
+      if (a.plan) omsetMarkBusy(queued.map(q => ({ website: q.website, market: a.plan.market })), 'Auto Prediksi: input → Hitung → baca menu Prediksi…');
       let left = queued.length;
-      const finish = () => { if (--left === 0) { autoInputShow(out); loadOmsetTable(true); } };
+      const notDone = [];
+      const finish = () => {
+        if (--left > 0) return;
+        queued.forEach(q => omsetDone(q.website));
+        autoInputShow(out);
+        omsetState.at = 0;
+        loadOmsetTable(true);
+        // Job yang TIDAK berhasil: Total tetap dibaca dari menu Prediksi (hanya membaca, tanpa input/Hitung).
+        if (a.plan && notDone.length) autoInputCheckTotals(notDone.map(w => Object.assign({ website: w }, a.plan)));
+      };
       queued.forEach(q => {
         google.script.run
           .withSuccessHandler(res => {
             const ok = !!(res && res.success);
+            if (!ok) notDone.push(q.website);
             out.push({
               website: (res && res.website && res.website !== '-') ? res.website : q.website,
               status: ok ? 'BERHASIL' : ((res && res.status) || 'GAGAL'),
@@ -4476,6 +4500,7 @@
             finish();
           })
           .withFailureHandler(err => {
+            notDone.push(q.website);
             out.push({ website: q.website, status: 'GAGAL', detail: ((err && err.message) || 'Koneksi putus') + ' — CEK MANUAL di admin website.', manual: true });
             finish();
           })
