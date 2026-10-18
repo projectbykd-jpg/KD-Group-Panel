@@ -54,6 +54,8 @@ const ARG_MAP = {
 	autoInputDismissToto: ["token", "ids"],
 	autoInputTest: ["token", "website", "market"],
 	autoInputRun: ["token", "jobId"],
+	autoInputTotals: ["token"],
+	autoInputTotalsRefresh: ["token", "id"],
 	autoInputAlerts: ["token"],
 	autoInputTotoLog: ["token"],
 	autoInputTotoRun: ["token"],
@@ -210,7 +212,8 @@ const shim = `<script>
         // punya penanganan sendiri, jadi dikecualikan.
         if (data && data.success === false && !SESSION_EXEMPT[fn] &&
             /sesi tidak valid|telah berakhir|akun tidak ditemukan|akun sedang|akun terkunci/i.test(String(data.message || ""))) {
-          try { window.dispatchEvent(new CustomEvent("kd:session-expired", { detail: String(data.message) })); } catch (e) {}
+          // Sertakan token yang DIPAKAI permintaan ini: jawaban untuk token lama (poller sisa sesi sebelumnya) tidak boleh menendang sesi baru yang sah.
+          try { window.dispatchEvent(new CustomEvent("kd:session-expired", { detail: { message: String(data.message), token: String(body.token == null ? "" : body.token) } })); } catch (e) {}
         }
         try {
           (onOk || function () {})(data);
