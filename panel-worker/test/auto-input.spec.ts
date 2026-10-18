@@ -1212,3 +1212,43 @@ describe("pasaran yang TIDAK di-auto: Omset tetap dipantau lewat menu Prediksi (
 		expect(calls).toBe(0);
 	});
 });
+
+
+describe("MATRIKS: apa pun keadaan Auto Prediksi, KIRIM SEMUA selalu berujung Total Omset/Referal/Menang terbaca & tercatat", () => {
+	const profile = { username: "Op", role: "OPERATOR", websites: ["HUGOTOGEL"], menus: null } as unknown as UserProfile;
+	const cases: { name: string; enabled: boolean; marketOff: boolean; auto: boolean }[] = [
+		{ name: "Auto Prediksi ON, pasaran di-auto", enabled: true, marketOff: false, auto: true },
+		{ name: "Auto Prediksi ON, pasaran DIMATIKAN", enabled: true, marketOff: true, auto: false },
+		{ name: "Auto Prediksi OFF, pasaran di-auto", enabled: false, marketOff: false, auto: false },
+		{ name: "Auto Prediksi OFF, pasaran dimatikan", enabled: false, marketOff: true, auto: false },
+	];
+	for (const c of cases) {
+		it(c.name, async () => {
+			setGlobalOffMarkets(c.marketOff ? ["FLORIDAEVE"] : []);
+			turso.current = fakeD1([]);
+			resetAutoInputTablesFlag();
+			const ctx = fakeEnv();
+			const env = ctx.env;
+			ctx.db.prepare(`INSERT INTO users (username, username_lc, password_hash, role, status, websites) VALUES ('Op', 'op', ?, 'OPERATOR', 'AKTIF', ?)`).run(await hashPassword("pw"), JSON.stringify(["HUGOTOGEL"]));
+			const op = ((await checkLogin(env, "Op", "pw", "")) as { sessionToken: string }).sessionToken;
+			await setEnabled(env, "Op", c.enabled);
+			await saveSession(env, "Op", "HUGOTOGEL", "https://ag.suksesbogil.com", "PHPSESSID=" + SID1);
+			const m = mockSite({ prediksi: { totals: ["21,700", "0", "0"] } });
+			if (!c.auto) m.rows.unshift({ period: 1630, date: "06-10-2026 21:00:00", nums: ["9808"] }); // sudah dihitung manual di admin
+			const n = await autoInputAfterSend(env, profile, RAW, processText(RAW), ["HUGOTOGEL"]);
+			if (c.auto) {
+				await runQueuedJob(env, "Op", n!.results[0].jobId!, m.fetchFn);
+				expect(m.st.calcPosts).toBe(1); // Auto Prediksi benar-benar Input + Hitung
+			} else {
+				await autoInputTotalsCheck(env, op, n!.totalsCheck![0].id, m.fetchFn);
+				expect(m.st.calcPosts).toBe(0); // manual: TIDAK PERNAH menekan Hitung
+				expect(m.st.posts.every((x) => x.path.includes("prediksi"))).toBe(true); // hanya menu Prediksi
+			}
+			const post = m.st.posts.find((x) => x.path === "admin_prediksifullbb.php")!;
+			expect(Object.fromEntries(post.body)).toMatchObject({ periode: "1630", nomor: "9808", submit: "Submit" });
+			const [row] = ((await autoInputTotals(env, op)) as unknown as { rows: { pending: boolean; period: string; omset: string; referal: string; menang: string }[] }).rows;
+			expect(row).toMatchObject({ pending: false, period: "1630", omset: "21,700", referal: "0", menang: "0" });
+			expect((await listJobs(env, "Op"))[0].detail).toContain("[Omset 21,700 · Referal 0 · Menang 0]");
+		});
+	}
+});
