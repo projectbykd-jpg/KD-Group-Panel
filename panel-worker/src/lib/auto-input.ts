@@ -661,35 +661,41 @@ export async function scheduleManualTotals(
 	website: string,
 	plan: Extract<AutoInputPlan, { ok: true }>,
 	hasSession: boolean,
-): Promise<{ status: "dijadwalkan" | "sudah" | "tanpa-sesi"; id: number }> {
+): Promise<"dijadwalkan" | "sudah" | "tanpa-sesi"> {
 	await ensureAutoInputTables(env);
 	const db = getTurso(env);
 	const w = String(website).trim().toUpperCase();
 	const dup = await db.prepare(`SELECT id FROM auto_input_totals WHERE website = ? AND rkey = ? AND username = ? LIMIT 1`).bind(w, plan.key, username).first<{ id: number }>();
-	if (dup) return { status: "sudah", id: Number(dup.id) };
+	if (dup) return "sudah";
 	const wait = await getSys(env, "sys_totals_wait_min");
 	const now = tsNow();
 	const fakeJobId = -(Date.now() * 1000 + Math.floor(Math.random() * 1000)); // negatif = bukan job Auto Prediksi; unik per baris
-	const ins = await db
+	await db
 		.prepare(
 			`INSERT INTO auto_input_totals (job_id, username, website, market, prizes, result_date, period, omset, referal, menang, note, at, rkey, pending, manual, code, next_at, until_at)
 			 VALUES (?, ?, ?, ?, ?, ?, '', '', '', '', ?, ?, ?, ?, 1, '', ?, ?)`,
 		)
 		.bind(fakeJobId, username, w, plan.market, JSON.stringify(plan.prizes), plan.date, hasSession ? "" : `PHPSESSID ${w} belum disimpan — Omset tidak bisa dicek otomatis`, now, plan.key, hasSession ? 1 : 0, now, tsPlusMinutes(wait))
 		.run();
-	return { status: hasSession ? "dijadwalkan" : "tanpa-sesi", id: Number(ins.meta.last_row_id) };
+	return hasSession ? "dijadwalkan" : "tanpa-sesi";
 }
 
-const MANUAL_COLS = `id, username, website, market, prizes, result_date, rkey, code, until_at, period, next_at`;
-
-async function claimManualRow(env: Env, r: Record<string, unknown>): Promise<ManualTotalsRow | null> {
+/** Ambil SATU baris pantauan yang sudah waktunya dicek, atomik (dua tick bersamaan tidak mengambil baris yang sama). */
+export async function claimDueManualTotals(env: Env): Promise<ManualTotalsRow | null> {
+	await ensureAutoInputTables(env);
 	const db = getTurso(env);
+	const now = tsNow();
+	const r = await db
+		.prepare(`SELECT id, username, website, market, prizes, result_date, rkey, code, until_at, period, next_at FROM auto_input_totals WHERE pending = 1 AND next_at <= ? ORDER BY next_at ASC LIMIT 1`)
+		.bind(now)
+		.first<Record<string, unknown>>();
+	if (!r) return null;
 	const poll = await getSys(env, "sys_totals_poll_min");
 	const c = await db
 		.prepare(`UPDATE auto_input_totals SET next_at = ? WHERE id = ? AND pending = 1 AND next_at = ?`)
 		.bind(tsPlusMinutes(poll), Number(r.id), String(r.next_at))
 		.run();
-	if (c.meta.changes !== 1) return null; // diambil tick/klik lain
+	if (c.meta.changes !== 1) return null; // diambil tick lain
 	let prizes: string[] = [];
 	try {
 		const a = JSON.parse(String(r.prizes ?? "[]"));
@@ -698,26 +704,6 @@ async function claimManualRow(env: Env, r: Record<string, unknown>): Promise<Man
 		/* kosong */
 	}
 	return { id: Number(r.id), username: String(r.username), website: String(r.website), market: String(r.market), prizes, resultDate: String(r.result_date ?? ""), rkey: String(r.rkey ?? ""), code: String(r.code ?? ""), untilAt: String(r.until_at ?? ""), period: String(r.period ?? "") };
-}
-
-/** Ambil SATU baris pantauan yang sudah waktunya dicek, atomik (dua tick bersamaan tidak mengambil baris yang sama). */
-export async function claimDueManualTotals(env: Env): Promise<ManualTotalsRow | null> {
-	await ensureAutoInputTables(env);
-	const r = await getTurso(env)
-		.prepare(`SELECT ${MANUAL_COLS} FROM auto_input_totals WHERE pending = 1 AND next_at <= ? ORDER BY next_at ASC LIMIT 1`)
-		.bind(tsNow())
-		.first<Record<string, unknown>>();
-	return r ? claimManualRow(env, r) : null;
-}
-
-/** Cek LANGSUNG satu baris milik akun ini (dipicu browser tepat sesudah KIRIM SEMUA), tanpa menunggu jadwal cron. */
-export async function claimManualTotalsById(env: Env, username: string, id: number): Promise<ManualTotalsRow | null> {
-	await ensureAutoInputTables(env);
-	const r = await getTurso(env)
-		.prepare(`SELECT ${MANUAL_COLS} FROM auto_input_totals WHERE id = ? AND username = ? AND pending = 1 AND manual = 1`)
-		.bind(id, username)
-		.first<Record<string, unknown>>();
-	return r ? claimManualRow(env, r) : null;
 }
 
 export async function setManualTotalsState(env: Env, id: number, patch: { code?: string; note?: string }): Promise<void> {

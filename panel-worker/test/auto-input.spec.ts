@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: import("node:sqlite").DatabaseSync } }));
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
-import { autoInputAfterSend, autoInputRetryTick, autoInputTotals, autoInputTotalsCheck, autoInputTotalsRefresh, autoInputTotalsTick, runQueuedJob, type AutoInputNotice } from "../src/api/auto-input";
+import { autoInputAfterSend, autoInputRetryTick, autoInputTotals, autoInputTotalsRefresh, autoInputTotalsTick, runQueuedJob, type AutoInputNotice } from "../src/api/auto-input";
 import { autoInputGetState, autoInputSetMarkets } from "../src/api/auto-input";
 import { checkLogin } from "../src/api/auth";
 import { hashPassword } from "../src/lib/crypto";
@@ -518,13 +518,10 @@ describe("autoInputAfterSend (DB)", () => {
 	};
 	const withSession = () => saveSession(env, "Op", "HUGOTOGEL", "https://ag.suksesbogil.com", "PHPSESSID=" + SID1);
 
-	it("saklar OFF (default) -> tidak ada input/Hitung otomatis (hanya memantau Omset: tanpa satu pun request ke admin saat kirim)", async () => {
+	it("saklar OFF (default) -> tidak melakukan apa pun", async () => {
 		const m = mockSite();
 		await withSession();
-		const n = await autoInputAfterSend(env, profile, RAW, processText(RAW), ["HUGOTOGEL"]);
-		expect(n?.skippedReason).toBeUndefined();
-		expect(n?.results).toEqual([]);
-		expect(n?.totalsCheck).toHaveLength(1);
+		expect(await go(m)).toBeUndefined();
 		expect(m.st.posts).toHaveLength(0);
 	});
 	it("ON + sesi ada -> jalan sekali; klik ulang tidak dobel", async () => {
@@ -1109,40 +1106,10 @@ describe("pasaran yang TIDAK di-auto: Omset tetap dipantau lewat menu Prediksi (
 		await send(); // kirim ulang teks yang sama: tidak ada baris ganda
 		expect(await rows()).toHaveLength(1);
 	});
-	it("Auto Prediksi dimatikan total: tetap dipantau (cek langsung dipicu), tanpa pemberitahuan 'dilewati'", async () => {
+	it("Auto Prediksi dimatikan total: tetap dipantau, tanpa pemberitahuan baru", async () => {
 		await setEnabled(env, "Op", false);
-		const n = await send();
-		expect(n).toMatchObject({ results: [], totalsCheck: [{ website: "HUGOTOGEL" }] });
-		expect(n?.skippedReason).toBeUndefined();
+		expect(await send()).toBeUndefined();
 		expect(await rows()).toMatchObject([{ website: "HUGOTOGEL", pending: true, manual: true }]);
-	});
-	it("CEK LANGSUNG saat kirim: bila sudah dihitung di admin -> Total terbaca seketika (tanpa menunggu cron), cuma menu Prediksi yang disentuh", async () => {
-		const m = mockSite({ prediksi: { totals: ["21,700", "0", "0"] } });
-		m.rows.unshift({ period: 1630, date: "06-10-2026 21:00:00", nums: ["9808"] }); // operator sudah menginput & menghitung di admin
-		const n = await send();
-		const id = n!.totalsCheck![0].id;
-		expect(await autoInputTotalsCheck(env, op, id, m.fetchFn)).toMatchObject({ success: true, done: true, message: "Terbaca: omset 21,700, referal 0, menang 0." });
-		expect(await rows()).toMatchObject([{ pending: false, period: "1630", omset: "21,700", referal: "0", menang: "0", note: "" }]);
-		expect(adminPaths(m).every((x) => x === "GET admin_prediksifullbb.php" || x === "admin_prediksifullbb.php")).toBe(true);
-		expect(Object.fromEntries(m.st.posts.find((x) => x.path === "admin_prediksifullbb.php")!.body)).toMatchObject({ periode: "1630", nomor: "9808", submit: "Submit" });
-		// klik ganda / cek lagi: tidak membaca ulang baris yang sudah selesai
-		expect(await autoInputTotalsCheck(env, op, id, m.fetchFn)).toMatchObject({ done: false, message: "Sedang/sudah dicek." });
-	});
-	it("CEK LANGSUNG tetapi Last Result admin belum sama -> baris menampilkan FAKTA yang terbaca (bukan kalimat menunggu), pantau berlanjut diam-diam", async () => {
-		const m = mockSite({ prediksi: {} });
-		const n = await send();
-		const r = await autoInputTotalsCheck(env, op, n!.totalsCheck![0].id, m.fetchFn);
-		expect(r).toMatchObject({ done: false });
-		const [row] = await rows();
-		expect(row).toMatchObject({ pending: true, omset: "" });
-		expect(row.note).toBe("Last Result di admin: periode 1629 angka 7283; menunggu 9808 dihitung");
-		expect(m.st.posts.some((x) => x.path === "admin_prediksifullbb.php")).toBe(false); // belum cocok -> tidak ada Submit
-	});
-	it("cek langsung hanya untuk baris milik akun sendiri", async () => {
-		const m = mockSite({ prediksi: {} });
-		const n = await send();
-		expect(await autoInputTotalsCheck(env, op, 987654, m.fetchFn)).toMatchObject({ done: false, message: "Sedang/sudah dicek." });
-		expect(n!.totalsCheck).toHaveLength(1);
 	});
 	it("tick: Last Result belum angka ini -> TUNGGU (jadwal maju, tidak dibaca ulang sebelum waktunya); begitu dihitung -> Submit & baca Total; hanya menu Prediksi yang disentuh", async () => {
 		const m = mockSite({ prediksi: { totals: ["21,700", "0", "0"] } });
