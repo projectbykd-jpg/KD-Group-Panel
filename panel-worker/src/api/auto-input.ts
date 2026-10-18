@@ -6,15 +6,21 @@ import { ackTotoAlerts, dismissTotoRows, listTotoEvents, totoDispatchAt, totoWin
 import { requireSession } from "./auth";
 import { saveMaster, loadMasterData } from "../lib/master-data";
 import { logActivity } from "../lib/activity";
-import { dateKeyNow } from "../lib/time";
+import { dateKeyNow, tsNow } from "../lib/time";
 import { hasMenu } from "../lib/menus";
 import type { Processed } from "../lib/parser";
 import type { UserProfile } from "../lib/db";
 import {
 	adminBaseProblem,
+	type AutoInputPlan,
 	getTotalsRow,
 	listTotals,
 	saveTotals,
+	scheduleManualTotals,
+	claimDueManualTotals,
+	setManualTotalsState,
+	finishManualTotals,
+	rearmManualTotals,
 	setJobTotalsText,
 	withTotalsText,
 	claimJob,
@@ -44,7 +50,7 @@ import {
 	setStage,
 	startJob,
 } from "../lib/auto-input";
-import { findMarketCode, readPrediksiTotals, runAutoInput, type Fetcher } from "../lib/auto-input-run";
+import { checkManualTotals, findMarketCode, readPrediksiTotals, runAutoInput, type Fetcher } from "../lib/auto-input-run";
 
 async function gate(env: Env, token: string) {
 	const s = await requireSession(env, token, { menu: "auto-input" });
@@ -213,12 +219,17 @@ export async function autoInputAfterSend(
 ): Promise<AutoInputNotice | undefined> {
 	if (profile.role !== "ADMIN" && profile.role !== "OPERATOR") return undefined;
 	if (!hasMenu(profile, "auto-input")) return undefined;
-	if (!(await getEnabled(env, profile.username))) return undefined;
 
 	const plan = planAutoInput(rawText, processed);
+	// Auto Prediksi dimatikan: tidak ada input/Hitung otomatis, tapi Total Omset/Referal/Menang tetap dipantau (hanya membaca).
+	if (!(await getEnabled(env, profile.username))) {
+		if (plan.ok) await watchManualTotals(env, profile, plan, websites).catch(() => {});
+		return undefined;
+	}
 	if (!plan.ok) return { skippedReason: plan.reason, results: [] };
 	if ((await getDisabledMarkets(env, profile.username)).includes(normMarket(plan.market))) {
-		return { skippedReason: `Pasaran ${plan.market} tidak di-auto (diatur di menu Auto Prediksi) — input manual`, results: [] };
+		await watchManualTotals(env, profile, plan, websites).catch(() => {});
+		return { skippedReason: `Pasaran ${plan.market} tidak di-auto (diatur di menu Auto Prediksi) — input manual. Total Omset/Referal/Menang tetap dicek otomatis setelah Anda menghitung di admin`, results: [] };
 	}
 
 	const sessions = await getSessions(env, profile.username);
@@ -237,6 +248,57 @@ export async function autoInputAfterSend(
 		}
 	}
 	return { results };
+}
+
+/** Pasaran yang dihitung manual: jadwalkan pemantauan Omset per website (hanya membaca; cron yang menjalankannya). */
+async function watchManualTotals(env: Env, profile: UserProfile, plan: Extract<AutoInputPlan, { ok: true }>, websites: string[]): Promise<void> {
+	const sessions = await getSessions(env, profile.username);
+	for (const website of websites) {
+		const w = String(website).trim().toUpperCase();
+		await scheduleManualTotals(env, profile.username, w, plan, !!sessions.find((x) => x.website === w)?.phpsessid);
+	}
+}
+
+/**
+ * Tick cron (tiap menit): satu baris pantauan Omset yang sudah waktunya dicek. Murah bila tidak ada yang menunggu (1 query ber-index).
+ * Hanya MEMBACA admin. Berhenti memantau bila angkanya terbaca atau batas tunggu habis; selama belum, dicoba lagi tiap sys_totals_poll_min.
+ */
+export async function autoInputTotalsTick(env: Env, fetchFn?: Fetcher): Promise<boolean> {
+	const row = await claimDueManualTotals(env);
+	if (!row) return false;
+	const expired = () => !!row.untilAt && tsNow() > row.untilAt;
+	const give = (why: string) => finishManualTotals(env, row, "", null, "Sampai batas waktu tunggu: " + why);
+	const sess = await getSession(env, row.username, row.website);
+	if (!sess?.phpsessid) {
+		await finishManualTotals(env, row, "", null, `PHPSESSID ${row.website} belum disimpan — Omset tidak bisa dicek`);
+		return true;
+	}
+	const badBase = adminBaseProblem(sess.website, sess.baseUrl);
+	if (badBase) {
+		await finishManualTotals(env, row, "", null, `URL admin ${row.website} ditolak: ${badBase}`);
+		return true;
+	}
+	const f: Fetcher = fetchFn ?? ((u, i) => fetch(u, i));
+	try {
+		const r = await checkManualTotals({ f, sess, market: row.market, prizes: row.prizes, code: row.code });
+		if (r.code !== row.code) await setManualTotalsState(env, row.id, { code: r.code });
+		if (r.state === "done") {
+			await saveManualOutcome(env, row, r.period, r.totals);
+			return true;
+		}
+		if (expired()) await give(r.why);
+		else await setManualTotalsState(env, row.id, { note: r.why });
+	} catch (e) {
+		const why = (e instanceof Error ? e.message : String(e)).slice(0, 240);
+		if (expired()) await give(why);
+		else await setManualTotalsState(env, row.id, { note: why }); // sesi habis / jaringan: tetap dicoba lagi sampai batas waktu
+	}
+	return true;
+}
+
+async function saveManualOutcome(env: Env, row: Parameters<typeof finishManualTotals>[1], period: string, totals: { omset: string; referal: string; menang: string }): Promise<void> {
+	await finishManualTotals(env, row, period, totals, "");
+	await logActivity(env, row.username, "AUTO PREDIKSI", `[${row.website}] ${row.market} ${row.prizes.join("/")} — dihitung manual, Omset ${totals.omset} · Referal ${totals.referal} · Menang ${totals.menang}`, "BERHASIL", "").catch(() => {});
 }
 
 /** Menjalankan SATU job antre (tanpa autentikasi -- dipanggil setelah gate). */
@@ -323,6 +385,11 @@ export async function autoInputTotalsRefresh(env: Env, token: string, id: number
 	if (!sess?.phpsessid) return { success: false, message: `PHPSESSID ${w} belum disimpan.` };
 	const badBase = adminBaseProblem(sess.website, sess.baseUrl);
 	if (badBase) return { success: false, message: `URL admin ${w} ditolak: ${badBase}.` };
+	if (row.manual) {
+		// pasaran yang dihitung manual: periode baru diketahui setelah angkanya terbaca, jadi pantau ulang dari awal (cron yang membaca)
+		await rearmManualTotals(env, row.id);
+		return { success: true, message: "Dipantau lagi: akan dicek otomatis sampai angkanya diinput & dihitung di admin." };
+	}
 	const f: Fetcher = fetchFn ?? ((u, i) => fetch(u, i));
 	const keep = { id: row.jobId, username: s.username, website: w, market: row.market, prizes: row.prizes, resultDate: "" };
 	try {
