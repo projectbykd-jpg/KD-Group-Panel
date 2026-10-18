@@ -73,3 +73,34 @@ describe("deepHealth + Turso", () => {
 		expect(h.checks.turso.note).toContain("cadangan disalin 2026-10-11 07:20:00");
 	});
 });
+
+describe("deepHealth ?session=1 (uji tulis-baca sesi login)", () => {
+	const sessionRows = () => (ctx.db.prepare(`SELECT COUNT(*) AS n FROM sessions`).get() as { n: number }).n;
+	it("tanpa opsi: TIDAK menulis apa pun ke KV/D1 (aman dipanggil watchdog berkala)", async () => {
+		const h = await deepHealth(ctx.env, now);
+		expect(h.checks.session).toBeUndefined();
+		expect(ctx.kv.store.size).toBe(0);
+		expect(sessionRows()).toBe(0);
+	});
+	it("sehat: sesi percobaan ditulis, terbaca, lalu dibersihkan", async () => {
+		const h = await deepHealth(ctx.env, now, { session: true });
+		expect(h.checks.session).toMatchObject({ ok: true, note: "tulis + baca KV & D1 OK" });
+		expect(ctx.kv.store.size).toBe(0);
+		expect(sessionRows()).toBe(0);
+	});
+	it("KV tidak bisa ditulis (kuota) tapi D1 OK -> tetap terbaca, tapi ada peringatan", async () => {
+		ctx.kv.put = async () => { throw new Error("KV put() limit exceeded for the day."); };
+		const h = await deepHealth(ctx.env, now, { session: true });
+		expect(h.checks.session.ok).toBe(true);
+		expect(h.warnings.join(" ")).toMatch(/tulis KV: KV put\(\) limit exceeded/);
+	});
+	it("KV DAN D1 sama-sama gagal menulis (gejala 'login berhasil lalu Sesi tidak valid') -> GAGAL dengan alasan keduanya", async () => {
+		ctx.kv.put = async () => { throw new Error("KV put() limit exceeded for the day."); };
+		ctx.db.exec(`DROP TABLE sessions`);
+		const h = await deepHealth(ctx.env, now, { session: true });
+		expect(h.ok).toBe(false);
+		expect(h.checks.session.error).toMatch(/TIDAK terbaca/);
+		expect(h.checks.session.error).toMatch(/tulis D1/);
+		expect(h.checks.session.error).toMatch(/tulis KV: KV put\(\) limit exceeded/);
+	});
+});
