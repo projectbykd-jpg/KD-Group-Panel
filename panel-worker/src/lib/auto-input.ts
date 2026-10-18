@@ -536,6 +536,53 @@ export async function setJobTotalsText(env: Env, jobId: number, totals: { omset:
 	await db.prepare(`UPDATE auto_input_job SET detail = ? WHERE id = ?`).bind(withTotalsText(row.detail, totals).slice(0, 600), jobId).run();
 }
 
+/**
+ * Pasaran yang dihitung MANUAL (tidak di-auto / Auto Prediksi OFF): catat pembacaan menu Prediksi di Riwayat Job sebagai baris
+ * SELESAI (DONE) atau DILEWATI (SKIPPED, bila gagal dibaca) -- tidak pernah FAILED/QUEUED, jadi percobaan ulang otomatis & antrean
+ * Auto Prediksi tidak pernah menyentuhnya (tidak ada input/Hitung). Kunci "manual:..." beda dari kunci result Auto Prediksi, jadi
+ * pagar anti-input-ganda tidak terpengaruh. KIRIM ulang result yang sama memperbarui baris yang sama. Tanpa kolom/tabel baru.
+ */
+export async function recordManualTotalsJob(
+	env: Env,
+	o: { username: string; website: string; market: string; prizes: string[]; resultDate: string; key: string; ok: boolean; detail: string; period: string },
+): Promise<number> {
+	await ensureAutoInputTables(env);
+	const db = getTurso(env);
+	const now = tsNow();
+	const w = String(o.website).trim().toUpperCase();
+	await db
+		.prepare(
+			`INSERT INTO auto_input_job (username, website, market, prizes, result_date, result_key, status, stage, detail, period, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, 'prediksi', ?, ?, ?, ?)
+			 ON CONFLICT(website, result_key) DO UPDATE SET status = excluded.status, detail = excluded.detail, period = excluded.period, updated_at = excluded.updated_at, hidden = 0
+			 WHERE auto_input_job.username = excluded.username`,
+		)
+		.bind(o.username, w, o.market, JSON.stringify(o.prizes), o.resultDate, o.key, o.ok ? "DONE" : "SKIPPED", o.detail.slice(0, 600), o.period, now, now)
+		.run();
+	const r = await db.prepare(`SELECT id FROM auto_input_job WHERE website = ? AND result_key = ? AND username = ?`).bind(w, o.key, o.username).first<{ id: number }>();
+	if (!r) throw new Error("Riwayat Job tidak tercatat.");
+	return Number(r.id);
+}
+
+/** Job catatan pasaran MANUAL (kunci "manual:...") milik user ini, atau null. Dipakai "Ambil ulang" agar membaca Last Result terkini. */
+export async function getManualJob(env: Env, username: string, id: number): Promise<JobRow | null> {
+	await ensureAutoInputTables(env);
+	const r = await getTurso(env)
+		.prepare(`SELECT * FROM auto_input_job WHERE id = ? AND username = ? AND result_key LIKE 'manual:%'`)
+		.bind(id, username)
+		.first<Record<string, unknown>>();
+	return r ? rowToJob(r) : null;
+}
+
+export async function manualJobStatus(env: Env, username: string, website: string, key: string): Promise<string> {
+	await ensureAutoInputTables(env);
+	const r = await getTurso(env)
+		.prepare(`SELECT status FROM auto_input_job WHERE website = ? AND result_key = ? AND username = ?`)
+		.bind(String(website).trim().toUpperCase(), key, username)
+		.first<{ status: string }>();
+	return r ? String(r.status) : "";
+}
+
 export interface TotalsRow {
 	id: number;
 	jobId: number;
@@ -558,6 +605,8 @@ export async function saveTotals(
 	period: string,
 	totals: { omset: string; referal: string; menang: string } | null | undefined,
 	note: string,
+	/** peringatan yang tetap disimpan walau angka terbaca (pasaran manual: Last Result beda dari result yang dikirim) */
+	warn = "",
 ): Promise<void> {
 	await ensureAutoInputTables(env);
 	await getTurso(env)
@@ -566,7 +615,7 @@ export async function saveTotals(
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(job_id) DO UPDATE SET period = excluded.period, omset = excluded.omset, referal = excluded.referal, menang = excluded.menang, note = excluded.note, at = excluded.at`,
 		)
-		.bind(job.id, job.username, job.website, job.market, JSON.stringify(job.prizes), job.resultDate, period, totals?.omset ?? "", totals?.referal ?? "", totals?.menang ?? "", totals ? "" : note.slice(0, 300), tsNow())
+		.bind(job.id, job.username, job.website, job.market, JSON.stringify(job.prizes), job.resultDate, period, totals?.omset ?? "", totals?.referal ?? "", totals?.menang ?? "", (totals ? warn : note).slice(0, 300), tsNow())
 		.run();
 }
 

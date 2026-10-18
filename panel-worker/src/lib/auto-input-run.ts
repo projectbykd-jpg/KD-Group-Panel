@@ -436,11 +436,25 @@ export async function findMarketCode(f: Fetcher, sess: AdminSession, market: str
  * Lempar Error berisi alasan bila ada yang tidak persis sesuai (pasaran, periode, angka, tabel).
  */
 export async function readPrediksiTotals(o: { f: Fetcher; sess: AdminSession; code: string; market: string; period: string; numbers: string[] }): Promise<PrediksiTotals> {
+	if (!Number(o.period) || !o.numbers.length) throw new Error("Periode/angka yang dihitung tidak diketahui.");
+	return (await submitPrediksi(o, { period: Number(o.period), numbers: o.numbers })).totals;
+}
+
+/**
+ * Pasaran yang dihitung MANUAL di admin (tidak di-auto): Last Result APA ADANYA -> Submit -> baris Result. Tidak membandingkan dengan
+ * result yang dikirim; periode & angka Last Result dikembalikan supaya pemanggil bisa mencatat (dan menandai bila berbeda). Hanya membaca.
+ */
+export async function readPrediksiLastTotals(o: { f: Fetcher; sess: AdminSession; code: string; market: string }): Promise<{ totals: PrediksiTotals; last: LastResult }> {
+	return submitPrediksi(o, null);
+}
+
+async function submitPrediksi(
+	o: { f: Fetcher; sess: AdminSession; code: string; market: string },
+	expect: { period: number; numbers: string[] } | null,
+): Promise<{ totals: PrediksiTotals; last: LastResult }> {
 	const path = `admin_prediksifullbb.php?psr=${o.code}`;
 	const referer = new URL(path, o.sess.baseUrl).toString();
 	const html = await adminReq(o.f, o.sess, path);
-	const period = Number(o.period);
-	if (!period || !o.numbers.length) throw new Error("Periode/angka yang dihitung tidak diketahui.");
 
 	const forms = parseForms(html).filter((f) => f.inputs.some((i) => i.name === "periode") && f.inputs.some((i) => i.type === "submit"));
 	if (forms.length !== 1) throw new Error("Halaman Prediksi tidak dikenali (form Periode + Submit tidak ditemukan).");
@@ -455,10 +469,14 @@ export async function readPrediksiTotals(o: { f: Fetcher; sess: AdminSession; co
 
 	const last = parseLastResult(html);
 	if (!last) throw new Error("'Last Result' tidak ditemukan / tidak terbaca di halaman Prediksi.");
-	if (last.period !== period) throw new Error(`Last Result di admin periode ${last.period}, bukan periode ${period} yang baru dihitung.`);
-	// Banding sebanyak angka yang ada di KEDUA sisi (pasaran 1-prize bisa menampilkan filler '0' / job menyimpan 3 prize).
-	const cmp = Math.min(o.numbers.length, last.numbers.length);
-	if (!cmp || o.numbers.slice(0, cmp).some((n, i) => last.numbers[i] !== n)) throw new Error(`Last Result angka ${last.numbers.join("/") || "-"} ≠ angka yang dihitung ${o.numbers.join("/")}.`);
+	if (expect) {
+		if (last.period !== expect.period) throw new Error(`Last Result di admin periode ${last.period}, bukan periode ${expect.period} yang baru dihitung.`);
+		// Banding sebanyak angka yang ada di KEDUA sisi (pasaran 1-prize bisa menampilkan filler '0' / job menyimpan 3 prize).
+		const cmp = Math.min(expect.numbers.length, last.numbers.length);
+		if (!cmp || expect.numbers.slice(0, cmp).some((n, i) => last.numbers[i] !== n)) throw new Error(`Last Result angka ${last.numbers.join("/") || "-"} ≠ angka yang dihitung ${expect.numbers.join("/")}.`);
+	}
+	const period = last.period;
+	const numbers = expect ? expect.numbers : last.numbers;
 
 	// sendRes(per, res, res2, res3, wild): isi kolom id periode / nomor / nomor2 / nomor3 / wild (yang ada), persis fungsi di halamannya.
 	const nameOf = (id: string) => form.inputs.find((i) => i.id === id)?.name;
@@ -475,11 +493,11 @@ export async function readPrediksiTotals(o: { f: Fetcher; sess: AdminSession; co
 	const button = form.inputs.find((i) => i.type === "submit");
 	const body = await adminReq(o.f, o.sess, path, { method: "POST", body: buildPayload(form, fill, button), referer });
 
-	const echo = prediksiEchoProblem(body, period, o.numbers);
+	const echo = prediksiEchoProblem(body, period, numbers);
 	if (echo) throw new Error(`Hasil Prediksi ditolak: ${echo}.`);
 	const totals = parsePrediksiTotals(body);
 	if (!totals) throw new Error("Baris Result / kolom Total Omset-Referal-Menang tidak terbaca di tabel Prediksi.");
-	return totals;
+	return { totals, last };
 }
 
 // ---------------------------------------------------------------------------
