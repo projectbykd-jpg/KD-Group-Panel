@@ -9,7 +9,7 @@
 // Jangan menulis rahasia (password, key, token) di sini.
 // ============================================================================
 
-export const ASSISTANT_KB_VERSION = "2026-10-18.80";
+export const ASSISTANT_KB_VERSION = "2026-10-18.81";
 
 /** Penjelasan per menu. Kunci = id navigasi (nav-<kunci>) di ui-src/Index.html. */
 export const KB_PAGES: Record<string, { title: string; text: string }> = {
@@ -19,7 +19,7 @@ export const KB_PAGES: Record<string, { title: string; text: string }> = {
 	},
 	result: {
 		title: "Result",
-		text: "Alur harian utama. 1) Salin teks hasil pengeluaran dari Telegram, 2) klik 'Tempel' (atau tempel manual) di kotak 'Teks mentah' — teks otomatis diproses: panel mengenali Pasaran, Prize 1/2/3, Shio, angka 2D, lalu tampil di 'Monitor hasil real-time' dan 'Live preview output'. 3) Pastikan Status 'BENAR', lalu klik 'KIRIM SEMUA SISTEM' (TG = Telegram, LT = LinkTree, PZ = Panel-Z) untuk mengirim ke semua website milik akun Anda. Sistem mencegah pengiriman ganda (duplikat diblokir). Bila salah satu sistem gagal, hasil tiap sistem tampil dan bisa dikirim ulang. 'Kirim manual ke Panel-Z': pilih pasaran + isi angka, klik 'Kirim ke Panel-Z' (tombol 'Tempel Angka' mengambil dari clipboard). 'Salin cepat' menyalin Prize 1/2/3, teks Telegram, Judul LinkTree, Pesan LinkTree, dan teks Panel-Z. Kartu 'Monitor hasil real-time' kini ringkas (Angka 2D, Shio, Status) dan di bawahnya ada tabel 'Total Omset · Referal · Menang' per website (hanya untuk akun yang memakai Auto Prediksi): angkanya dibaca OTOMATIS dari menu Prediksi di admin website (baris 'Result') setelah pasaran selesai dihitung. Tombol 'Salin Website 1 · NAMA' dan 'Salin Website 2 · NAMA' (warna beda) menyalin 'omset[TAB]referal[TAB]menang' (mis. 21,700 0 0) supaya langsung tempel jadi 3 kolom; 'Muat' memuat ulang; 'Ambil ulang' di baris yang gagal terbaca membaca ulang menu Prediksi.",
+		text: "Alur harian utama. 1) Salin teks hasil pengeluaran dari Telegram, 2) klik 'Tempel' (atau tempel manual) di kotak 'Teks mentah' — teks otomatis diproses: panel mengenali Pasaran, Prize 1/2/3, Shio, angka 2D, lalu tampil di 'Monitor hasil real-time' dan 'Live preview output'. 3) Pastikan Status 'BENAR', lalu klik 'KIRIM SEMUA SISTEM' (TG = Telegram, LT = LinkTree, PZ = Panel-Z) untuk mengirim ke semua website milik akun Anda. Sistem mencegah pengiriman ganda (duplikat diblokir). Bila salah satu sistem gagal, hasil tiap sistem tampil dan bisa dikirim ulang. 'Kirim manual ke Panel-Z': pilih pasaran + isi angka, klik 'Kirim ke Panel-Z' (tombol 'Tempel Angka' mengambil dari clipboard). 'Salin cepat' menyalin Prize 1/2/3, teks Telegram, Judul LinkTree, Pesan LinkTree, dan teks Panel-Z. Kartu 'Monitor hasil real-time' kini ringkas (Angka 2D, Shio, Status). Di BAWAH dua kolom (kartu lebar tersendiri) ada tabel 'Total Omset · Referal · Menang' per website (hanya untuk akun yang memakai Auto Prediksi): angkanya dibaca OTOMATIS dari menu Prediksi di admin website (baris 'Result') setelah pasaran selesai dihitung. Tombol 'Salin Website 1 · NAMA' dan 'Salin Website 2 · NAMA' (warna beda) menyalin 'omset[TAB]referal[TAB]menang' (mis. 21,700 0 0) supaya langsung tempel jadi 3 kolom; 'Muat' memuat ulang; 'Ambil ulang' di baris yang gagal terbaca membaca ulang menu Prediksi.",
 	},
 	prediction: {
 		title: "Prediksi",

@@ -511,21 +511,6 @@
                   <div id="status" class="text-xs font-black tracking-wider text-slate-400 mt-1 leading-none">-</div>
                 </div>
               </div>
-              <!-- Total Omset / Referal / Menang periode yang baru dihitung (dibaca Auto Prediksi dari menu Prediksi admin).
-                   Tampil hanya untuk akun yang boleh memakai Auto Prediksi. -->
-              <div id="omsetBox" class="flex flex-col gap-2" style="display:none">
-                <div class="flex items-center justify-between gap-2">
-                  <span class="text-[10px] text-slate-400 font-bold tracking-wider">TOTAL OMSET · REFERAL · MENANG</span>
-                  <button type="button" onclick="loadOmsetTable()" class="paste-btn"><i class="fa-solid fa-rotate"></i> Muat</button>
-                </div>
-                <div id="omsetCopy" class="flex flex-wrap gap-2"></div>
-                <div class="pretty-table-wrap" style="overflow-x:auto;max-height:240px;overflow-y:auto">
-                  <table class="pretty-table stack-sm">
-                    <thead><tr><th>Website</th><th class="omset-num">Total Omset</th><th class="omset-num">Total Referal</th><th class="omset-num">Total Menang</th></tr></thead>
-                    <tbody id="omsetBody"></tbody>
-                  </table>
-                </div>
-              </div>
               <div class="beranda-flex flex flex-col gap-2">
                 <span class="text-[10px] text-slate-400 font-bold tracking-wider">LIVE PREVIEW OUTPUT</span>
                 <div id="outputPreview" class="w-full h-20 glass-inner border border-white/5 rounded-2xl p-3.5 text-xs font-mono text-cyan-300/90 overflow-y-auto whitespace-pre-wrap shadow-inner"></div>
@@ -552,6 +537,21 @@
                 <button onclick="copyPanelZ()" class="qcopy-btn justify-center"><i class="fa-solid fa-bolt text-amber-400"></i>Panel-Z</button>
               </div>
             </div>
+          </div>
+        </div>
+        <!-- Total Omset / Referal / Menang periode yang baru dihitung (dibaca Auto Prediksi dari menu Prediksi admin).
+             Kartu lebar di bawah dua kolom; tampil hanya untuk akun yang boleh memakai Auto Prediksi. -->
+        <div id="omsetBox" class="glass-card rounded-3xl p-5 flex flex-col gap-3" style="display:none">
+          <div class="flex items-center justify-between gap-2">
+            <div class="panel-section-title"><i class="fa-solid fa-coins text-amber-400 text-sm"></i> TOTAL OMSET · REFERAL · MENANG</div>
+            <button type="button" onclick="loadOmsetTable()" class="paste-btn"><i class="fa-solid fa-rotate"></i> Muat</button>
+          </div>
+          <div id="omsetCopy" class="flex flex-wrap gap-2"></div>
+          <div class="pretty-table-wrap" style="overflow-x:auto;max-height:320px;overflow-y:auto">
+            <table class="pretty-table stack-sm">
+              <thead><tr><th>Website</th><th>Pasaran</th><th>Periode</th><th class="omset-num">Total Omset</th><th class="omset-num">Total Referal</th><th class="omset-num">Total Menang</th></tr></thead>
+              <tbody id="omsetBody"></tbody>
+            </table>
           </div>
         </div>
       </div>

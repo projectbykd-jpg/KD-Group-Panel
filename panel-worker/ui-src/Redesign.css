@@ -1593,7 +1593,7 @@ th.ai-sel, td.ai-sel { width: 36px; padding-right: 0 !important; }
 #omsetBox .pretty-table td.omset-num { text-align: right; font-family: ui-monospace, monospace; white-space: nowrap; font-weight: 700; color: #e2e8f0; }
 #omsetBox .pretty-table th.omset-num { text-align: right; }
 /* Tombol salin per website dibedakan warna: 1 biru, 2 kuning, 3 hijau, 4 merah muda */
-#omsetCopy .omset-copy-0 { border-color: rgba(34,211,238,.5); background: rgba(8,145,178,.2); color: #a5f3fc; }
-#omsetCopy .omset-copy-1 { border-color: rgba(251,191,36,.5); background: rgba(180,83,9,.2); color: #fde68a; }
-#omsetCopy .omset-copy-2 { border-color: rgba(52,211,153,.5); background: rgba(5,150,105,.2); color: #a7f3d0; }
-#omsetCopy .omset-copy-3 { border-color: rgba(244,114,182,.5); background: rgba(190,24,93,.2); color: #fbcfe8; }
+#omsetCopy .omset-copy-0 { border-color: rgba(34,211,238,.5) !important; background: rgba(8,145,178,.2) !important; color: #a5f3fc !important; }
+#omsetCopy .omset-copy-1 { border-color: rgba(251,191,36,.5) !important; background: rgba(180,83,9,.2) !important; color: #fde68a !important; }
+#omsetCopy .omset-copy-2 { border-color: rgba(52,211,153,.5) !important; background: rgba(5,150,105,.2) !important; color: #a7f3d0 !important; }
+#omsetCopy .omset-copy-3 { border-color: rgba(244,114,182,.5) !important; background: rgba(190,24,93,.2) !important; color: #fbcfe8 !important; }
