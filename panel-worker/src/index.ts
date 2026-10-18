@@ -42,6 +42,7 @@ import {
 	autoInputTotals,
 	autoInputTotalsRefresh,
 	autoInputRetryTick,
+	autoInputTotalsTick,
 	dispatchTotoMacau,
 	pruneAutoPrediksiHistory,
 	autoInputAlerts,
@@ -848,13 +849,18 @@ export default {
 				await cronFail(env, "auto-input retry")(e);
 				return false;
 			});
+			// Pantau Total Omset/Referal/Menang pasaran yang dihitung MANUAL (hanya membaca admin; tanpa baris menunggu = 1 query ber-index).
+			const watched = retried ? false : await autoInputTotalsTick(env).catch(async (e) => {
+				await cronFail(env, "pantau omset")(e);
+				return false;
+			});
 			// Auto Check Toto Macau/5D: cron ini hanya MEMICU workflow GitHub Actions (1 panggilan GitHub); prosesnya di Actions. Bila memicu, pump Invest menunggu tick berikutnya.
 			const totoDispatched = retried ? false : await totoDispatchTick(env, () => dispatchTotoMacau(env)).catch(async (e) => {
 						await cronFail(env, "toto dispatch tick")(e);
 						await logTotoEvent(env, "", "info", "ERR", "Pemicu cron galat: " + (e instanceof Error ? e.message : String(e)).slice(0, 200)); // terlihat di LOG KEGIATAN, tidak diam-diam
 						return false;
 					});
-			if (!retried && !totoDispatched) await investPump(env).catch(cronFail(env, "invest pump"));
+			if (!retried && !totoDispatched && !watched) await investPump(env).catch(cronFail(env, "invest pump"));
 		}
 	},
 } satisfies ExportedHandler<Env>;
