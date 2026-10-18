@@ -4494,10 +4494,17 @@
       if (ok.length) toast('Auto Prediksi: dihitung di ' + ok.join(', '));
     }
 
+    // Halaman belum pernah tampil: jangan diam KOSONG -- tunjukkan "Memuat…" lalu pesan galat + Coba lagi (poll 6 dtk tetap mencoba sendiri).
+    function autoInputPlaceholder(msg, isErr) {
+      const page = document.getElementById('auto-input-page');
+      if (!page || autoInputState) return;
+      page.innerHTML = `<div class="glass-card rounded-3xl p-6 text-sm ${isErr ? 'text-amber-300' : 'text-slate-400'}" style="font-weight:600">${escapeHtml(msg)}${isErr ? ' <button type="button" class="retry-mini" onclick="loadAutoInputPage(false)">Coba lagi</button>' : ''}</div>`;
+    }
     function loadAutoInputPage(silent) {
+      if (!silent) autoInputPlaceholder('Memuat Auto Prediksi…', false);
       google.script.run
         .withSuccessHandler(res => {
-          if (apiFailed(res)) { if (!silent) toast(apiMessage(res)); return; }
+          if (apiFailed(res)) { autoInputPlaceholder('Auto Prediksi gagal dimuat: ' + apiMessage(res), true); if (!silent) toast(apiMessage(res)); return; }
           // Poll senyap: render ulang HANYA bila datanya berubah (dulu seluruh halaman ditimpa tiap 6 dtk -> isian yang belum disimpan hilang).
           const sig = JSON.stringify(res);
           if (silent && sig === autoInputSig) return;
@@ -4505,7 +4512,7 @@
           autoInputState = res;
           renderAutoInputPage();
         })
-        .withFailureHandler(err => { if (!silent) toast((err && err.message) || 'Gagal memuat Auto Prediksi'); })
+        .withFailureHandler(err => { autoInputPlaceholder('Auto Prediksi gagal dimuat: ' + ((err && err.message) || 'koneksi putus'), true); if (!silent) toast((err && err.message) || 'Gagal memuat Auto Prediksi'); })
         .autoInputGetState(currentSessionToken);
       clearInterval(autoInputTimer);
       autoInputTimer = setInterval(() => {

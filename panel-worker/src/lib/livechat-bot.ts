@@ -30,31 +30,16 @@
 import { getTurso } from "./turso";
 import { tsNow } from "./time";
 import { ensureColumns } from "./turso-schema";
+import { sharedOnce } from "./shared-once";
 
-let tablesEnsured = false;
-let ensuring: Promise<void> | null = null;
-/** Hanya untuk test. */
-export function resetLivechatTablesFlag(): void {
-	tablesEnsured = false;
-	ensuring = null;
-}
 /** Satu pembuatan skema bersama + SATU batch CREATE + SATU query kolom (ALTER hanya bila kolom belum ada).
  *  Dulu: 3 CREATE + 5 ALTER yang SELALU gagal "duplicate column" dijalankan satu-satu di tiap isolate dingin, dan dua request
- *  paralel (polling sesi + sinkron userscript) masing-masing mengulang semuanya -> boros subrequest (batas 50) dan menu Sesi Chat error. */
-function ensureTables(env: Env): Promise<void> {
-	if (tablesEnsured) return Promise.resolve();
-	if (!ensuring) {
-		ensuring = ensureTablesOnce(env).then(
-			() => {
-				tablesEnsured = true;
-			},
-			(e) => {
-				ensuring = null; // gagal -> request berikutnya boleh mencoba lagi
-				throw e;
-			},
-		);
-	}
-	return ensuring;
+ *  paralel (polling sesi + sinkron userscript) masing-masing mengulang semuanya -> boros subrequest (batas 50) dan menu Sesi Chat error.
+ *  Request lain yang ikut menunggu dibatasi 8 dtk (lihat shared-once.ts) supaya tidak menggantung bersama. */
+const ensureTables = sharedOnce((env) => ensureTablesOnce(env), 8000);
+/** Hanya untuk test. */
+export function resetLivechatTablesFlag(): void {
+	ensureTables.reset();
 }
 async function ensureTablesOnce(env: Env): Promise<void> {
 	const db = getTurso(env);

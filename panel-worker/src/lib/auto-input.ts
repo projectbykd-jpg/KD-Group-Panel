@@ -13,6 +13,7 @@
 import { adminDomain } from "./integrations";
 import { getTurso } from "./turso";
 import { ensureColumns } from "./turso-schema";
+import { sharedOnce } from "./shared-once";
 import { getSys } from "./settings";
 import { retentionFrom, tsNow, tsPlusMinutes } from "./time";
 import { MARKET_TO_PANEL, type Processed } from "./parser";
@@ -38,30 +39,15 @@ export function finalFailureSql(alias = ""): string {
 
 export type JobStatus = "QUEUED" | "RUNNING" | "DONE" | "FAILED" | "SKIPPED";
 
-let tablesEnsured = false;
-let ensuring: Promise<void> | null = null;
-/** Hanya untuk test (tiap test memakai database baru). */
-export function resetAutoInputTablesFlag(): void {
-	tablesEnsured = false;
-	ensuring = null;
-	lastExpireAt = 0;
-}
+/** Batas IKUT menunggu pembuatan skema yang dimulai request lain (lihat shared-once.ts). Bukan pengaturan: pengaman internal. */
+const ENSURE_JOIN_WAIT_MS = 8000;
 /** Satu pembuatan skema bersama: tiga fungsi yang dipanggil paralel (Promise.all) di isolate dingin dulu masing-masing menjalankan
  *  SELURUH pembuatan skema (penanda baru diset sesudah selesai) -> subrequest dikali tiga -> "Too many subrequests". */
-export function ensureAutoInputTables(env: Env): Promise<void> {
-	if (tablesEnsured) return Promise.resolve();
-	if (!ensuring) {
-		ensuring = ensureAutoInputTablesOnce(env).then(
-			() => {
-				tablesEnsured = true;
-			},
-			(e) => {
-				ensuring = null; // gagal -> request berikutnya boleh mencoba lagi
-				throw e;
-			},
-		);
-	}
-	return ensuring;
+export const ensureAutoInputTables = sharedOnce((env) => ensureAutoInputTablesOnce(env), ENSURE_JOIN_WAIT_MS);
+/** Hanya untuk test (tiap test memakai database baru). */
+export function resetAutoInputTablesFlag(): void {
+	ensureAutoInputTables.reset();
+	lastExpireAt = 0;
 }
 async function ensureAutoInputTablesOnce(env: Env): Promise<void> {
 	const db = getTurso(env);
