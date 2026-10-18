@@ -4386,7 +4386,10 @@
       if (!box || !body || !copy) return;
       box.style.display = 'flex';
       const esc = escapeHtml;
-      const rows = omsetState.rows;
+      // Hanya hasil TERAKHIR per website (tanpa riwayat -- riwayat ada di Auto Prediksi > Riwayat Job > Keterangan).
+      // Urutan mengikuti urutan website akun (Website 1, Website 2); hasil baru menggantikan yang lama.
+      const order = omsetState.websites.length ? omsetState.websites : [...new Set(omsetState.rows.map(r => r.website))];
+      const rows = order.map(w => omsetLatest(w)).filter(Boolean);
       body.innerHTML = rows.length ? rows.map(r => {
         const ok = omsetHas(r);
         const num = (v, label) => `<td data-label="${label}" class="omset-num">${ok ? esc(v) : '–'}</td>`;

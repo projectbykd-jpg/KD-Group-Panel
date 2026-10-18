@@ -520,6 +520,22 @@ export async function finishJob(
 		.run();
 }
 
+/** Penanda ringkas Total Omset/Referal/Menang di kolom Keterangan Riwayat Job (rapi & mudah dibaca). */
+const TOTALS_TAG_RE = /\s*\[Omset[^\]]*\]\s*$/;
+export function withTotalsText(detail: string, totals: { omset: string; referal: string; menang: string } | null | undefined, note = ""): string {
+	const base = String(detail ?? "").replace(TOTALS_TAG_RE, "");
+	const tag = totals ? `[Omset ${totals.omset} · Referal ${totals.referal} · Menang ${totals.menang}]` : `[Omset belum terbaca${note ? ": " + note.slice(0, 160) : ""}]`;
+	return `${base} ${tag}`;
+}
+
+/** Perbarui Keterangan job SELESAI setelah "Ambil ulang" berhasil membaca angkanya. */
+export async function setJobTotalsText(env: Env, jobId: number, totals: { omset: string; referal: string; menang: string }): Promise<void> {
+	const db = getTurso(env);
+	const row = await db.prepare(`SELECT detail FROM auto_input_job WHERE id = ? AND status = 'DONE'`).bind(jobId).first<{ detail: string }>();
+	if (!row) return;
+	await db.prepare(`UPDATE auto_input_job SET detail = ? WHERE id = ?`).bind(withTotalsText(row.detail, totals).slice(0, 600), jobId).run();
+}
+
 export interface TotalsRow {
 	id: number;
 	jobId: number;
