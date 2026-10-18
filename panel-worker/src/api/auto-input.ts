@@ -10,12 +10,16 @@ import { dateKeyNow } from "../lib/time";
 import { hasMenu } from "../lib/menus";
 import type { Processed } from "../lib/parser";
 import type { UserProfile } from "../lib/db";
+import type { AutoInputPlan } from "../lib/auto-input";
 import {
 	adminBaseProblem,
 	getTotalsRow,
 	listTotals,
 	saveTotals,
 	setJobTotalsText,
+	recordManualTotalsJob,
+	manualJobStatus,
+	getManualJob,
 	withTotalsText,
 	claimJob,
 	hideJobs,
@@ -44,7 +48,7 @@ import {
 	setStage,
 	startJob,
 } from "../lib/auto-input";
-import { findMarketCode, readPrediksiTotals, runAutoInput, type Fetcher } from "../lib/auto-input-run";
+import { findMarketCode, readPrediksiLastTotals, readPrediksiTotals, runAutoInput, type Fetcher } from "../lib/auto-input-run";
 
 async function gate(env: Env, token: string) {
 	const s = await requireSession(env, token, { menu: "auto-input" });
@@ -197,6 +201,14 @@ export interface AutoInputNotice {
 	skippedReason?: string;
 	/** ANTRI = job sudah dibuat, browser harus memanggil autoInputRun(jobId) -- satu panggilan per website. */
 	results: (Omit<AutoInputOutcome, "status"> & { status: AutoInputOutcome["status"] | "ANTRI"; jobId?: number })[];
+	/** Pasaran yang dihitung MANUAL (tidak di-auto / Auto Prediksi OFF): browser memanggil autoInputTotalsCheck per website -- hanya membaca menu Prediksi. */
+	totalsCheck?: ManualCheck[];
+}
+export interface ManualCheck {
+	website: string;
+	market: string;
+	prizes: string[];
+	date: string;
 }
 
 /**
@@ -213,12 +225,21 @@ export async function autoInputAfterSend(
 ): Promise<AutoInputNotice | undefined> {
 	if (profile.role !== "ADMIN" && profile.role !== "OPERATOR") return undefined;
 	if (!hasMenu(profile, "auto-input")) return undefined;
-	if (!(await getEnabled(env, profile.username))) return undefined;
-
+	const enabled = await getEnabled(env, profile.username);
 	const plan = planAutoInput(rawText, processed);
+	// Auto Prediksi OFF: tidak ada input/Hitung, tapi Total Omset/Referal/Menang tetap dibaca dari menu Prediksi (browser yang memanggil).
+	if (!enabled) {
+		if (!plan.ok) return undefined;
+		const totalsCheck = await manualChecks(env, profile, plan, websites);
+		return totalsCheck.length ? { results: [], totalsCheck } : undefined;
+	}
 	if (!plan.ok) return { skippedReason: plan.reason, results: [] };
 	if ((await getDisabledMarkets(env, profile.username)).includes(normMarket(plan.market))) {
-		return { skippedReason: `Pasaran ${plan.market} tidak di-auto (diatur di menu Auto Prediksi) — input manual`, results: [] };
+		return {
+			skippedReason: `Pasaran ${plan.market} tidak di-auto (diatur di menu Auto Prediksi) — input manual`,
+			results: [],
+			totalsCheck: await manualChecks(env, profile, plan, websites),
+		};
 	}
 
 	const sessions = await getSessions(env, profile.username);
@@ -237,6 +258,68 @@ export async function autoInputAfterSend(
 		}
 	}
 	return { results };
+}
+
+/** Website (yang punya PHPSESSID) untuk pembacaan Total pasaran manual. Galat apa pun -> daftar kosong: tidak boleh mengganggu KIRIM SEMUA. */
+async function manualChecks(env: Env, profile: UserProfile, plan: Extract<AutoInputPlan, { ok: true }>, websites: string[]): Promise<ManualCheck[]> {
+	try {
+		const have = new Set((await getSessions(env, profile.username)).filter((x) => x.phpsessid).map((x) => x.website));
+		return websites
+			.map((w) => String(w).trim().toUpperCase())
+			.filter((w) => have.has(w))
+			.map((website) => ({ website, market: plan.market, prizes: plan.prizes, date: plan.date }));
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Dipanggil browser TEPAT sesudah KIRIM SEMUA untuk pasaran yang dihitung MANUAL: buka menu Prediksi pasaran itu, klik Last Result,
+ * tekan Submit, baca baris Result -- seketika, tanpa cron. HANYA membaca (tidak pernah Kirim/Hitung). Hasil masuk tabel Result &
+ * Riwayat Job (Keterangan). Last Result yang berbeda dari result yang dikirim tetap dibaca, tapi ditandai jelas.
+ */
+export async function autoInputTotalsCheck(env: Env, token: string, data: Record<string, unknown>, fetchFn?: Fetcher) {
+	const s = await gate(env, token);
+	const w = mustOwnWebsite(s.profile, String(data?.website ?? ""));
+	const market = String(data?.market ?? "").trim().slice(0, 60);
+	const prizes = (Array.isArray(data?.prizes) ? data.prizes : []).map((x) => String(x).trim()).filter((x) => /^\d{1,8}$/.test(x)).slice(0, 3);
+	const date = String(data?.date ?? "").trim().slice(0, 20);
+	if (!market || !prizes.length) throw new Error("Pasaran/angka result tidak lengkap.");
+	return manualTotalsCheck(env, s.username, w, market, prizes, date, fetchFn);
+}
+
+async function manualTotalsCheck(env: Env, username: string, w: string, market: string, prizes: string[], date: string, fetchFn?: Fetcher) {
+	const sess = await getSession(env, username, w);
+	if (!sess?.phpsessid) return { success: false, website: w, message: `PHPSESSID ${w} belum disimpan — Total tidak bisa dibaca.` };
+	const badBase = adminBaseProblem(sess.website, sess.baseUrl);
+	if (badBase) return { success: false, website: w, message: `URL admin ${w} ditolak: ${badBase}.` };
+	const f: Fetcher = fetchFn ?? ((u, i) => fetch(u, i));
+	const key = `manual:${normMarket(market)}:${date}:${prizes.join("/")}`;
+	let period = "";
+	let numbers = prizes;
+	let totals: Awaited<ReturnType<typeof readPrediksiLastTotals>>["totals"] | null = null;
+	let why = "";
+	try {
+		const code = await findMarketCode(f, sess, market);
+		const r = await readPrediksiLastTotals({ f, sess, code, market });
+		totals = r.totals;
+		period = String(r.last.period);
+		numbers = r.last.numbers;
+	} catch (e) {
+		why = (e instanceof Error ? e.message : String(e)).slice(0, 240);
+	}
+	// Pembacaan ulang yang gagal tidak pernah menimpa angka yang sudah terbaca untuk result yang sama.
+	if (!totals && (await manualJobStatus(env, username, w, key)) === "DONE") return { success: false, website: w, message: why + " (angka sebelumnya tetap)." };
+	const cmp = Math.min(prizes.length, numbers.length);
+	const differs = !!totals && (!cmp || prizes.slice(0, cmp).some((n, i) => numbers[i] !== n));
+	const lastTxt = totals ? ` Last Result periode ${period} angka ${numbers.join("/")}.` : "";
+	const warn = differs ? ` ⚠ Berbeda dari result yang dikirim (${prizes.join("/")}) — angka baru belum diinput/dihitung di admin? Tekan Ambil ulang di menu Result setelah menghitung.` : "";
+	const detail = withTotalsText(`Dihitung manual (pasaran tidak di-auto) — dibaca dari menu Prediksi: ${market} ${prizes.join("/")}.${lastTxt}${warn}`, totals, why);
+	const jobId = await recordManualTotalsJob(env, { username, website: w, market, prizes, resultDate: date, key, ok: !!totals, detail, period });
+	await saveTotals(env, { id: jobId, username, website: w, market, prizes, resultDate: date }, period, totals, why, differs ? `Last Result admin ${numbers.join("/")} ≠ result dikirim ${prizes.join("/")} — cek sebelum menyalin` : "");
+	await logActivity(env, username, "AUTO PREDIKSI", `[${w}] ${detail}`, totals ? "BERHASIL" : "GAGAL", "").catch(() => {});
+	if (!totals) return { success: false, website: w, message: why };
+	return { success: true, website: w, differs, message: `Terbaca: omset ${totals.omset}, referal ${totals.referal}, menang ${totals.menang} (periode ${period})${differs ? " — Last Result berbeda dari result yang dikirim" : ""}.` };
 }
 
 /** Menjalankan SATU job antre (tanpa autentikasi -- dipanggil setelah gate). */
@@ -319,6 +402,9 @@ export async function autoInputTotalsRefresh(env: Env, token: string, id: number
 	const row = await getTotalsRow(env, s.username, Number(id));
 	if (!row) throw new Error("Baris tidak ditemukan.");
 	const w = mustOwnWebsite(s.profile, row.website);
+	// Baris pasaran MANUAL: baca lagi Last Result TERKINI (admin mungkin baru menghitung), bukan periode lama.
+	const manual = await getManualJob(env, s.username, row.jobId);
+	if (manual) return manualTotalsCheck(env, s.username, w, manual.market, manual.prizes, manual.resultDate, fetchFn);
 	const sess = await getSession(env, s.username, w);
 	if (!sess?.phpsessid) return { success: false, message: `PHPSESSID ${w} belum disimpan.` };
 	const badBase = adminBaseProblem(sess.website, sess.baseUrl);

@@ -4393,9 +4393,9 @@
       body.innerHTML = rows.length ? rows.map(r => {
         const ok = omsetHas(r);
         const num = (v, label) => `<td data-label="${label}" class="omset-num">${ok ? esc(v) : '–'}</td>`;
-        const why = ok ? '' : `<div class="text-amber-300 text-[10px] whitespace-normal" style="font-weight:600">${esc(r.note || 'Belum terbaca')} <button type="button" class="retry-mini" onclick="omsetRefresh(${Number(r.id)}, this)">Ambil ulang</button></div>`;
+        const why = ok ? (r.note ? `<div class="text-amber-300 text-[10px] whitespace-normal" style="font-weight:600">⚠ ${esc(r.note)} <button type="button" class="retry-mini" onclick="omsetRefresh(${Number(r.id)}, this)">Ambil ulang</button></div>` : '') : `<div class="text-amber-300 text-[10px] whitespace-normal" style="font-weight:600">${esc(r.note || 'Belum terbaca')} <button type="button" class="retry-mini" onclick="omsetRefresh(${Number(r.id)}, this)">Ambil ulang</button></div>`;
         return `<tr><td data-label="Website" class="font-bold text-cyan-300 whitespace-nowrap">${esc(r.website)}</td><td data-label="Pasaran">${esc(r.market)}${why}</td><td data-label="Periode" class="font-mono">${esc(r.period)}</td>${num(r.omset, 'Total Omset')}${num(r.referal, 'Total Referal')}${num(r.menang, 'Total Menang')}</tr>`;
-      }).join('') : '<tr><td colspan="6" class="text-center text-slate-500 py-4">Belum ada. Muncul otomatis setelah Auto Prediksi menghitung sebuah pasaran.</td></tr>';
+      }).join('') : '<tr><td colspan="6" class="text-center text-slate-500 py-4">Belum ada. Muncul otomatis setelah KIRIM SEMUA (pasaran auto maupun manual).</td></tr>';
       // Satu tombol salin per website (urutan website akun): "21,700<TAB>0<TAB>0" -> tempel langsung jadi 3 kolom.
       const tone = ['text-cyan-400', 'text-amber-400', 'text-emerald-400', 'text-pink-400'];
       copy.innerHTML = omsetState.websites.map((w, i) => {
@@ -4428,8 +4428,33 @@
 
     // Server hanya MEMBUAT job; tiap website dijalankan lewat panggilan terpisah (autoInputRun) karena
     // Worker paket gratis dibatasi 50 subrequest per panggilan.
+    // Pasaran yang dihitung MANUAL (tidak di-auto / Auto Prediksi OFF): langsung baca Total dari menu Prediksi admin
+    // (Last Result -> Submit -> baris Result), satu panggilan per website. Hanya membaca; hasilnya ke tabel Result & Riwayat Job.
+    function autoInputCheckTotals(list) {
+      let left = list.length;
+      const got = [], bad = [];
+      const fin = () => {
+        if (--left > 0) return;
+        omsetState.at = 0;
+        loadOmsetTable(true);
+        if (got.length) toast('Total Omset terbaca: ' + got.join(', '));
+        if (bad.length) setTimeout(() => toast('Total Omset belum terbaca — ' + bad.join(' · ')), got.length ? 2600 : 0);
+      };
+      list.forEach(c => {
+        google.script.run
+          .withSuccessHandler(res => {
+            if (res && res.success) got.push(c.website + (res.differs ? ' (Last Result beda)' : ''));
+            else bad.push(c.website + ': ' + apiMessage(res));
+            fin();
+          })
+          .withFailureHandler(err => { bad.push(c.website + ': ' + ((err && err.message) || 'koneksi putus')); fin(); })
+          .autoInputTotalsCheck(currentSessionToken, c);
+      });
+    }
+
     function autoInputNotify(a) {
       if (!a) return;
+      if (Array.isArray(a.totalsCheck) && a.totalsCheck.length) autoInputCheckTotals(a.totalsCheck);
       if (a.skippedReason) { setTimeout(() => toast('Auto Prediksi dilewati: ' + a.skippedReason), 1800); return; }
       const rs = Array.isArray(a.results) ? a.results : [];
       const queued = rs.filter(r => r.status === 'ANTRI' && r.jobId);

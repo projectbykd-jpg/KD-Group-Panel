@@ -56,6 +56,7 @@ const ARG_MAP = {
 	autoInputRun: ["token", "jobId"],
 	autoInputTotals: ["token"],
 	autoInputTotalsRefresh: ["token", "id"],
+	autoInputTotalsCheck: ["token", "data"],
 	autoInputAlerts: ["token"],
 	autoInputTotoLog: ["token"],
 	autoInputTotoRun: ["token"],

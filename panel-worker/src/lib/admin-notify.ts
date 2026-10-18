@@ -332,7 +332,7 @@ export async function buildDailyReport(env: Env, day: string): Promise<string> {
 	if (tursoOn) {
 		ops.push(
 			await safe("Auto Prediksi", async () => {
-				const r = await db.prepare(`SELECT status AS s, COUNT(*) AS n FROM auto_input_job WHERE substr(created_at,1,10) = ? GROUP BY status`).bind(day).all<{ s: string; n: number }>();
+				const r = await db.prepare(`SELECT status AS s, COUNT(*) AS n FROM auto_input_job WHERE substr(created_at,1,10) = ? AND result_key NOT LIKE 'manual:%' GROUP BY status`).bind(day).all<{ s: string; n: number }>();
 				const done = cnt(r.results, "DONE"), fail = cnt(r.results, "FAILED"), skip = cnt(r.results, "SKIPPED");
 				return row("🎯", "Auto Prediksi", `${fmt(done)} berhasil${fail ? ` · <b>${fmt(fail)} gagal</b>${pct(fail, done + fail)}` : ""}${skip ? ` · ${fmt(skip)} dilewati` : ""}`, !fail);
 			}),
