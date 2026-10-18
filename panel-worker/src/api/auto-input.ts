@@ -18,6 +18,7 @@ import {
 	saveTotals,
 	scheduleManualTotals,
 	claimDueManualTotals,
+	claimManualTotalsById,
 	setManualTotalsState,
 	finishManualTotals,
 	rearmManualTotals,
@@ -203,6 +204,8 @@ export interface AutoInputNotice {
 	skippedReason?: string;
 	/** ANTRI = job sudah dibuat, browser harus memanggil autoInputRun(jobId) -- satu panggilan per website. */
 	results: (Omit<AutoInputOutcome, "status"> & { status: AutoInputOutcome["status"] | "ANTRI"; jobId?: number })[];
+	/** Pasaran yang dihitung MANUAL: browser memanggil autoInputTotalsCheck(id) per baris -- langsung membaca menu Prediksi (tanpa menunggu cron). */
+	totalsCheck?: { website: string; id: number }[];
 }
 
 /**
@@ -223,13 +226,13 @@ export async function autoInputAfterSend(
 	const plan = planAutoInput(rawText, processed);
 	// Auto Prediksi dimatikan: tidak ada input/Hitung otomatis, tapi Total Omset/Referal/Menang tetap dipantau (hanya membaca).
 	if (!(await getEnabled(env, profile.username))) {
-		if (plan.ok) await watchManualTotals(env, profile, plan, websites).catch(() => {});
-		return undefined;
+		const watch = plan.ok ? await watchManualTotals(env, profile, plan, websites).catch(() => []) : [];
+		return watch.length ? { results: [], totalsCheck: watch } : undefined;
 	}
 	if (!plan.ok) return { skippedReason: plan.reason, results: [] };
 	if ((await getDisabledMarkets(env, profile.username)).includes(normMarket(plan.market))) {
-		await watchManualTotals(env, profile, plan, websites).catch(() => {});
-		return { skippedReason: `Pasaran ${plan.market} tidak di-auto (diatur di menu Auto Prediksi) — input manual. Total Omset/Referal/Menang tetap dicek otomatis setelah Anda menghitung di admin`, results: [] };
+		const watch = await watchManualTotals(env, profile, plan, websites).catch(() => []);
+		return { totalsCheck: watch, skippedReason: `Pasaran ${plan.market} tidak di-auto (diatur di menu Auto Prediksi) — input manual. Total Omset/Referal/Menang tetap dicek otomatis setelah Anda menghitung di admin`, results: [] };
 	}
 
 	const sessions = await getSessions(env, profile.username);
@@ -251,12 +254,15 @@ export async function autoInputAfterSend(
 }
 
 /** Pasaran yang dihitung manual: jadwalkan pemantauan Omset per website (hanya membaca; cron yang menjalankannya). */
-async function watchManualTotals(env: Env, profile: UserProfile, plan: Extract<AutoInputPlan, { ok: true }>, websites: string[]): Promise<void> {
+async function watchManualTotals(env: Env, profile: UserProfile, plan: Extract<AutoInputPlan, { ok: true }>, websites: string[]): Promise<{ website: string; id: number }[]> {
 	const sessions = await getSessions(env, profile.username);
+	const out: { website: string; id: number }[] = [];
 	for (const website of websites) {
 		const w = String(website).trim().toUpperCase();
-		await scheduleManualTotals(env, profile.username, w, plan, !!sessions.find((x) => x.website === w)?.phpsessid);
+		const r = await scheduleManualTotals(env, profile.username, w, plan, !!sessions.find((x) => x.website === w)?.phpsessid);
+		if (r.status === "dijadwalkan") out.push({ website: w, id: r.id });
 	}
+	return out;
 }
 
 /**
@@ -266,34 +272,52 @@ async function watchManualTotals(env: Env, profile: UserProfile, plan: Extract<A
 export async function autoInputTotalsTick(env: Env, fetchFn?: Fetcher): Promise<boolean> {
 	const row = await claimDueManualTotals(env);
 	if (!row) return false;
+	await processManualRow(env, row, fetchFn);
+	return true;
+}
+
+/** Satu pembacaan menu Prediksi untuk satu baris pantauan. Mengembalikan keadaan baris sesudahnya (untuk jawaban klik langsung). */
+async function processManualRow(env: Env, row: NonNullable<Awaited<ReturnType<typeof claimDueManualTotals>>>, fetchFn?: Fetcher): Promise<{ done: boolean; message: string }> {
 	const expired = () => !!row.untilAt && tsNow() > row.untilAt;
-	const give = (why: string) => finishManualTotals(env, row, "", null, "Sampai batas waktu tunggu: " + why);
+	const give = async (why: string) => {
+		await finishManualTotals(env, row, "", null, "Sampai batas waktu tunggu: " + why);
+		return { done: true, message: why };
+	};
+	const stop = async (why: string) => {
+		await finishManualTotals(env, row, "", null, why);
+		return { done: true, message: why };
+	};
 	const sess = await getSession(env, row.username, row.website);
-	if (!sess?.phpsessid) {
-		await finishManualTotals(env, row, "", null, `PHPSESSID ${row.website} belum disimpan — Omset tidak bisa dicek`);
-		return true;
-	}
+	if (!sess?.phpsessid) return stop(`PHPSESSID ${row.website} belum disimpan — Omset tidak bisa dicek`);
 	const badBase = adminBaseProblem(sess.website, sess.baseUrl);
-	if (badBase) {
-		await finishManualTotals(env, row, "", null, `URL admin ${row.website} ditolak: ${badBase}`);
-		return true;
-	}
+	if (badBase) return stop(`URL admin ${row.website} ditolak: ${badBase}`);
 	const f: Fetcher = fetchFn ?? ((u, i) => fetch(u, i));
 	try {
 		const r = await checkManualTotals({ f, sess, market: row.market, prizes: row.prizes, code: row.code });
 		if (r.code !== row.code) await setManualTotalsState(env, row.id, { code: r.code });
 		if (r.state === "done") {
 			await saveManualOutcome(env, row, r.period, r.totals);
-			return true;
+			return { done: true, message: `Terbaca: omset ${r.totals.omset}, referal ${r.totals.referal}, menang ${r.totals.menang}.` };
 		}
-		if (expired()) await give(r.why);
-		else await setManualTotalsState(env, row.id, { note: r.why });
+		if (expired()) return give(r.why);
+		await setManualTotalsState(env, row.id, { note: r.why });
+		return { done: false, message: r.why };
 	} catch (e) {
 		const why = (e instanceof Error ? e.message : String(e)).slice(0, 240);
-		if (expired()) await give(why);
-		else await setManualTotalsState(env, row.id, { note: why }); // sesi habis / jaringan: tetap dicoba lagi sampai batas waktu
+		if (expired()) return give(why);
+		await setManualTotalsState(env, row.id, { note: why }); // sesi habis / jaringan: tetap dicoba lagi sampai batas waktu
+		return { done: false, message: why };
 	}
-	return true;
+}
+
+/** Dipanggil browser TEPAT sesudah KIRIM SEMUA untuk pasaran yang tidak di-auto: langsung buka menu Prediksi, Last Result, Submit, baca Total. */
+export async function autoInputTotalsCheck(env: Env, token: string, id: number, fetchFn?: Fetcher) {
+	const s = await gate(env, token);
+	const row = await claimManualTotalsById(env, s.username, Number(id));
+	if (!row) return { success: true, done: false, message: "Sedang/sudah dicek." };
+	mustOwnWebsite(s.profile, row.website);
+	const r = await processManualRow(env, row, fetchFn);
+	return { success: true, ...r };
 }
 
 async function saveManualOutcome(env: Env, row: Parameters<typeof finishManualTotals>[1], period: string, totals: { omset: string; referal: string; menang: string }): Promise<void> {
