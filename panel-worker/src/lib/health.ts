@@ -2,6 +2,7 @@
 // supaya "panel tidak jalan" bisa dibedakan: D1/KV/Turso mati, cron Cloudflare berhenti, atau Worker sehat tapi masalah di browser.
 // Dipakai pil status di Dashboard dan workflow GitHub "Penjaga panel" (.github/workflows/watchdog.yml).
 import { getSys } from "./settings";
+import { deleteSession, loadSession } from "./session";
 import { getTurso, tursoStatus } from "./turso";
 
 type Check = { ok: boolean; ms: number; error?: string; note?: string };
@@ -41,7 +42,44 @@ export interface DeepHealth {
 	at: string;
 }
 
-export async function deepHealth(env: Env, nowMs = Date.now()): Promise<DeepHealth> {
+/**
+ * Uji tulis-baca SESI login (hanya dengan ?session=1: menulis ke KV + D1, jadi tidak ikut pemeriksaan berkala watchdog).
+ * Membuat sesi percobaan seperti createSession, membacanya lewat loadSession yang SAMA dengan yang dipakai tiap permintaan, lalu menghapusnya.
+ * Gagal baca = persis gejala "login berhasil tapi 2 detik kemudian 'Sesi tidak valid'".
+ */
+async function sessionProbe(env: Env, warnings: string[]): Promise<string> {
+	const token = "dg_healthprobe" + crypto.randomUUID().replace(/-/g, "");
+	const now = Date.now();
+	const exp = now + 120_000;
+	const problems: string[] = [];
+	const why = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 140);
+	try {
+		await env.DB.prepare(`INSERT OR REPLACE INTO sessions (token, username, created_at, expires_at) VALUES (?, ?, ?, ?)`).bind(token, "__health__", now, exp).run();
+	} catch (e) {
+		problems.push("tulis D1: " + why(e));
+	}
+	try {
+		await env.SESS.put(token, JSON.stringify({ username: "__health__", createdAt: now, expiresAt: exp }), { expirationTtl: 60 });
+	} catch (e) {
+		problems.push("tulis KV: " + why(e));
+	}
+	let rec: Awaited<ReturnType<typeof loadSession>> = null;
+	let readErr = "";
+	try {
+		rec = await loadSession(env, token);
+	} catch (e) {
+		readErr = "baca: " + why(e);
+	}
+	await deleteSession(env, token).catch(() => {});
+	if (!rec) throw new Error(`sesi percobaan yang baru ditulis TIDAK terbaca (${[...problems, readErr].filter(Boolean).join("; ") || "tulis OK tapi baca kosong"})`);
+	if (problems.length) {
+		warnings.push("Penyimpanan sesi login sebagian gagal (" + problems.join("; ") + ") — sesi baru hanya tersimpan di satu tempat.");
+		return "terbaca, tapi " + problems.join("; ");
+	}
+	return "tulis + baca KV & D1 OK";
+}
+
+export async function deepHealth(env: Env, nowMs = Date.now(), opts: { session?: boolean } = {}): Promise<DeepHealth> {
 	const tursoOn = !!(String(env.TURSO_URL ?? "").trim() && String(env.TURSO_TOKEN ?? "").trim());
 	const warnings: string[] = [];
 	const [d1, kv, cron, turso] = await Promise.all([
@@ -81,6 +119,7 @@ export async function deepHealth(env: Env, nowMs = Date.now()): Promise<DeepHeal
 				})
 			: Promise.resolve<Check>({ ok: true, ms: 0, note: "tidak dikonfigurasi" }),
 	]);
-	const checks = { d1, kv, turso, cron };
+	const checks: Record<string, Check> = { d1, kv, turso, cron };
+	if (opts.session) checks.session = await timed(() => sessionProbe(env, warnings));
 	return { ok: Object.values(checks).every((c) => c.ok), checks, warnings, at: new Date(nowMs).toISOString() };
 }

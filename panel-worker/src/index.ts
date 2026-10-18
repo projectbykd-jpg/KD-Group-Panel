@@ -492,7 +492,7 @@ export default {
 
 		if (url.pathname === "/health") {
 			if (url.searchParams.get("deep")) {
-				const h = await deepHealth(env);
+				const h = await deepHealth(env, Date.now(), { session: !!url.searchParams.get("session") });
 				return new Response(JSON.stringify(h), { status: h.ok ? 200 : 503, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 			}
 			return new Response("panel-worker OK", { headers: { "content-type": "text/plain" } });
