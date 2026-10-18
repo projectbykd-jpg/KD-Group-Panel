@@ -61,4 +61,25 @@ if (missing.length) {
 	}
 	process.exit(1);
 }
+// Pagar ARG_MAP: fungsi server yang dipanggil panel lewat google.script.run WAJIB terdaftar di ARG_MAP (scripts/build-ui.mjs).
+// Tanpa itu argumen dikirim sebagai `_args`, token tidak terbaca server -> "Sesi tidak valid" -> panel menendang user ke layar login
+// (kejadian 18 Okt 2026: menu Result memanggil autoInputTotals yang belum terdaftar).
+{
+	const buildSrc = readFileSync(resolve(root, "scripts", "build-ui.mjs"), "utf8");
+	const block = buildSrc.match(/const ARG_MAP[^{]*\{([\s\S]*?)\n\};/)?.[1] ?? "";
+	const mapped = new Set([...block.matchAll(/^\t([A-Za-z_$][\w$]*):/gm)].map((m) => m[1]));
+	// aksi server = kunci tabel rute di src/index.ts; panggilan google.script.run = ".namaAksi(" di JS panel
+	const idx = readFileSync(resolve(root, "src", "index.ts"), "utf8");
+	const actions = new Set([...idx.matchAll(/^\t([A-Za-z_$][\w$]*): \(env, b\)/gm)].map((m) => m[1]));
+	const called = new Set([...html.matchAll(/\.([A-Za-z_$][\w$]*)\(\s*(?:currentSessionToken|token)\b/g)].map((m) => m[1]));
+	const bad = [...called].filter((n) => actions.has(n) && !mapped.has(n));
+	if (!actions.size || !mapped.size) {
+		console.error("ERROR: pagar ARG_MAP tidak bisa membaca daftar aksi/ARG_MAP (format kode berubah?).");
+		process.exit(1);
+	}
+	if (bad.length) {
+		console.error("ERROR: fungsi server dipanggil panel tapi TIDAK ada di ARG_MAP (scripts/build-ui.mjs): " + bad.join(", "));
+		process.exit(1);
+	}
+}
 console.log(`OK -> tidak ada nama tak terdefinisi (${scripts.length} script inline, ${handlerNames.size} handler HTML).`);

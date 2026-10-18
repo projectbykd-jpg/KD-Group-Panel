@@ -990,6 +990,8 @@
               return;
             }
             if (!window.__sessionCacheShown || /sesi tidak valid|telah berakhir|tidak ditemukan|tidak aktif|terkunci/i.test(msg)) {
+              // Panel sempat dirender dari cache profil dan memulai poller; hentikan semuanya supaya tidak terus menembak dengan token yang ditolak.
+              try { stopLivePolling(); stopInvestPolling(); stopAllPagePollers(); } catch (err) {}
               clearLocalSession();
               openLoginScreen(msg);
             }
@@ -1115,7 +1117,11 @@
     // operator reload sendiri. Sekarang langsung kembali ke layar login.
     window.addEventListener('kd:session-expired', e => {
       if (!currentUser) return;
-      const msg = (e && e.detail) || 'Sesi berakhir. Silakan login kembali.';
+      const d = e && e.detail;
+      const msg = (d && typeof d === 'object' ? d.message : d) || 'Sesi berakhir. Silakan login kembali.';
+      // Penolakan untuk token LAIN daripada sesi yang sedang aktif (poller sisa sesi sebelumnya / permintaan yang terkirim sebelum
+      // login ulang) bukan tanda sesi INI habis: dulu menendang user yang baru saja login, ~2 detik setelah masuk.
+      if (d && typeof d === 'object' && String(d.token || '') !== String(currentSessionToken || '')) return;
       const maintModal = document.getElementById('maintenanceModal');
       if (maintModal) maintModal.classList.remove('open');
       document.querySelectorAll('.modal-shell.open').forEach(m => m.classList.remove('open'));
