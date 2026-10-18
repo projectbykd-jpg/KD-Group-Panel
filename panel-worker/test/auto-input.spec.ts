@@ -1037,6 +1037,30 @@ describe("Total Omset/Referal/Menang tersimpan & tampil di menu Result (DB + API
 		expect(bad.success).toBe(false);
 		expect(((await autoInputTotals(env, op)) as unknown as { rows: { omset: string }[] }).rows[0].omset).toBe("5,000");
 	});
+	it("Keterangan Riwayat Job memuat Total Omset/Referal/Menang; gagal baca memuat alasannya; Ambil ulang MENGGANTI (tidak menumpuk)", async () => {
+		const jobDetail = async () => (await listJobs(env, "Op"))[0].detail;
+		await run(mockSite({ prediksi: { totals: ["21,700", "0", "0"] } }));
+		expect(await jobDetail()).toBe("Periode 1630 FLORIDAEVE: angka 9808 masuk & dihitung (agen fakeagent). [Omset 21,700 · Referal 0 · Menang 0]");
+		// kasus gagal baca (menu Prediksi 404): job tetap SELESAI, Keterangan menyebut alasannya
+		turso.current!.raw.exec(`DELETE FROM auto_input_job; DELETE FROM auto_input_totals;`);
+		await run(mockSite());
+		expect((await listJobs(env, "Op"))[0]).toMatchObject({ status: "DONE" });
+		expect(await jobDetail()).toMatch(/masuk & dihitung \(agen fakeagent\)\. \[Omset belum terbaca: .*HTTP 404.*\]$/);
+		// admin sudah memperbarui Last Result -> Ambil ulang berhasil: tanda lama DIGANTI
+		const id = ((await autoInputTotals(env, op)) as unknown as { rows: { id: number }[] }).rows[0].id;
+		const fixed = mockSite({ prediksi: { totals: ["5,000", "50", "0"] } });
+		fixed.rows[0].period = 1630;
+		fixed.rows[0].nums = ["9808"];
+		expect(await autoInputTotalsRefresh(env, op, id, fixed.fetchFn)).toMatchObject({ success: true });
+		expect(await jobDetail()).toBe("Periode 1630 FLORIDAEVE: angka 9808 masuk & dihitung (agen fakeagent). [Omset 5,000 · Referal 50 · Menang 0]");
+	});
+	it("job GAGAL tidak mendapat catatan omset (Keterangan galat apa adanya)", async () => {
+		await run(mockSite({ ignoreKirimPost: true, prediksi: {} }));
+		const j = (await listJobs(env, "Op"))[0];
+		expect(j.status).toBe("FAILED");
+		expect(j.detail).not.toContain("Omset");
+		expect(((await autoInputTotals(env, op)) as unknown as { rows: unknown[] }).rows).toHaveLength(0);
+	});
 	it("user lain tidak bisa melihat / mengambil ulang baris ini", async () => {
 		await run(mockSite({ prediksi: {} }));
 		const id = ((await autoInputTotals(env, op)) as unknown as { rows: { id: number }[] }).rows[0].id;

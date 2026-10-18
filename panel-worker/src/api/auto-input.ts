@@ -15,6 +15,8 @@ import {
 	getTotalsRow,
 	listTotals,
 	saveTotals,
+	setJobTotalsText,
+	withTotalsText,
 	claimJob,
 	hideJobs,
 	pruneAutoInputJobs,
@@ -258,9 +260,11 @@ export async function runQueuedJob(env: Env, username: string, jobId: number, fe
 		fetchFn,
 		onStage: (st, period) => setStage(env, job.id, st, period),
 	});
-	await finishJob(env, job.id, r.ok ? "DONE" : "FAILED", r.ok ? "selesai" : r.stage, r.detail, r.period);
+	// Keterangan job SELESAI memuat Total Omset/Referal/Menang (atau alasan belum terbaca) supaya terlihat di Riwayat Job.
+	const shown = r.ok ? withTotalsText(r.detail, r.totals, r.totalsNote ?? "") : r.detail;
+	await finishJob(env, job.id, r.ok ? "DONE" : "FAILED", r.ok ? "selesai" : r.stage, shown, r.period);
 	if (r.ok) await saveTotals(env, job, r.period, r.totals, r.totalsNote ?? "").catch(() => {}); // job sudah beres; gagal simpan angka tidak boleh mengubahnya
-	await logActivity(env, username, "AUTO PREDIKSI", `[${website}] ${job.market} ${job.prizes.join("/")} — ${r.detail}`, r.ok ? "BERHASIL" : "GAGAL", "").catch(() => {});
+	await logActivity(env, username, "AUTO PREDIKSI", `[${website}] ${job.market} ${job.prizes.join("/")} — ${shown}`, r.ok ? "BERHASIL" : "GAGAL", "").catch(() => {});
 	return { website, status: r.ok ? "BERHASIL" : "GAGAL", detail: r.detail, manual: !r.ok };
 }
 
@@ -288,7 +292,7 @@ export async function autoInputRetryTick(env: Env, fetchFn?: Fetcher): Promise<b
 		const r = await runAutoInput({ session: sess, plan, fetchFn, resumePeriod: job.period || undefined, onStage: (st, period) => setStage(env, job.id, st, period) });
 		const left = maxRetries - n;
 		const note = r.ok ? "" : left > 0 ? ` (dicoba lagi otomatis ±${gapMin} menit)` : " (percobaan otomatis habis — CEK MANUAL)";
-		await finishJob(env, job.id, r.ok ? "DONE" : "FAILED", r.ok ? "selesai" : r.stage, tag + r.detail + note, r.period || job.period);
+		await finishJob(env, job.id, r.ok ? "DONE" : "FAILED", r.ok ? "selesai" : r.stage, r.ok ? withTotalsText(tag + r.detail, r.totals, r.totalsNote ?? "") : tag + r.detail + note, r.period || job.period);
 		if (r.ok) await saveTotals(env, job, r.period || job.period, r.totals, r.totalsNote ?? "").catch(() => {});
 		await logActivity(env, job.username, "AUTO PREDIKSI", `[${job.website}] ${job.market} ${job.prizes.join("/")} — ${tag}${r.detail}`, r.ok ? "BERHASIL" : "GAGAL", "").catch(() => {});
 		return true; // satu job per tick
@@ -325,6 +329,7 @@ export async function autoInputTotalsRefresh(env: Env, token: string, id: number
 		const code = await findMarketCode(f, sess, row.market);
 		const totals = await readPrediksiTotals({ f, sess, code, market: row.market, period: row.period, numbers: row.prizes });
 		await saveTotals(env, keep, row.period, totals, "");
+		await setJobTotalsText(env, row.jobId, totals).catch(() => {});
 		return { success: true, message: `Terbaca: omset ${totals.omset}, referal ${totals.referal}, menang ${totals.menang}.` };
 	} catch (e) {
 		const why = (e instanceof Error ? e.message : String(e)).slice(0, 300);
