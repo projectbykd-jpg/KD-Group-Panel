@@ -98,6 +98,23 @@ async function ensureAutoInputTablesOnce(env: Env): Promise<void> {
 		)`),
 		db.prepare(`CREATE INDEX IF NOT EXISTS ix_auto_input_job_user ON auto_input_job(username, id)`),
 		db.prepare(`CREATE INDEX IF NOT EXISTS ix_auto_input_job_retry ON auto_input_job(status, updated_at)`),
+		// Total Omset/Referal/Menang (menu Prediksi admin) per job SELESAI -- tabel tersendiri supaya tampilan Result hanya membaca N baris terakhir.
+		db.prepare(`CREATE TABLE IF NOT EXISTS auto_input_totals (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			job_id      INTEGER NOT NULL UNIQUE,
+			username    TEXT NOT NULL,
+			website     TEXT NOT NULL,
+			market      TEXT NOT NULL,
+			prizes      TEXT NOT NULL DEFAULT '[]',
+			result_date TEXT NOT NULL DEFAULT '',
+			period      TEXT NOT NULL DEFAULT '',
+			omset       TEXT NOT NULL DEFAULT '',
+			referal     TEXT NOT NULL DEFAULT '',
+			menang      TEXT NOT NULL DEFAULT '',
+			note        TEXT NOT NULL DEFAULT '',
+			at          TEXT NOT NULL DEFAULT ''
+		)`),
+		db.prepare(`CREATE INDEX IF NOT EXISTS ix_auto_input_totals_user ON auto_input_totals(username, id)`),
 	]);
 	await ensureColumns(db, {
 		auto_input_job: [
@@ -503,6 +520,84 @@ export async function finishJob(
 		.run();
 }
 
+export interface TotalsRow {
+	id: number;
+	jobId: number;
+	website: string;
+	market: string;
+	prizes: string[];
+	period: string;
+	omset: string;
+	referal: string;
+	menang: string;
+	/** alasan gagal baca (kosong bila angka terbaca) */
+	note: string;
+	at: string;
+}
+
+/** Simpan hasil baca menu Prediksi untuk job SELESAI (ulang = timpa). totals null = gagal baca, `note` berisi alasannya. */
+export async function saveTotals(
+	env: Env,
+	job: { id: number; username: string; website: string; market: string; prizes: string[]; resultDate: string },
+	period: string,
+	totals: { omset: string; referal: string; menang: string } | null | undefined,
+	note: string,
+): Promise<void> {
+	await ensureAutoInputTables(env);
+	await getTurso(env)
+		.prepare(
+			`INSERT INTO auto_input_totals (job_id, username, website, market, prizes, result_date, period, omset, referal, menang, note, at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(job_id) DO UPDATE SET period = excluded.period, omset = excluded.omset, referal = excluded.referal, menang = excluded.menang, note = excluded.note, at = excluded.at`,
+		)
+		.bind(job.id, job.username, job.website, job.market, JSON.stringify(job.prizes), job.resultDate, period, totals?.omset ?? "", totals?.referal ?? "", totals?.menang ?? "", totals ? "" : note.slice(0, 300), tsNow())
+		.run();
+}
+
+const TOTALS_ROW_CAP = 60; // pengaman jumlah baris yang dikirim ke browser (bukan pengaturan)
+
+function rowToTotals(r: Record<string, unknown>): TotalsRow {
+	let prizes: string[] = [];
+	try {
+		const a = JSON.parse(String(r.prizes ?? "[]"));
+		if (Array.isArray(a)) prizes = a.map(String);
+	} catch {
+		/* kosong */
+	}
+	return {
+		id: Number(r.id),
+		jobId: Number(r.job_id),
+		website: String(r.website ?? ""),
+		market: String(r.market ?? ""),
+		prizes,
+		period: String(r.period ?? ""),
+		omset: String(r.omset ?? ""),
+		referal: String(r.referal ?? ""),
+		menang: String(r.menang ?? ""),
+		note: String(r.note ?? ""),
+		at: String(r.at ?? ""),
+	};
+}
+
+/** Baris Total Omset/Referal/Menang terbaru milik akun ini -- membaca PERSIS sebanyak batas (index username,id), bukan memindai riwayat. */
+export async function listTotals(env: Env, username: string): Promise<TotalsRow[]> {
+	await ensureAutoInputTables(env);
+	const res = await getTurso(env)
+		.prepare(`SELECT id, job_id, website, market, prizes, period, omset, referal, menang, note, at FROM auto_input_totals WHERE username = ? ORDER BY id DESC LIMIT ?`)
+		.bind(username, TOTALS_ROW_CAP)
+		.all<Record<string, unknown>>();
+	return (res.results ?? []).map(rowToTotals);
+}
+
+export async function getTotalsRow(env: Env, username: string, id: number): Promise<TotalsRow | null> {
+	await ensureAutoInputTables(env);
+	const r = await getTurso(env)
+		.prepare(`SELECT id, job_id, website, market, prizes, period, omset, referal, menang, note, at FROM auto_input_totals WHERE id = ? AND username = ?`)
+		.bind(id, username)
+		.first<Record<string, unknown>>();
+	return r ? rowToTotals(r) : null;
+}
+
 /** Tahap terakhir yang dicapai (dipakai kalau eksekusi mati di tengah). */
 export async function setStage(env: Env, jobId: number, stage: string, period = ""): Promise<void> {
 	await getTurso(env)
@@ -603,7 +698,9 @@ export async function hideJobs(env: Env, username: string, ids: number[]): Promi
 export async function pruneAutoInputJobs(env: Env, days?: number): Promise<number> {
 	await ensureAutoInputTables(env);
 	const n = days ?? (await getSys(env, "sys_auto_input_history_days"));
-	const r = await getTurso(env).prepare(`DELETE FROM auto_input_job WHERE created_at < ? AND status <> 'RUNNING'`).bind(retentionFrom(n)).run();
+	const from = retentionFrom(n);
+	const r = await getTurso(env).prepare(`DELETE FROM auto_input_job WHERE created_at < ? AND status <> 'RUNNING'`).bind(from).run();
+	await getTurso(env).prepare(`DELETE FROM auto_input_totals WHERE at < ?`).bind(from).run();
 	return r.meta.changes;
 }
 

@@ -11,6 +11,10 @@ import { hasMenu } from "../lib/menus";
 import type { Processed } from "../lib/parser";
 import type { UserProfile } from "../lib/db";
 import {
+	adminBaseProblem,
+	getTotalsRow,
+	listTotals,
+	saveTotals,
 	claimJob,
 	hideJobs,
 	pruneAutoInputJobs,
@@ -38,7 +42,7 @@ import {
 	setStage,
 	startJob,
 } from "../lib/auto-input";
-import { runAutoInput, type Fetcher } from "../lib/auto-input-run";
+import { findMarketCode, readPrediksiTotals, runAutoInput, type Fetcher } from "../lib/auto-input-run";
 
 async function gate(env: Env, token: string) {
 	const s = await requireSession(env, token, { menu: "auto-input" });
@@ -255,6 +259,7 @@ export async function runQueuedJob(env: Env, username: string, jobId: number, fe
 		onStage: (st, period) => setStage(env, job.id, st, period),
 	});
 	await finishJob(env, job.id, r.ok ? "DONE" : "FAILED", r.ok ? "selesai" : r.stage, r.detail, r.period);
+	if (r.ok) await saveTotals(env, job, r.period, r.totals, r.totalsNote ?? "").catch(() => {}); // job sudah beres; gagal simpan angka tidak boleh mengubahnya
 	await logActivity(env, username, "AUTO PREDIKSI", `[${website}] ${job.market} ${job.prizes.join("/")} — ${r.detail}`, r.ok ? "BERHASIL" : "GAGAL", "").catch(() => {});
 	return { website, status: r.ok ? "BERHASIL" : "GAGAL", detail: r.detail, manual: !r.ok };
 }
@@ -284,6 +289,7 @@ export async function autoInputRetryTick(env: Env, fetchFn?: Fetcher): Promise<b
 		const left = maxRetries - n;
 		const note = r.ok ? "" : left > 0 ? ` (dicoba lagi otomatis ±${gapMin} menit)` : " (percobaan otomatis habis — CEK MANUAL)";
 		await finishJob(env, job.id, r.ok ? "DONE" : "FAILED", r.ok ? "selesai" : r.stage, tag + r.detail + note, r.period || job.period);
+		if (r.ok) await saveTotals(env, job, r.period || job.period, r.totals, r.totalsNote ?? "").catch(() => {});
 		await logActivity(env, job.username, "AUTO PREDIKSI", `[${job.website}] ${job.market} ${job.prizes.join("/")} — ${tag}${r.detail}`, r.ok ? "BERHASIL" : "GAGAL", "").catch(() => {});
 		return true; // satu job per tick
 	}
@@ -294,6 +300,38 @@ export async function autoInputRun(env: Env, token: string, jobId: number, fetch
 	const s = await gate(env, token);
 	const o = await runQueuedJob(env, s.username, Number(jobId), fetchFn);
 	return { success: o.status === "BERHASIL", ...o };
+}
+
+/** Menu Result: Total Omset/Referal/Menang periode yang baru dihitung (dibaca dari menu Prediksi admin) per website. */
+export async function autoInputTotals(env: Env, token: string) {
+	const s = await gate(env, token);
+	const mine = new Set(s.profile.websites);
+	return { success: true, websites: s.profile.websites, rows: (await listTotals(env, s.username)).filter((r) => mine.has(r.website)) };
+}
+
+/** Tombol "Ambil ulang" di tabel Result: baca lagi menu Prediksi untuk satu baris yang gagal terbaca. Tidak menyentuh Kirim/Hitung. */
+export async function autoInputTotalsRefresh(env: Env, token: string, id: number, fetchFn?: Fetcher) {
+	const s = await gate(env, token);
+	const row = await getTotalsRow(env, s.username, Number(id));
+	if (!row) throw new Error("Baris tidak ditemukan.");
+	const w = mustOwnWebsite(s.profile, row.website);
+	const sess = await getSession(env, s.username, w);
+	if (!sess?.phpsessid) return { success: false, message: `PHPSESSID ${w} belum disimpan.` };
+	const badBase = adminBaseProblem(sess.website, sess.baseUrl);
+	if (badBase) return { success: false, message: `URL admin ${w} ditolak: ${badBase}.` };
+	const f: Fetcher = fetchFn ?? ((u, i) => fetch(u, i));
+	const keep = { id: row.jobId, username: s.username, website: w, market: row.market, prizes: row.prizes, resultDate: "" };
+	try {
+		const code = await findMarketCode(f, sess, row.market);
+		const totals = await readPrediksiTotals({ f, sess, code, market: row.market, period: row.period, numbers: row.prizes });
+		await saveTotals(env, keep, row.period, totals, "");
+		return { success: true, message: `Terbaca: omset ${totals.omset}, referal ${totals.referal}, menang ${totals.menang}.` };
+	} catch (e) {
+		const why = (e instanceof Error ? e.message : String(e)).slice(0, 300);
+		// angka yang sudah terbaca tidak pernah ditimpa kosong oleh pengambilan ulang yang gagal
+		if (!row.omset && !row.referal && !row.menang) await saveTotals(env, keep, row.period, null, why).catch(() => {});
+		return { success: false, message: why };
+	}
 }
 
 /** Peringatan terakhir: job yang tetap GAGAL setelah semua percobaan + Toto Macau gagal dibaca/dikirim. Dipoll browser dari menu mana pun. */

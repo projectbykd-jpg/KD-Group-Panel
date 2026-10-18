@@ -846,7 +846,7 @@ tr[data-role="BOT"] > td:nth-child(4) > span.rounded-full, #activeSessionsBody t
   #result-page > .grid > .lg\:col-span-7 > .glass-card:first-child { flex: 1 1 auto !important; display: flex !important; flex-direction: column !important; }
   #result-page > .grid > .lg\:col-span-7 > .glass-card:last-child { flex: 0 0 auto !important; }
   #result-page .monitor-stats { flex: 0 0 auto !important; }
-  #result-page .monitor-stats > div { min-height: 78px !important; }
+  #result-page .monitor-stats > div { min-height: 46px !important; }
   #result-page .beranda-flex { flex: 1 1 auto; min-height: 0; }
   #result-page > .grid > .lg\:col-span-7 .beranda-flex { display: flex !important; flex-direction: column !important; }
   #result-page #outputPreview { width: 100% !important; height: auto !important; min-height: 96px !important; max-height: none !important; flex: 1 1 auto !important; overflow-y: auto !important; }
@@ -1587,3 +1587,13 @@ th.ai-sel, td.ai-sel { width: 36px; padding-right: 0 !important; }
   .dash-heat .hc { height: 16px; border-radius: 3px; }
   .dash-tcol .bw { height: 100px; }
 }
+
+/* Result: tabel Total Omset / Referal / Menang (padat; kartu stat di atasnya sudah dikecilkan) */
+#omsetBox .pretty-table thead th, #omsetBox .pretty-table tbody td { padding: 7px 10px !important; }
+#omsetBox .pretty-table td.omset-num { text-align: right; font-family: ui-monospace, monospace; white-space: nowrap; font-weight: 700; color: #e2e8f0; }
+#omsetBox .pretty-table th.omset-num { text-align: right; }
+/* Tombol salin per website dibedakan warna: 1 biru, 2 kuning, 3 hijau, 4 merah muda */
+#omsetCopy .omset-copy-0 { border-color: rgba(34,211,238,.5); background: rgba(8,145,178,.2); color: #a5f3fc; }
+#omsetCopy .omset-copy-1 { border-color: rgba(251,191,36,.5); background: rgba(180,83,9,.2); color: #fde68a; }
+#omsetCopy .omset-copy-2 { border-color: rgba(52,211,153,.5); background: rgba(5,150,105,.2); color: #a7f3d0; }
+#omsetCopy .omset-copy-3 { border-color: rgba(244,114,182,.5); background: rgba(190,24,93,.2); color: #fbcfe8; }

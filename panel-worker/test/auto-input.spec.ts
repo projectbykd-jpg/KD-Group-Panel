@@ -3,12 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: import("node:sqlite").DatabaseSync } }));
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
 
-import { autoInputAfterSend, autoInputRetryTick, runQueuedJob, type AutoInputNotice } from "../src/api/auto-input";
+import { autoInputAfterSend, autoInputRetryTick, autoInputTotals, autoInputTotalsRefresh, runQueuedJob, type AutoInputNotice } from "../src/api/auto-input";
 import { autoInputGetState, autoInputSetMarkets } from "../src/api/auto-input";
 import { checkLogin } from "../src/api/auth";
 import { hashPassword } from "../src/lib/crypto";
 import { getDisabledMarkets, setGlobalOffMarkets, cleanMarketList, hideJobs, pruneAutoInputJobs, pendingFailureAlerts, ackFailureAlerts, claimJob, parseCookieInput, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
-import { frameSources, parseAngkaPage, readTopRow, parseHitungPage, runAutoInput, buildPayload, parseForms } from "../src/lib/auto-input-run";
+import { frameSources, parseAngkaPage, readTopRow, parseHitungPage, runAutoInput, buildPayload, parseForms, parseLastResult, parsePrediksiTotals, prediksiEchoProblem } from "../src/lib/auto-input-run";
 import { processText } from "../src/lib/parser";
 import { fakeD1, fakeEnv } from "./helpers/fake-env";
 import type { UserProfile } from "../src/lib/db";
@@ -44,6 +44,70 @@ interface SiteOpts {
 	lastDate?: string;
 	expired?: boolean;
 	hitungNomorField?: string; // nilai hidden field `nomor` di form Hitung (default: angka pertama)
+	/** Menu Prediksi admin (admin_prediksifullbb.php). Tanpa ini halaman itu 404 seperti situs yang belum punya menunya. */
+	prediksi?: {
+		totals?: [string, string, string]; // Total Omset / Referal / Menang di baris Result setelah Submit
+		lastPeriod?: number; // periode di "Last Result" (default: periode yang baru dihitung)
+		ignorePost?: boolean; // server mengabaikan Submit dan menampilkan tampilan bawaan
+		market?: string; // pasaran yang terpilih di dropdown halaman Prediksi
+		noResultRow?: boolean;
+	};
+}
+
+/** Halaman Prediksi (BB/FULL) -- struktur disalin dari halaman asli (tag tidak rapi ikut disalin: </font></a></th> di sel link). */
+function prediksiPage(p: { market: string; code: string; last: number; nums: string[]; showPeriod: number; showNomor: string; totals: [string, string, string]; noResultRow?: boolean }): string {
+	const n = (i: number) => p.nums[i] ?? "0";
+	const link = (tipe: string) => `<td><a target=_blank href="admin_menkalahbb.php?pasar=${p.code}&tipe=${tipe}&periode=${p.showPeriod}&nomor=${p.showNomor}&nomor2=0&nomor3=0&,180,70,950,540); ">0</font></a></th>`;
+	return `<style type="text/css">th{color:#FFFF00;} table{border:1px solid #fff;font-size:13px;}</style>
+<script type="text/javascript">
+function sendRes(per,res,res2,res3,wild){
+    document.getElementById('periode').value=per;
+    document.getElementById('nomor').value=res;
+    if(res2)document.getElementById('nomor2').value=res2;
+    if(res3)document.getElementById('nomor3').value=res3;
+    if(wild)document.getElementById('wild').value=wild;
+}
+</script>
+<form method=post>
+    <B>Prediksi (BB/FULL) ${p.market}&nbsp;&nbsp;
+        P: <input type=text name="periode" id="periode" value='${p.showPeriod}' size=3>
+        No: </font><input type=text name="nomor" id="nomor" maxlength="4" value='${p.showNomor}' size=3></B></font>
+                    <input type=text name="nomor1" id="nomor2" maxlength="4" placeholder="prize2" value='0' size=3></B></font>
+            <input type=text name="nomor2" id="nomor3" maxlength="4" placeholder="prize3" value='0' size=3></B></font>
+        <font style="font-family:helvetica;font-size:13px;">
+            <select name="pasaran" id="pasaran" style="padding: 2px;" onchange="location = this.value;">
+                            <option value="admin_prediksifullbb.php?psr=p33210" >BALI</option>
+                            <option value="admin_prediksifullbb.php?psr=${p.code}" SELECTED>${p.market}</option>
+                    </select>
+        <input type=submit name=submit value=Submit>
+        <input type=hidden value='${p.code}' name="sar" id="pasarnya">
+        <div style="display: inline-block;" onclick="sendRes(${p.last},'${n(0)}','${n(1)}','${n(2)}','0')">Last Result Periode : ${p.last} , Angka : ${p.nums.join(",")}</div></form>
+<table>
+    <tr bgcolor=#009B00 align=center>
+       <th>Games</th>
+       <th>Omset<br>BB</th><th>Referal<br>BB</th><th>Menang<br>BB</th>
+       <th>Omset<br>FULL</th><th>Referal<br>FULL</th><th>Menang<br>FULL</th>
+       <th>Omset<br>DISKON</th><th>Referal<br>DISKON</th><th>Menang<br>DISKON</th>
+       <th>Omset<br>PRIZE123</th><th>Referal<br>PRIZE123</th><th>Menang<br>PRIZE123</th>
+       <th>Total<br>Omset</th>
+       <th>Total<br>Referal</th>
+       <th>Total<br>Menang</th>
+    </tr>
+    <tr class="table-row" bgcolor="#BCFF9F"><td align="left">4D</td>${"<td>0</td>".repeat(14)}${link("A")}</tr>
+    <tr class="table-row" bgcolor="#88F885"><td align="left">3D</td>${"<td>0</td>".repeat(14)}${link("B")}</tr>
+    ${
+			p.noResultRow
+				? ""
+				: `<tr class="table-row" bgcolor="#CCCCCC">
+       <td align="left"><b>Result</b></td>
+        ${"<td>0</td>".repeat(12)}
+        <td>${p.totals[0]}</td>
+        <td>${p.totals[1]}</td>
+        <td>${p.totals[2]}</td>
+    </tr>`
+		}
+    <tr bgcolor="#CCCCCC"><td align="center" colspan=15><b>SERI</b></td><td><font color=#000><b>0</b></td></tr>
+ </table>`;
 }
 function mockSite(o: SiteOpts = {}) {
 	const market = o.market ?? "FLORIDAEVE";
@@ -99,6 +163,20 @@ ${st.calc ? "" : `<form method="post" action="admin_hitungtimte.php?psr=${code}"
 				return new Response("", { status: 302, headers: { location: "admin_hitungtimte.php?psr=" + code } });
 			}
 			return html(hitung());
+		}
+		if (path === "admin_prediksifullbb.php" && o.prediksi) {
+			const pr = o.prediksi;
+			const q = new URL(url).searchParams.get("psr");
+			if (q !== code) return html("pasaran lain", 404);
+			const last = pr.lastPeriod ?? rows[0].period;
+			const base = { market: pr.market ?? market, code, last, nums: rows[0].nums, totals: ["0", "0", "0"] as [string, string, string], noResultRow: pr.noResultRow };
+			if (!isPost) {
+				st.posts.push({ path: "GET " + path, search: new URL(url).search, body, cookie: "" });
+				return html(prediksiPage({ ...base, showPeriod: rows[0].period + 1, showNomor: "" }));
+			}
+			st.posts.push({ path, search: new URL(url).search, body, cookie: String((init!.headers as Record<string, string>).Cookie) });
+			if (pr.ignorePost) return html(prediksiPage({ ...base, showPeriod: rows[0].period + 1, showNomor: "" }));
+			return html(prediksiPage({ ...base, showPeriod: Number(body.get("periode")), showNomor: body.get("nomor") ?? "", totals: pr.totals ?? ["21,700", "0", "0"] }));
 		}
 		return html("404", 404);
 	};
@@ -803,5 +881,173 @@ describe("percobaan ulang tidak boleh menekan Hitung dua kali (audit: risiko bay
 		job("k3", "cek", "masih akan dicoba ulang", 0, 10);
 		const al = await pendingFailureAlerts(env, "Op", 2);
 		expect(al.map((a) => a.detail).sort()).toEqual(["Halaman Nomor Keluar tidak dikenali", "Hitung dikirim tapi tombol Hitung periode ini masih ada — cek manual apakah sudah terhitung."]);
+	});
+});
+
+
+// ---------------------------------------------------------------------------
+// Menu Result: Total Omset / Referal / Menang dari menu Prediksi admin
+// ---------------------------------------------------------------------------
+describe("halaman Prediksi admin (HTML asli dari pemilik)", () => {
+	// Potongan PERSIS seperti yang ditempel pemilik dari situs admin.
+	const LAST = `<div style="display: inline-block;" onclick="sendRes(737,'1956','7895','1236','0')">Last Result Periode : 737 , Angka : 1956,7895,1236</div>`;
+	it("Last Result: periode & angka dibaca dari onclick sendRes dan dicocokkan dengan teksnya", () => {
+		expect(parseLastResult(`<form>${LAST}</form>`)).toEqual({ period: 737, numbers: ["1956", "7895", "1236"], args: ["737", "1956", "7895", "1236", "0"] });
+	});
+	it("Last Result ditolak bila teks ≠ argumen, tidak ada, atau ganda", () => {
+		expect(parseLastResult(LAST.replace("Periode : 737", "Periode : 736"))).toBeNull();
+		expect(parseLastResult(LAST.replace("1956,7895", "1956,7000"))).toBeNull();
+		expect(parseLastResult("<div>tidak ada</div>")).toBeNull();
+		expect(parseLastResult(LAST + LAST)).toBeNull();
+	});
+	const page = (totals: [string, string, string], extra = "") =>
+		prediksiHtml(totals) + extra;
+	function prediksiHtml(t: [string, string, string]): string {
+		return `<table><tr bgcolor=#009B00 align=center><th>Games</th><th>Omset<br>BB</th><th>Total<br>Omset</th><th>Total<br>Referal</th><th>Total<br>Menang</th></tr>
+<tr class="table-row"><td align="left">4D</td><td>9</td><td>9</td><td>9</td><td><a href="x">9</font></a></th></tr>
+<tr class="table-row" bgcolor="#CCCCCC"><td align="left"><b>Result</b></td><td>0</td><td>${t[0]}</td><td>${t[1]}</td><td>${t[2]}</td></tr>
+<tr bgcolor="#CCCCCC"><td align="center" colspan=15><b>SERI</b></td><td><font color=#000><b>0</b></td></tr></table>`;
+	}
+	it("baris Result: Total Omset/Referal/Menang dicari dari NAMA header, nilai disalin apa adanya", () => {
+		expect(parsePrediksiTotals(page(["21,700", "0", "0"]))).toEqual({ omset: "21,700", referal: "0", menang: "0" });
+		expect(parsePrediksiTotals(page(["1.250.000", "12.500", "-300.000"]))).toEqual({ omset: "1.250.000", referal: "12.500", menang: "-300.000" });
+	});
+	it("tabel yang tidak persis dikenali -> null (tidak menebak)", () => {
+		expect(parsePrediksiTotals(page(["x", "0", "0"]))).toBeNull(); // bukan angka
+		expect(parsePrediksiTotals(page(["1", "2", "3"]).replace("<th>Total<br>Referal</th>", ""))).toBeNull(); // header kurang
+		expect(parsePrediksiTotals(page(["1", "2", "3"]).replace("<td>3</td></tr>", "</tr>"))).toBeNull(); // jumlah sel ≠ header
+		expect(parsePrediksiTotals(page(["1", "2", "3"], '<tr><td><b>Result</b></td><td>1</td></tr>'))).toBeNull(); // dua baris Result
+		expect(parsePrediksiTotals("<html>tidak ada tabel</html>")).toBeNull();
+	});
+	it("tampilan bawaan (periode berikutnya, nomor kosong) DITOLAK; tabel hasil Submit lolos", () => {
+		const view = (per: number, nomor: string) => `<form><input type=text name="periode" id="periode" value='${per}'><input type=text name="nomor" id="nomor" value='${nomor}'></form><a href="admin_menkalahbb.php?pasar=p1&tipe=A&amp;periode=${per}&nomor=${nomor}&nomor2=0&nomor3=0&,180,70); ">0</a>`;
+		expect(prediksiEchoProblem(view(738, ""), 737, ["1956"])).toMatch(/periode 738 angka kosong/);
+		expect(prediksiEchoProblem(view(737, "1956"), 737, ["1956"])).toBe("");
+		expect(prediksiEchoProblem(view(737, "1111"), 737, ["1956"])).toMatch(/angka 1111/);
+		// tanpa tautan: kolom form yang menentukan
+		const inputsOnly = (per: number, nomor: string) => view(per, nomor).replace(/<a .*<\/a>/, "");
+		expect(prediksiEchoProblem(inputsOnly(737, "1956"), 737, ["1956"])).toBe("");
+		expect(prediksiEchoProblem(inputsOnly(738, ""), 737, ["1956"])).toMatch(/tidak menampilkan/);
+	});
+});
+
+describe("Auto Prediksi membaca Total Omset/Referal/Menang sesudah Hitung", () => {
+	it("alur penuh: Last Result -> Submit seperti browser -> baris Result terbaca; Kirim & Hitung tidak berubah", async () => {
+		const m = mockSite({ prediksi: { totals: ["21,700", "0", "0"] } });
+		const r = await runAutoInput({ session: sess, plan: plan(), fetchFn: m.fetchFn });
+		expect(r).toMatchObject({ ok: true, stage: "selesai", period: "1630", totals: { omset: "21,700", referal: "0", menang: "0" }, totalsNote: "" });
+		const post = m.st.posts.find((x) => x.path === "admin_prediksifullbb.php")!;
+		expect(post.search).toBe("?psr=p21545"); // form tanpa action = kirim ke alamat halaman itu sendiri
+		expect(Object.fromEntries(post.body)).toEqual({ periode: "1630", nomor: "9808", nomor1: "0", nomor2: "0", sar: "p21545", pasaran: "admin_prediksifullbb.php?psr=p21545", submit: "Submit" });
+		expect(m.st.calcPosts).toBe(1);
+	});
+	it("anggaran request tetap <= 16 fetch per website (batas Worker gratis 50)", async () => {
+		const m = mockSite({ prediksi: {} });
+		let n = 0;
+		const r = await runAutoInput({ session: sess, plan: plan(), fetchFn: async (u, i) => (n++, m.fetchFn(u, i)) });
+		expect(r.ok).toBe(true);
+		expect(n).toBeLessThanOrEqual(16);
+	});
+	it("menu Prediksi tak bisa dibuka -> job TETAP berhasil (Hitung sudah membayar pemenang), alasannya dicatat", async () => {
+		const m = mockSite(); // tanpa halaman Prediksi = 404
+		const r = await runAutoInput({ session: sess, plan: plan(), fetchFn: m.fetchFn });
+		expect(r).toMatchObject({ ok: true, stage: "selesai", totals: null });
+		expect(r.totalsNote).toMatch(/HTTP 404/);
+	});
+	it("Last Result masih periode lama -> TIDAK ada Submit, angka tidak ditampilkan", async () => {
+		const m = mockSite({ prediksi: { lastPeriod: 1629 } });
+		const r = await runAutoInput({ session: sess, plan: plan(), fetchFn: m.fetchFn });
+		expect(r.ok).toBe(true);
+		expect(r.totals).toBeNull();
+		expect(r.totalsNote).toMatch(/Last Result di admin periode 1629, bukan periode 1630/);
+		expect(m.st.posts.some((x) => x.path === "admin_prediksifullbb.php")).toBe(false);
+	});
+	it("dropdown Prediksi menunjukkan pasaran lain -> TIDAK ada Submit", async () => {
+		const m = mockSite({ prediksi: { market: "HONGKONG" } });
+		const r = await runAutoInput({ session: sess, plan: plan(), fetchFn: m.fetchFn });
+		expect(r.totals).toBeNull();
+		expect(r.totalsNote).toMatch(/menampilkan pasaran "HONGKONG"/);
+		expect(m.st.posts.some((x) => x.path === "admin_prediksifullbb.php")).toBe(false);
+	});
+	it("server mengabaikan Submit (tampilan bawaan, semua 0) -> ditolak, BUKAN ditampilkan sebagai Rp 0", async () => {
+		const m = mockSite({ prediksi: { ignorePost: true } });
+		const r = await runAutoInput({ session: sess, plan: plan(), fetchFn: m.fetchFn });
+		expect(r.ok).toBe(true);
+		expect(r.totals).toBeNull();
+		expect(r.totalsNote).toMatch(/Hasil Prediksi ditolak/);
+	});
+	it("baris Result tidak ada -> tidak terbaca (bukan ditebak)", async () => {
+		const m = mockSite({ prediksi: { noResultRow: true } });
+		const r = await runAutoInput({ session: sess, plan: plan(), fetchFn: m.fetchFn });
+		expect(r.totals).toBeNull();
+		expect(r.totalsNote).toMatch(/Baris Result/);
+	});
+	it("uji kering tidak menyentuh halaman Prediksi", async () => {
+		const m = mockSite({ prediksi: {} });
+		await runAutoInput({ session: sess, plan: plan(), dryRun: true, fetchFn: m.fetchFn });
+		expect(m.st.posts.some((x) => x.path.includes("prediksi"))).toBe(false);
+	});
+});
+
+describe("Total Omset/Referal/Menang tersimpan & tampil di menu Result (DB + API)", () => {
+	let env: Env;
+	let op: string;
+	beforeEach(async () => {
+		setGlobalOffMarkets([]);
+		turso.current = fakeD1([]);
+		resetAutoInputTablesFlag();
+		const ctx = fakeEnv();
+		env = ctx.env;
+		const hash = await hashPassword("pw");
+		ctx.db.prepare(`INSERT INTO users (username, username_lc, password_hash, role, status, websites) VALUES ('Op', 'op', ?, 'OPERATOR', 'AKTIF', ?)`).run(hash, JSON.stringify(["HUGOTOGEL", "FOLATOTO"]));
+		op = ((await checkLogin(env, "Op", "pw", "")) as { sessionToken: string }).sessionToken;
+		await setEnabled(env, "Op", true);
+		await saveSession(env, "Op", "HUGOTOGEL", "https://ag.suksesbogil.com", "PHPSESSID=" + SID1);
+	});
+	const run = async (m: ReturnType<typeof mockSite>) => {
+		const profile = { username: "Op", role: "OPERATOR", websites: ["HUGOTOGEL", "FOLATOTO"], menus: null } as unknown as UserProfile;
+		const n = await autoInputAfterSend(env, profile, RAW, processText(RAW), ["HUGOTOGEL"]);
+		return runQueuedJob(env, "Op", n!.results[0].jobId!, m.fetchFn);
+	};
+	it("job selesai -> baris tersimpan dan dikembalikan autoInputTotals bersama urutan website akun", async () => {
+		await run(mockSite({ prediksi: { totals: ["21,700", "0", "0"] } }));
+		const r = (await autoInputTotals(env, op)) as unknown as { rows: Record<string, unknown>[]; websites: string[] };
+		expect(r.websites).toEqual(["HUGOTOGEL", "FOLATOTO"]);
+		expect(r.rows).toHaveLength(1);
+		expect(r.rows[0]).toMatchObject({ website: "HUGOTOGEL", market: "FLORIDAEVE", period: "1630", omset: "21,700", referal: "0", menang: "0", note: "" });
+	});
+	it("gagal baca -> baris tersimpan dengan alasan; Ambil ulang membacanya lagi; ambil ulang gagal TIDAK menghapus angka yang sudah ada", async () => {
+		const m = mockSite({ prediksi: { lastPeriod: 1629 } });
+		await run(m);
+		let row = ((await autoInputTotals(env, op)) as unknown as { rows: { id: number; omset: string; note: string }[] }).rows[0];
+		expect(row.omset).toBe("");
+		expect(row.note).toMatch(/periode 1629/);
+		// admin sudah memperbarui Last Result -> ambil ulang berhasil
+		const fixed = mockSite({ prediksi: { totals: ["5,000", "50", "0"] } });
+		fixed.rows[0].period = 1630;
+		fixed.rows[0].nums = ["9808"];
+		expect(await autoInputTotalsRefresh(env, op, row.id, fixed.fetchFn)).toMatchObject({ success: true });
+		row = ((await autoInputTotals(env, op)) as unknown as { rows: { id: number; omset: string; referal: string; note: string }[] }).rows[0];
+		expect(row).toMatchObject({ omset: "5,000", referal: "50", note: "" });
+		// admin pindah ke periode berikutnya -> ambil ulang gagal, angka lama aman
+		const moved = mockSite({ prediksi: {} });
+		moved.rows[0].period = 1631;
+		moved.rows[0].nums = ["1111"];
+		const bad = await autoInputTotalsRefresh(env, op, row.id, moved.fetchFn);
+		expect(bad.success).toBe(false);
+		expect(((await autoInputTotals(env, op)) as unknown as { rows: { omset: string }[] }).rows[0].omset).toBe("5,000");
+	});
+	it("user lain tidak bisa melihat / mengambil ulang baris ini", async () => {
+		await run(mockSite({ prediksi: {} }));
+		const id = ((await autoInputTotals(env, op)) as unknown as { rows: { id: number }[] }).rows[0].id;
+		await expect(autoInputTotalsRefresh(env, op, 99999)).rejects.toThrow(/tidak ditemukan/);
+		expect(id).toBeGreaterThan(0);
+	});
+	it("pemangkasan harian ikut membuang baris lama", async () => {
+		await run(mockSite({ prediksi: {} }));
+		const old = new Date(Date.now() + 7 * 3600_000 - 9 * 86400_000).toISOString().slice(0, 19).replace("T", " ");
+		turso.current!.raw.prepare(`UPDATE auto_input_totals SET at = ?`).run(old);
+		await pruneAutoInputJobs(env);
+		expect(((await autoInputTotals(env, op)) as unknown as { rows: unknown[] }).rows).toHaveLength(0);
 	});
 });

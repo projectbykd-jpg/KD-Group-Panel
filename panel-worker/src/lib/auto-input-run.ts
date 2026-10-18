@@ -33,6 +33,9 @@ export interface RunOutcome {
 	period: string;
 	/** hanya dryRun: yang AKAN dikirim. */
 	preview?: Record<string, unknown>;
+	/** Sesudah Hitung selesai: Total Omset/Referal/Menang dari menu Prediksi (null = gagal dibaca, alasannya di totalsNote). Tidak pernah menggagalkan job. */
+	totals?: PrediksiTotals | null;
+	totalsNote?: string;
 }
 
 class Stop extends Error {
@@ -334,6 +337,152 @@ export function buildPayload(form: ParsedForm, fill: Record<string, string>, but
 }
 
 // ---------------------------------------------------------------------------
+// Prediksi: Total Omset / Referal / Menang periode yang BARU dihitung (tampil di menu Result)
+// ---------------------------------------------------------------------------
+export interface PrediksiTotals {
+	omset: string;
+	referal: string;
+	menang: string;
+}
+export interface LastResult {
+	period: number;
+	/** angka yang tertulis di "Last Result Periode : N , Angka : a,b,c" */
+	numbers: string[];
+	/** argumen asli sendRes(periode, nomor, nomor2, nomor3, wild) */
+	args: string[];
+}
+
+/** Div "Last Result" di halaman Prediksi: onclick="sendRes(93,'1956','7895','1236','0')". Harus tepat satu & teksnya cocok dengan argumennya. */
+export function parseLastResult(html: string): LastResult | null {
+	const hits: LastResult[] = [];
+	for (const m of html.matchAll(/<div\b([^>]*)>([\s\S]*?)<\/div>/gi)) {
+		const call = (attr(m[1], "onclick") ?? "").match(/^\s*sendRes\s*\(([^)]*)\)/i);
+		if (!call) continue;
+		const txt = htmlText(m[2]);
+		const head = txt.match(/Last\s*Result\s*Periode\s*:?\s*(\d+)/i);
+		if (!head) continue;
+		const args = call[1].split(",").map((a) => a.trim().replace(/^['"]|['"]$/g, ""));
+		if (!/^\d+$/.test(args[0] ?? "") || Number(args[0]) !== Number(head[1])) return null;
+		const fromArgs = args.slice(1, 4).filter((a) => /^\d+$/.test(a));
+		const shown = txt.match(/Angka\s*:?\s*([\d][\d\s,]*)/i)?.[1].match(/\d+/g) ?? [];
+		if (shown.some((n, i) => fromArgs[i] !== n)) return null;
+		hits.push({ period: Number(args[0]), numbers: shown.length ? shown : fromArgs, args });
+	}
+	return hits.length === 1 ? hits[0] : null;
+}
+
+const MONEY_RE = /^-?\d[\d.,]*$/;
+
+/**
+ * Baris "Result" di tabel halaman Prediksi, kolom Total Omset / Total Referal / Total Menang.
+ * Kolom dicari dari NAMA header (bukan urutan), dan jumlah sel baris Result harus sama dengan header.
+ */
+export function parsePrediksiTotals(html: string): PrediksiTotals | null {
+	const rows = (html.match(/<tr\b[\s\S]*?<\/tr>/gi) ?? []).map((r) => [...r.matchAll(/<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((c) => htmlText(c[1])));
+	const heads = rows.filter((c) => c.some((x) => /^total omset$/i.test(x)));
+	const results = rows.filter((c) => /^result$/i.test(c[0] ?? ""));
+	if (heads.length !== 1 || results.length !== 1) return null;
+	const head = heads[0];
+	const res = results[0];
+	if (head.length !== res.length) return null;
+	const col = (re: RegExp) => {
+		const at = head.map((h, i) => (re.test(h) ? i : -1)).filter((i) => i >= 0);
+		return at.length === 1 ? at[0] : -1;
+	};
+	const [o, r, m] = [col(/^total omset$/i), col(/^total referal$/i), col(/^total menang$/i)];
+	if (o < 1 || r < 1 || m < 1) return null;
+	const vals = [res[o], res[r], res[m]];
+	if (!vals.every((v) => MONEY_RE.test(v))) return null;
+	return { omset: vals[0], referal: vals[1], menang: vals[2] };
+}
+
+/** Tabel yang diterima HARUS untuk periode & angka yang kita kirim (bukan tampilan bawaan: periode berikutnya, nomor kosong). '' = cocok. */
+export function prediksiEchoProblem(html: string, period: number, numbers: string[]): string {
+	const want = `periode ${period} angka ${numbers.join("/")}`;
+	const links = [...html.matchAll(/href\s*=\s*["']?([^"'>]*admin_menkalahbb\.php\?[^"'>]*)/gi)].map((m) => decodeEntities(m[1])).map((h) => ({
+		p: h.match(/[?&]periode=(\d*)/i)?.[1] ?? "",
+		n: h.match(/[?&]nomor=([^&]*)/i)?.[1] ?? "",
+	}));
+	if (links.length) {
+		const bad = links.find((l) => l.p !== String(period) || l.n !== numbers[0]);
+		return bad ? `tabel yang diterima untuk periode ${bad.p || "?"} angka ${bad.n || "kosong"}, bukan ${want}` : "";
+	}
+	const form = parseForms(html).find((f) => f.inputs.some((i) => i.name === "periode"));
+	const p = form?.inputs.find((i) => i.id === "periode")?.value;
+	const n = form?.inputs.find((i) => i.id === "nomor")?.value;
+	return p === String(period) && n === numbers[0] ? "" : `server tidak menampilkan ${want}`;
+}
+
+/** Kode pasaran dari dropdown di sidebar (index.php + frame). Hanya untuk pengambilan ulang -- alur utama sudah punya kodenya. */
+export async function findMarketCode(f: Fetcher, sess: AdminSession, market: string): Promise<string> {
+	const indexUrl = new URL("index.php", sess.baseUrl).toString();
+	const index = await adminReq(f, sess, "index.php");
+	let home = index;
+	for (const src of frameSources(index, indexUrl)) {
+		try {
+			home += "\n" + (await adminReq(f, sess, src, { referer: indexUrl }));
+		} catch (e) {
+			if (e instanceof Stop) throw e;
+		}
+	}
+	const code = findPoolCode(home, market);
+	if (!code) throw new Error(`Pasaran "${market}" tidak ditemukan (atau ganda) di dropdown website ini.`);
+	return code;
+}
+
+/**
+ * Buka menu Prediksi pasaran itu, "klik" Last Result (sendRes hanya mengisi kolom form -- tidak ada request),
+ * lalu Submit seperti browser dan baca baris Result. Tidak mengubah apa pun di admin selain tampilan prediksi.
+ * Lempar Error berisi alasan bila ada yang tidak persis sesuai (pasaran, periode, angka, tabel).
+ */
+export async function readPrediksiTotals(o: { f: Fetcher; sess: AdminSession; code: string; market: string; period: string; numbers: string[] }): Promise<PrediksiTotals> {
+	const path = `admin_prediksifullbb.php?psr=${o.code}`;
+	const referer = new URL(path, o.sess.baseUrl).toString();
+	const html = await adminReq(o.f, o.sess, path);
+	const period = Number(o.period);
+	if (!period || !o.numbers.length) throw new Error("Periode/angka yang dihitung tidak diketahui.");
+
+	const forms = parseForms(html).filter((f) => f.inputs.some((i) => i.name === "periode") && f.inputs.some((i) => i.type === "submit"));
+	if (forms.length !== 1) throw new Error("Halaman Prediksi tidak dikenali (form Periode + Submit tidak ditemukan).");
+	const form = forms[0];
+	const sel = form.selects.find((s) => s.name === "pasaran");
+	const cur = sel?.options.find((op) => op.value === sel.selected);
+	if (!cur || !cur.value.includes(`psr=${o.code}`) || squash(cur.label) !== squash(o.market)) {
+		throw new Error(`Halaman Prediksi menampilkan pasaran "${cur?.label ?? "?"}", bukan ${o.market}.`);
+	}
+	const sar = form.inputs.find((i) => i.name === "sar")?.value;
+	if (sar !== undefined && sar !== o.code) throw new Error(`Kode pasaran di form Prediksi ${sar} ≠ ${o.code}.`);
+
+	const last = parseLastResult(html);
+	if (!last) throw new Error("'Last Result' tidak ditemukan / tidak terbaca di halaman Prediksi.");
+	if (last.period !== period) throw new Error(`Last Result di admin periode ${last.period}, bukan periode ${period} yang baru dihitung.`);
+	// Banding sebanyak angka yang ada di KEDUA sisi (pasaran 1-prize bisa menampilkan filler '0' / job menyimpan 3 prize).
+	const cmp = Math.min(o.numbers.length, last.numbers.length);
+	if (!cmp || o.numbers.slice(0, cmp).some((n, i) => last.numbers[i] !== n)) throw new Error(`Last Result angka ${last.numbers.join("/") || "-"} ≠ angka yang dihitung ${o.numbers.join("/")}.`);
+
+	// sendRes(per, res, res2, res3, wild): isi kolom id periode / nomor / nomor2 / nomor3 / wild (yang ada), persis fungsi di halamannya.
+	const nameOf = (id: string) => form.inputs.find((i) => i.id === id)?.name;
+	const fill: Record<string, string> = {};
+	const fPeriod = nameOf("periode");
+	const fNomor = nameOf("nomor");
+	if (!fPeriod || !fNomor || !/^\d+$/.test(last.args[1] ?? "")) throw new Error("Kolom Periode/Nomor di form Prediksi tidak terbaca.");
+	fill[fPeriod] = String(last.period);
+	fill[fNomor] = last.args[1];
+	for (const [id, v] of [["nomor2", last.args[2]], ["nomor3", last.args[3]], ["wild", last.args[4]]] as const) {
+		const n = nameOf(id);
+		if (n && v) fill[n] = v;
+	}
+	const button = form.inputs.find((i) => i.type === "submit");
+	const body = await adminReq(o.f, o.sess, path, { method: "POST", body: buildPayload(form, fill, button), referer });
+
+	const echo = prediksiEchoProblem(body, period, o.numbers);
+	if (echo) throw new Error(`Hasil Prediksi ditolak: ${echo}.`);
+	const totals = parsePrediksiTotals(body);
+	if (!totals) throw new Error("Baris Result / kolom Total Omset-Referal-Menang tidak terbaca di tabel Prediksi.");
+	return totals;
+}
+
+// ---------------------------------------------------------------------------
 // HTTP
 // ---------------------------------------------------------------------------
 const UA =
@@ -565,7 +714,15 @@ export async function runAutoInput(opts: {
 			throw new Stop("Hitung dikirim tapi tombol Hitung periode ini masih ada — cek manual apakah sudah terhitung.", "hitung");
 		}
 		stage = "selesai";
-		return { ok: true, stage, period, detail: `Periode ${period} ${plan.market}: angka ${used.join("/")} masuk & dihitung (agen ${who}).` };
+		// Angka sudah masuk & terhitung (membayar pemenang): apa pun yang terjadi di langkah baca-Prediksi TIDAK boleh mengubah hasil job.
+		let totals: PrediksiTotals | null = null;
+		let totalsNote = "";
+		try {
+			totals = await readPrediksiTotals({ f, sess, code, market: plan.market, period, numbers: used });
+		} catch (e) {
+			totalsNote = (e instanceof Error ? e.message : String(e)).slice(0, 300);
+		}
+		return { ok: true, stage, period, totals, totalsNote, detail: `Periode ${period} ${plan.market}: angka ${used.join("/")} masuk & dihitung (agen ${who}).` };
 	} catch (e) {
 		if (e instanceof Stop) return { ok: false, stage: e.stage, period, detail: e.message };
 		return {

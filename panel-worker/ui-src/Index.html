@@ -497,18 +497,33 @@
               <div class="panel-section-title">
                 <i class="fa-solid fa-chart-pie text-pink-400 text-sm"></i> MONITOR HASIL REAL-TIME
               </div>
-              <div class="monitor-stats grid grid-cols-3 gap-3">
-                 <div class="glass-inner rounded-2xl p-3.5 flex flex-col justify-between min-h-[78px] shadow-sm relative overflow-hidden border border-white/5">
-                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">ANGKA 2D</span>
-                  <div id="twoDigit" class="text-xl sm:text-2xl font-black font-mono text-amber-400 mt-1">-</div>
+              <div class="monitor-stats monitor-stats-sm grid grid-cols-3 gap-2">
+                <div class="glass-inner rounded-xl px-3 py-2 flex flex-col justify-center min-h-[46px] border border-white/5">
+                  <span class="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none">ANGKA 2D</span>
+                  <div id="twoDigit" class="text-base font-black font-mono text-amber-400 mt-1 leading-none">-</div>
                 </div>
-                <div class="glass-inner rounded-2xl p-3.5 flex flex-col justify-between min-h-[78px] shadow-sm relative overflow-hidden border border-white/5">
-                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">SHIO</span>
-                  <div id="shio-box" class="text-sm sm:text-base font-extrabold text-emerald-400 truncate mt-1.5 flex items-center"><span id="shio-icon" class="mr-1.5 text-lg"></span><span id="shio">-</span></div>
+                <div class="glass-inner rounded-xl px-3 py-2 flex flex-col justify-center min-h-[46px] border border-white/5">
+                  <span class="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none">SHIO</span>
+                  <div id="shio-box" class="text-xs font-extrabold text-emerald-400 truncate mt-1 leading-none flex items-center"><span id="shio-icon" class="mr-1 text-sm"></span><span id="shio">-</span></div>
                 </div>
-                <div class="glass-inner rounded-2xl p-3.5 flex flex-col justify-between min-h-[78px] shadow-sm relative overflow-hidden border border-white/5">
-                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">STATUS</span>
-                  <div id="status" class="text-sm sm:text-base font-black tracking-wider text-slate-400 mt-1.5">-</div>
+                <div class="glass-inner rounded-xl px-3 py-2 flex flex-col justify-center min-h-[46px] border border-white/5">
+                  <span class="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none">STATUS</span>
+                  <div id="status" class="text-xs font-black tracking-wider text-slate-400 mt-1 leading-none">-</div>
+                </div>
+              </div>
+              <!-- Total Omset / Referal / Menang periode yang baru dihitung (dibaca Auto Prediksi dari menu Prediksi admin).
+                   Tampil hanya untuk akun yang boleh memakai Auto Prediksi. -->
+              <div id="omsetBox" class="flex flex-col gap-2" style="display:none">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-[10px] text-slate-400 font-bold tracking-wider">TOTAL OMSET · REFERAL · MENANG</span>
+                  <button type="button" onclick="loadOmsetTable()" class="paste-btn"><i class="fa-solid fa-rotate"></i> Muat</button>
+                </div>
+                <div id="omsetCopy" class="flex flex-wrap gap-2"></div>
+                <div class="pretty-table-wrap" style="overflow-x:auto;max-height:240px;overflow-y:auto">
+                  <table class="pretty-table stack-sm">
+                    <thead><tr><th>Website</th><th class="omset-num">Total Omset</th><th class="omset-num">Total Referal</th><th class="omset-num">Total Menang</th></tr></thead>
+                    <tbody id="omsetBody"></tbody>
+                  </table>
                 </div>
               </div>
               <div class="beranda-flex flex flex-col gap-2">

@@ -1393,6 +1393,7 @@
       currentPage = page;
 
       if (page === 'auto-input') loadAutoInputPage();
+      if (page === 'result') loadOmsetTable(true);
 
       if (page === 'prediction') {
         if (!pageFetchedAt.prediction) {
@@ -4346,6 +4347,71 @@
         .smartAutoSendFast(txt, currentSessionToken);
     }
 
+    // ===== Result: Total Omset / Referal / Menang (dibaca Auto Prediksi dari menu Prediksi admin) =====
+    let omsetState = { rows: [], websites: [], at: 0, loading: false };
+    function omsetAllowed() {
+      const role = String((currentProfile && currentProfile.role) || '').trim().toUpperCase();
+      return (role === 'ADMIN' || role === 'OPERATOR') && menuAllowed('auto-input');
+    }
+    // silent=true: lewati bila data masih segar (<10 dtk) dan jangan tampilkan galat
+    function loadOmsetTable(silent) {
+      const box = document.getElementById('omsetBox');
+      if (!box) return;
+      if (!currentUser || !omsetAllowed()) { box.style.display = 'none'; return; }
+      if (omsetState.loading || (silent && Date.now() - omsetState.at < 10000)) return;
+      omsetState.loading = true;
+      google.script.run
+        .withSuccessHandler(res => {
+          omsetState.loading = false;
+          if (apiFailed(res)) { if (!silent) toast(apiMessage(res)); return; }
+          omsetState = { rows: res.rows || [], websites: res.websites || [], at: Date.now(), loading: false };
+          renderOmsetTable();
+        })
+        .withFailureHandler(err => { omsetState.loading = false; if (!silent) toast((err && err.message) || 'Gagal memuat omset'); })
+        .autoInputTotals(currentSessionToken);
+    }
+    const omsetHas = r => !!(r && (r.omset || r.referal || r.menang));
+    // Baris TERBARU per website (urutan rows = terbaru dulu). Sengaja tidak melompat ke baris lama bila yang terbaru kosong: salah periode lebih buruk daripada kosong.
+    function omsetLatest(site) { return omsetState.rows.find(r => r.website === site) || null; }
+    function renderOmsetTable() {
+      const box = document.getElementById('omsetBox');
+      const body = document.getElementById('omsetBody');
+      const copy = document.getElementById('omsetCopy');
+      if (!box || !body || !copy) return;
+      box.style.display = 'flex';
+      const esc = escapeHtml;
+      const rows = omsetState.rows;
+      body.innerHTML = rows.length ? rows.map(r => {
+        const ok = omsetHas(r);
+        const num = (v, label) => `<td data-label="${label}" class="omset-num">${ok ? esc(v) : '–'}</td>`;
+        const why = ok ? '' : `<div class="text-amber-300 text-[10px] whitespace-normal" style="min-width:150px;font-weight:600">${esc(r.note || 'Belum terbaca')} <button type="button" class="retry-mini" onclick="omsetRefresh(${Number(r.id)}, this)">Ambil ulang</button></div>`;
+        return `<tr><td data-label="Website"><span class="font-bold text-cyan-300">${esc(r.website)}</span><div class="text-[10px] text-slate-400 whitespace-nowrap">${esc(r.market)} · periode ${esc(r.period)}</div>${why}</td>${num(r.omset, 'Total Omset')}${num(r.referal, 'Total Referal')}${num(r.menang, 'Total Menang')}</tr>`;
+      }).join('') : '<tr><td colspan="4" class="text-center text-slate-500 py-4">Belum ada. Muncul otomatis setelah Auto Prediksi menghitung sebuah pasaran.</td></tr>';
+      // Satu tombol salin per website (urutan website akun): "21,700<TAB>0<TAB>0" -> tempel langsung jadi 3 kolom.
+      const tone = ['text-cyan-400', 'text-amber-400', 'text-emerald-400', 'text-pink-400'];
+      copy.innerHTML = omsetState.websites.map((w, i) => {
+        const r = omsetLatest(w);
+        const can = omsetHas(r);
+        const tip = can ? `${r.market} periode ${r.period}` : 'Belum ada angka untuk website ini';
+        return `<button type="button" class="qcopy-btn omset-copy-${i % 4}" ${can ? '' : 'disabled style="opacity:.45;cursor:not-allowed"'} title="${esc(tip)}" onclick="copyOmset(${i})"><i class="fa-solid fa-copy ${tone[i % tone.length]}"></i>Salin Website ${i + 1} · ${esc(w)}</button>`;
+      }).join('');
+    }
+    function copyOmset(i) {
+      const w = omsetState.websites[i];
+      const r = w ? omsetLatest(w) : null;
+      if (!omsetHas(r)) { toast('Belum ada angka untuk website ini'); return; }
+      const text = [r.omset, r.referal, r.menang].join('\t');
+      navigator.clipboard.writeText(text).then(() => toast(`Website ${i + 1} (${w}) disalin: ${r.omset} / ${r.referal} / ${r.menang}`)).catch(() => toast('Gagal menyalin'));
+      google.script.run.withFailureHandler(() => {}).logClientActivity(currentSessionToken, 'COPY OMSET', `${w} ${r.market} periode ${r.period}`, 'BERHASIL', text);
+    }
+    function omsetRefresh(id, btn) {
+      if (btn) { btn.disabled = true; btn.textContent = 'Membaca…'; }
+      google.script.run
+        .withSuccessHandler(res => { toast(apiMessage(res, res && res.success ? 'Terbaca' : 'Gagal')); omsetState.at = 0; loadOmsetTable(false); })
+        .withFailureHandler(err => { toast((err && err.message) || 'Gagal membaca ulang'); omsetState.at = 0; loadOmsetTable(false); })
+        .autoInputTotalsRefresh(currentSessionToken, id);
+    }
+
     // ===== Auto Prediksi: input Nomor Keluar + Hitung otomatis di admin website =====
     let autoInputState = null;
     let autoInputTimer = null;
@@ -4362,7 +4428,7 @@
       if (!queued.length) { autoInputShow(out); return; }
       setTimeout(() => toast('Auto Prediksi: memproses ' + queued.map(q => q.website).join(', ') + '…'), 1500);
       let left = queued.length;
-      const finish = () => { if (--left === 0) autoInputShow(out); };
+      const finish = () => { if (--left === 0) { autoInputShow(out); loadOmsetTable(true); } };
       queued.forEach(q => {
         google.script.run
           .withSuccessHandler(res => {
