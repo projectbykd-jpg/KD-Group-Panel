@@ -203,6 +203,8 @@ export interface AutoInputNotice {
 	results: (Omit<AutoInputOutcome, "status"> & { status: AutoInputOutcome["status"] | "ANTRI"; jobId?: number })[];
 	/** Pasaran yang dihitung MANUAL (tidak di-auto / Auto Prediksi OFF): browser memanggil autoInputTotalsCheck per website -- hanya membaca menu Prediksi. */
 	totalsCheck?: ManualCheck[];
+	/** Result yang dikirim: browser memakainya untuk membaca Total dari menu Prediksi bila job Auto Prediksi website itu TIDAK berhasil. */
+	plan?: Omit<ManualCheck, "website">;
 }
 export interface ManualCheck {
 	website: string;
@@ -244,6 +246,7 @@ export async function autoInputAfterSend(
 
 	const sessions = await getSessions(env, profile.username);
 	const results: AutoInputNotice["results"] = [];
+	const totalsCheck: ManualCheck[] = [];
 	for (const website of websites) {
 		const sess = sessions.find((x) => x.website === String(website).trim().toUpperCase());
 		if (!sess?.phpsessid) {
@@ -253,11 +256,13 @@ export async function autoInputAfterSend(
 		const started = await startJob(env, profile.username, website, plan);
 		if ("existing" in started) {
 			results.push({ website, status: "SUDAH", detail: `Result ini sudah pernah diproses (${started.existing.status}).`, manual: false });
+			// Sudah pernah diproses tapi TIDAK selesai (gagal / terputus): Total tetap dibaca dari menu Prediksi (hanya membaca).
+			if (started.existing.status !== "DONE") totalsCheck.push({ website: sess.website, market: plan.market, prizes: plan.prizes, date: plan.date });
 		} else {
 			results.push({ website, status: "ANTRI", detail: "Menunggu dijalankan", manual: false, jobId: started.id });
 		}
 	}
-	return { results };
+	return { results, plan: { market: plan.market, prizes: plan.prizes, date: plan.date }, ...(totalsCheck.length ? { totalsCheck } : {}) };
 }
 
 /** Website (yang punya PHPSESSID) untuk pembacaan Total pasaran manual. Galat apa pun -> daftar kosong: tidak boleh mengganggu KIRIM SEMUA. */
@@ -314,7 +319,7 @@ async function manualTotalsCheck(env: Env, username: string, w: string, market: 
 	const differs = !!totals && (!cmp || prizes.slice(0, cmp).some((n, i) => numbers[i] !== n));
 	const lastTxt = totals ? ` Last Result periode ${period} angka ${numbers.join("/")}.` : "";
 	const warn = differs ? ` ⚠ Berbeda dari result yang dikirim (${prizes.join("/")}) — angka baru belum diinput/dihitung di admin? Tekan Ambil ulang di menu Result setelah menghitung.` : "";
-	const detail = withTotalsText(`Dihitung manual (pasaran tidak di-auto) — dibaca dari menu Prediksi: ${market} ${prizes.join("/")}.${lastTxt}${warn}`, totals, why);
+	const detail = withTotalsText(`Total dibaca dari menu Prediksi (Last Result → Submit): ${market} ${prizes.join("/")}.${lastTxt}${warn}`, totals, why);
 	const jobId = await recordManualTotalsJob(env, { username, website: w, market, prizes, resultDate: date, key, ok: !!totals, detail, period });
 	await saveTotals(env, { id: jobId, username, website: w, market, prizes, resultDate: date }, period, totals, why, differs ? `Last Result admin ${numbers.join("/")} ≠ result dikirim ${prizes.join("/")} — cek sebelum menyalin` : "");
 	await logActivity(env, username, "AUTO PREDIKSI", `[${w}] ${detail}`, totals ? "BERHASIL" : "GAGAL", "").catch(() => {});

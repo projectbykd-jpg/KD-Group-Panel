@@ -1127,7 +1127,7 @@ describe("pasaran dihitung MANUAL (tidak di-auto / Auto Prediksi OFF): KIRIM SEM
 			expect((await rows())[0]).toMatchObject({ website: "HUGOTOGEL", market: "FLORIDAEVE", period: "1629", omset: "21,700", referal: "0", menang: "0", note: "" });
 			const j = (await listJobs(env, "Op"))[0];
 			expect(j).toMatchObject({ status: "DONE", stage: "prediksi", period: "1629" });
-			expect(j.detail).toMatch(/^Dihitung manual .* Last Result periode 1629 angka 9808\. \[Omset 21,700 · Referal 0 · Menang 0\]$/);
+			expect(j.detail).toMatch(/^Total dibaca dari menu Prediksi .* Last Result periode 1629 angka 9808\. \[Omset 21,700 · Referal 0 · Menang 0\]$/);
 		});
 	}
 
@@ -1184,6 +1184,25 @@ describe("pasaran dihitung MANUAL (tidak di-auto / Auto Prediksi OFF): KIRIM SEM
 		const n = await autoInputAfterSend(env, profile, RAW, processText(RAW), ["HUGOTOGEL"]);
 		expect(n?.results[0].status).toBe("ANTRI");
 		expect(n?.totalsCheck).toBeUndefined();
+	});
+
+	it("Auto Prediksi ON: result 'SUDAH' yang belum selesai (gagal/terputus) tetap dibaca Total-nya; yang SELESAI tidak dibaca ulang; notice membawa plan", async () => {
+		await setEnabled(env, "Op", true);
+		const first = await autoInputAfterSend(env, profile, RAW, processText(RAW), ["HUGOTOGEL"]);
+		expect(first?.plan).toEqual({ market: "FLORIDAEVE", prizes: ["9808"], date: plan().date });
+		expect(first?.totalsCheck).toBeUndefined(); // job baru -> jalur Auto Prediksi biasa
+		// job itu terputus (mis. permintaan menggantung) -> FAILED; klik KIRIM SEMUA lagi -> SUDAH + baca Total
+		turso.current!.raw.exec(`UPDATE auto_input_job SET status = 'FAILED'`);
+		const again = await autoInputAfterSend(env, profile, RAW, processText(RAW), ["HUGOTOGEL"]);
+		expect(again?.results[0].status).toBe("SUDAH");
+		expect(again?.totalsCheck).toEqual([{ website: "HUGOTOGEL", market: "FLORIDAEVE", prizes: ["9808"], date: plan().date }]);
+		const m = mockSite({ prediksi: { totals: ["1,000", "0", "0"] } });
+		m.rows[0].nums = ["9808"];
+		expect(await autoInputTotalsCheck(env, op, again!.totalsCheck![0] as unknown as Record<string, unknown>, m.fetchFn)).toMatchObject({ success: true });
+		onlyPrediksi(m);
+		// job SELESAI -> tidak dibaca ulang
+		turso.current!.raw.exec(`UPDATE auto_input_job SET status = 'DONE' WHERE result_key NOT LIKE 'manual:%'`);
+		expect((await autoInputAfterSend(env, profile, RAW, processText(RAW), ["HUGOTOGEL"]))?.totalsCheck).toBeUndefined();
 	});
 
 	it("website di luar akses akun ditolak", async () => {
