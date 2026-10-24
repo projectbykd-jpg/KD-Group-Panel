@@ -305,6 +305,26 @@ describe("runAutoInput", () => {
 		expect(autoInputPageMeta(r.detail)).toContain("FLORIDAEVE TIDAK ada di daftar Pools");
 		expect(autoInputPageMeta(r.detail)).toContain('isi "Pasaran FLORIDAEVE belum tutup');
 	});
+	it("lewat tengah malam WIB (data produksi MONTANA 25 Okt 01:04): form admin = tanggal result + 1 diterima HANYA bila diizinkan; +2 hari tetap ditolak", async () => {
+		// result bertanggal 06 Okt; form admin sudah 07 Okt; baris terakhir bertanggal 06 Okt (diinput lewat tengah malam juga)
+		const go = async (formDay: number, allowNextDay: boolean) => {
+			const m = mockSite({ formDay, lastDate: "06-10-2026 00:41:09" });
+			return { r: await runAutoInput({ session: sess, plan: plan(), fetchFn: m.fetchFn, dryRun: true, allowNextDay }), m };
+		};
+		const off = await go(7, false);
+		expect(off.r.ok).toBe(false);
+		expect(off.r.detail).toContain("Tanggal form 2026-10-07 ≠ tanggal result 2026-10-06");
+		const on = await go(7, true);
+		expect(on.r.ok).toBe(true);
+		expect(on.m.st.posts).toHaveLength(0); // uji kering
+		const far = await go(8, true);
+		expect(far.r.ok).toBe(false);
+		expect(far.r.detail).toContain("Tanggal form 2026-10-08");
+		// tanggal sama tetap memakai aturan lama: baris terakhir 06 Okt >= result 06 Okt -> ditolak (result hari ini sudah terinput?)
+		const same = await go(6, true);
+		expect(same.r.ok).toBe(false);
+		expect(same.r.detail).toContain("Baris terakhir bertanggal");
+	});
 	it("uji kering: validasi lolos, TIDAK ada POST", async () => {
 		const m = mockSite();
 		const r = await runAutoInput({ session: sess, plan: plan(), dryRun: true, fetchFn: m.fetchFn });
@@ -1207,23 +1227,17 @@ describe("pasaran dihitung MANUAL (tidak di-auto / Auto Prediksi OFF): KIRIM SEM
 		expect(n?.totalsCheck).toBeUndefined();
 	});
 
-	it("Auto Prediksi ON: result 'SUDAH' yang belum selesai (gagal/terputus) tetap dibaca Total-nya; yang SELESAI tidak dibaca ulang; notice membawa plan", async () => {
+	it("Auto Prediksi ON: result 'SUDAH' yang job-nya GAGAL TIDAK membaca Total (periode lama menyesatkan, pemilik 25 Okt) dan ditandai perlu dicek; notice membawa plan", async () => {
 		await setEnabled(env, "Op", true);
 		const first = await autoInputAfterSend(env, profile, RAW, processText(RAW), ["HUGOTOGEL"]);
 		expect(first?.plan).toEqual({ market: "FLORIDAEVE", prizes: ["9808"], date: plan().date });
-		expect(first?.totalsCheck).toBeUndefined(); // job baru -> jalur Auto Prediksi biasa
-		// job itu terputus (mis. permintaan menggantung) -> FAILED; klik KIRIM SEMUA lagi -> SUDAH + baca Total
+		expect(first?.totalsCheck).toBeUndefined();
 		turso.current!.raw.exec(`UPDATE auto_input_job SET status = 'FAILED'`);
 		const again = await autoInputAfterSend(env, profile, RAW, processText(RAW), ["HUGOTOGEL"]);
-		expect(again?.results[0].status).toBe("SUDAH");
-		expect(again?.totalsCheck).toEqual([{ website: "HUGOTOGEL", market: "FLORIDAEVE", prizes: ["9808"], date: plan().date }]);
-		const m = mockSite({ prediksi: { totals: ["1,000", "0", "0"] } });
-		m.rows[0].nums = ["9808"];
-		expect(await autoInputTotalsCheck(env, op, again!.totalsCheck![0] as unknown as Record<string, unknown>, m.fetchFn)).toMatchObject({ success: true });
-		onlyPrediksi(m);
-		// job SELESAI -> tidak dibaca ulang
-		turso.current!.raw.exec(`UPDATE auto_input_job SET status = 'DONE' WHERE result_key NOT LIKE 'manual:%'`);
-		expect((await autoInputAfterSend(env, profile, RAW, processText(RAW), ["HUGOTOGEL"]))?.totalsCheck).toBeUndefined();
+		expect(again?.results[0]).toMatchObject({ status: "SUDAH", manual: true });
+		expect(again?.totalsCheck).toBeUndefined();
+		turso.current!.raw.exec(`UPDATE auto_input_job SET status = 'DONE'`);
+		expect((await autoInputAfterSend(env, profile, RAW, processText(RAW), ["HUGOTOGEL"]))?.results[0]).toMatchObject({ status: "SUDAH", manual: false });
 	});
 
 	it("website di luar akses akun ditolak", async () => {

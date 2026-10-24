@@ -242,7 +242,20 @@ const isKirim = (i: FormInput) =>
 	(i.type === "button" || i.type === "submit") && i.value.replace(/ /g, " ").trim().toLowerCase() === "kirim";
 
 /** Validasi halaman NOMOR KELUAR. Lempar Stop('cek') kalau ada yang tidak persis sesuai. */
-export function parseAngkaPage(html: string, plan: Plan): AngkaPage {
+/** Tanggal ISO + n hari (UTC, tanpa zona). */
+function addDays(iso: string, n: number): string {
+	const t = new Date(iso + "T00:00:00Z");
+	t.setUTCDate(t.getUTCDate() + n);
+	return t.toISOString().slice(0, 10);
+}
+
+/**
+ * allowNextDay: result pasaran yang diundi menjelang/lewat tengah malam WIB (MONTANA dkk.) bertanggal undian (mis. 24),
+ * sedangkan form admin sudah tanggal WIB berikutnya (25) -- operator manual memakai tanggal form apa adanya. Bila true,
+ * tanggal form = tanggal result + 1 hari juga diterima dan dipakai sebagai acuan cek baris terakhir. Pemanggil hanya
+ * mengizinkannya pada jam awal setelah tengah malam WIB (sys_auto_input_midnight_grace_h), jadi teks result basi tetap ditolak.
+ */
+export function parseAngkaPage(html: string, plan: Plan, opts: { allowNextDay?: boolean } = {}): AngkaPage {
 	const fail = (msg: string): never => {
 		throw new Stop(msg, "cek");
 	};
@@ -272,7 +285,9 @@ export function parseAngkaPage(html: string, plan: Plan): AngkaPage {
 	}
 	if (!d || !mo || !y) fail("Pilihan tanggal (hari/bulan/tahun) di form tidak terbaca.");
 	const formDate = `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-	if (formDate !== plan.date) fail(`Tanggal form ${formDate} ≠ tanggal result ${plan.date}. Input manual.`);
+	const nextDay = !!opts.allowNextDay && formDate === addDays(plan.date, 1);
+	if (formDate !== plan.date && !nextDay) fail(`Tanggal form ${formDate} ≠ tanggal result ${plan.date}. Input manual.`);
+	const dateRef = nextDay ? formDate : plan.date; // lewat tengah malam: tanggal form admin yang jadi acuan
 
 	const prize = form.inputs.filter(
 		(i) =>
@@ -298,7 +313,7 @@ export function parseAngkaPage(html: string, plan: Plan): AngkaPage {
 		fail(`Tabel Daftar Nomor / baris periode sebelumnya tidak terbaca. Yang terbaca: "${seen}"`);
 	}
 	if (prev!.period + 1 !== period) fail(`Periode form ${period} ≠ periode terakhir ${prev!.period} + 1. Ada periode terlewat / sudah terinput.`);
-	if (!prev!.date || prev!.date >= plan.date) fail(`Baris terakhir bertanggal ${prev!.date || "?"} (≥ ${plan.date}) — result hari ini kemungkinan sudah terinput.`);
+	if (!prev!.date || prev!.date >= dateRef) fail(`Baris terakhir bertanggal ${prev!.date || "?"} (≥ ${dateRef}) — result hari ini kemungkinan sudah terinput.`);
 
 	return { form, period, prizeFields: prize.map((p) => p.name), prev: prev! };
 }
@@ -582,6 +597,8 @@ export async function runAutoInput(opts: {
 	resumePeriod?: string;
 	/** dipanggil SEBELUM langkah yang mengubah data -- supaya tahap tersimpan walau Worker mati. */
 	onStage?: (stage: "kirim" | "hitung", period: string) => Promise<void>;
+	/** lihat parseAngkaPage: terima tanggal form = tanggal result + 1 (jam awal setelah tengah malam WIB). */
+	allowNextDay?: boolean;
 }): Promise<RunOutcome> {
 	const f: Fetcher = opts.fetchFn ?? ((u, i) => fetch(u, i));
 	const { session: sess, plan } = opts;
@@ -648,7 +665,7 @@ export async function runAutoInput(opts: {
 		}
 		if (!skipKirim) {
 			try {
-				page = parseAngkaPage(angkaHtml, plan);
+				page = parseAngkaPage(angkaHtml, plan, { allowNextDay: opts.allowNextDay });
 			} catch (e) {
 				// Sesi SUDAH terbukti hidup (sidebar "Agent (...)" terbaca di atas), jadi "tidak dikenali" di sini BUKAN sesi habis.
 				// Dulu isi halaman dibuang -> pesan selalu generik dan penyebab (mis. pasaran ini diinput di halaman lain) tidak

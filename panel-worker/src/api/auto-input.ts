@@ -50,6 +50,13 @@ import {
 } from "../lib/auto-input";
 import { findMarketCode, readPrediksiLastTotals, readPrediksiTotals, runAutoInput, type Fetcher } from "../lib/auto-input-run";
 
+/** Jam awal setelah tengah malam WIB (sys_auto_input_midnight_grace_h): tanggal form admin boleh = tanggal result + 1. */
+async function allowNextDay(env: Env, nowMs = Date.now()): Promise<boolean> {
+	const h = await getSys(env, "sys_auto_input_midnight_grace_h");
+	const wibHour = new Date(nowMs + 7 * 3600_000).getUTCHours();
+	return h > 0 && wibHour < h;
+}
+
 async function gate(env: Env, token: string) {
 	const s = await requireSession(env, token, { menu: "auto-input" });
 	// Menghitung result = membayar pemenang: VIEWER (read-only) tidak boleh menyentuhnya.
@@ -183,6 +190,7 @@ export async function autoInputTest(env: Env, token: string, website: string, ma
 		plan: { ok: true, market: mk, prizes: ["0000", "0000", "0000"], date: dateKeyNow(), key: "TEST" },
 		dryRun: true,
 		fetchFn,
+		allowNextDay: await allowNextDay(env),
 	});
 	return { success: r.ok, message: r.detail, preview: r.preview };
 }
@@ -246,7 +254,6 @@ export async function autoInputAfterSend(
 
 	const sessions = await getSessions(env, profile.username);
 	const results: AutoInputNotice["results"] = [];
-	const totalsCheck: ManualCheck[] = [];
 	for (const website of websites) {
 		const sess = sessions.find((x) => x.website === String(website).trim().toUpperCase());
 		if (!sess?.phpsessid) {
@@ -255,14 +262,14 @@ export async function autoInputAfterSend(
 		}
 		const started = await startJob(env, profile.username, website, plan);
 		if ("existing" in started) {
-			results.push({ website, status: "SUDAH", detail: `Result ini sudah pernah diproses (${started.existing.status}).`, manual: false });
-			// Sudah pernah diproses tapi TIDAK selesai (gagal / terputus): Total tetap dibaca dari menu Prediksi (hanya membaca).
-			if (started.existing.status !== "DONE") totalsCheck.push({ website: sess.website, market: plan.market, prizes: plan.prizes, date: plan.date });
+			// Pasaran DI-AUTO yang job-nya belum selesai: Total TIDAK dibaca (Last Result admin masih periode lama -> menyesatkan;
+			// pemilik 25 Okt). Job GAGAL dicoba ulang otomatis oleh cron; alasannya ada di Riwayat Job.
+			results.push({ website, status: "SUDAH", detail: `Result ini sudah pernah diproses (${started.existing.status}).`, manual: started.existing.status === "FAILED" });
 		} else {
 			results.push({ website, status: "ANTRI", detail: "Menunggu dijalankan", manual: false, jobId: started.id });
 		}
 	}
-	return { results, plan: { market: plan.market, prizes: plan.prizes, date: plan.date }, ...(totalsCheck.length ? { totalsCheck } : {}) };
+	return { results, plan: { market: plan.market, prizes: plan.prizes, date: plan.date } };
 }
 
 /** Website (yang punya PHPSESSID) untuk pembacaan Total pasaran manual. Galat apa pun -> daftar kosong: tidak boleh mengganggu KIRIM SEMUA. */
@@ -346,6 +353,7 @@ export async function runQueuedJob(env: Env, username: string, jobId: number, fe
 		session: sess,
 		plan,
 		fetchFn,
+		allowNextDay: await allowNextDay(env),
 		onStage: (st, period) => setStage(env, job.id, st, period),
 	});
 	// Keterangan job SELESAI memuat Total Omset/Referal/Menang (atau alasan belum terbaca) supaya terlihat di Riwayat Job.
@@ -377,7 +385,7 @@ export async function autoInputRetryTick(env: Env, fetchFn?: Fetcher): Promise<b
 			continue;
 		}
 		const plan = { ok: true as const, market: job.market, prizes: job.prizes, date: job.resultDate, key: "" };
-		const r = await runAutoInput({ session: sess, plan, fetchFn, resumePeriod: job.period || undefined, onStage: (st, period) => setStage(env, job.id, st, period) });
+		const r = await runAutoInput({ session: sess, plan, fetchFn, resumePeriod: job.period || undefined, allowNextDay: await allowNextDay(env), onStage: (st, period) => setStage(env, job.id, st, period) });
 		const left = maxRetries - n;
 		const note = r.ok ? "" : left > 0 ? ` (dicoba lagi otomatis ±${gapMin} menit)` : " (percobaan otomatis habis — CEK MANUAL)";
 		await finishJob(env, job.id, r.ok ? "DONE" : "FAILED", r.ok ? "selesai" : r.stage, r.ok ? withTotalsText(tag + r.detail, r.totals, r.totalsNote ?? "") : tag + r.detail + note, r.period || job.period);

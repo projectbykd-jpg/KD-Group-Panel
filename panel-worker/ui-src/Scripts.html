@@ -4600,8 +4600,8 @@
         if (onDone) outAll.push(...out); else autoInputShow(out);
         omsetState.at = 0;
         loadOmsetTable(true);
-        // Job yang TIDAK berhasil: Total tetap dibaca dari menu Prediksi (hanya membaca, tanpa input/Hitung).
-        if (a.plan && notDone.length) { pending++; autoInputCheckTotals(notDone.map(w => Object.assign({ website: w }, a.plan)), finishOne, true); }
+        // Job pasaran yang DI-AUTO gagal -> Total TIDAK dibaca (perintah pemilik 25 Okt): Last Result admin masih periode lama,
+        // jadi angkanya menyesatkan ("langsung baca Total tanpa input & Hitung"). Alasan gagal tampil di tabel + popup.
         finishOne();
       };
       queued.forEach(q => {
