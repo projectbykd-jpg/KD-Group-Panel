@@ -34,9 +34,50 @@ export function cronAgeMin(raw: string | null | undefined, nowMs = Date.now()): 
 	return Number.isFinite(t) ? Math.max(0, Math.round((nowMs - t) / 60000)) : null;
 }
 
+/** Kategori alasan job Auto Prediksi dari Keterangan-nya (TANPA isi Keterangan: tidak ada angka/cuplikan halaman admin). */
+export function autoInputWhy(detail: string, status: string): string {
+	const d = String(detail || "");
+	if (status === "DONE") return /\[Omset belum terbaca/.test(d) ? "dihitung, Total belum terbaca" : "dihitung + Total tercatat";
+	if (status === "QUEUED") return "antre (belum dijalankan browser)";
+	if (status === "RUNNING") return "sedang berjalan";
+	if (/PHPSESSID belum/i.test(d)) return "PHPSESSID belum disimpan";
+	if (/tidak di-auto/i.test(d)) return "pasaran tidak di-auto";
+	if (/belum login|sesi (habis|tidak)|login\.php|kedaluwarsa|Agent \(/i.test(d)) return "sesi admin habis";
+	if (/dropdown|tidak ada di daftar|pasaran .*tidak/i.test(d)) return "pasaran tidak ditemukan di admin";
+	if (/URL admin|host/i.test(d)) return "URL admin ditolak";
+	if (/waktu|timeout|menggantung|tidak menjawab|aborted/i.test(d)) return "admin tidak menjawab (timeout)";
+	if (/Hitung/i.test(d)) return "gagal di tahap Hitung";
+	if (/Kirim|kirim/.test(d)) return "gagal di tahap input angka";
+	return "lain";
+}
+
+/** Ringkasan Auto Prediksi untuk watchdog: hanya hitungan & kategori (tanpa username, angka, PHPSESSID, atau isi halaman). */
+async function autoInputSummary(env: Env): Promise<Record<string, unknown>> {
+	const db = getTurso(env);
+	const one = async <T>(sql: string): Promise<T | null> => {
+		try {
+			return (await db.prepare(sql).first<T>()) ?? null;
+		} catch {
+			return null;
+		}
+	};
+	const cfg = await one<{ n_on: number; n: number }>(`SELECT SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END) AS n_on, COUNT(*) AS n FROM auto_input_config`);
+	const ses = await one<{ n: number; last: string }>(`SELECT COUNT(*) AS n, MAX(updated_at) AS last FROM auto_input_session WHERE phpsessid <> ''`);
+	let jobs: { status: string; stage: string; at: string; why: string }[] = [];
+	try {
+		const r = await db.prepare(`SELECT status, stage, created_at, detail FROM auto_input_job WHERE result_key NOT LIKE 'manual:%' ORDER BY id DESC LIMIT 6`).all<Record<string, unknown>>();
+		jobs = (r.results ?? []).map((x) => ({ status: String(x.status), stage: String(x.stage ?? ""), at: String(x.created_at ?? ""), why: autoInputWhy(String(x.detail ?? ""), String(x.status)) }));
+	} catch {
+		/* tabel belum ada di database aktif */
+	}
+	return { switchOn: Number(cfg?.n_on ?? 0), accounts: Number(cfg?.n ?? 0), sessions: Number(ses?.n ?? 0), lastSessionSaved: String(ses?.last ?? ""), lastJobs: jobs };
+}
+
 export interface DeepHealth {
 	ok: boolean;
 	checks: Record<string, Check>;
+	/** Ringkasan Auto Prediksi (tidak mempengaruhi ok): saklar, sesi tersimpan, kategori alasan job terakhir. */
+	autoInput?: Record<string, unknown>;
 	/** Masalah yang tidak mematikan panel tetapi membuat fitur berhenti diam-diam (mis. channel Telegram gagal posting). */
 	warnings: string[];
 	at: string;
@@ -121,5 +162,10 @@ export async function deepHealth(env: Env, nowMs = Date.now(), opts: { session?:
 	]);
 	const checks: Record<string, Check> = { d1, kv, turso, cron };
 	if (opts.session) checks.session = await timed(() => sessionProbe(env, warnings));
-	return { ok: Object.values(checks).every((c) => c.ok), checks, warnings, at: new Date(nowMs).toISOString() };
+	let autoInput: Record<string, unknown> | undefined;
+	if (tursoOn) {
+		const t = await timed(async () => void (autoInput = await autoInputSummary(env)), 6000);
+		if (!t.ok) autoInput = { error: t.error };
+	}
+	return { ok: Object.values(checks).every((c) => c.ok), checks, warnings, autoInput, at: new Date(nowMs).toISOString() };
 }
