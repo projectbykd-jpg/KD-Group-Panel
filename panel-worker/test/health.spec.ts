@@ -3,14 +3,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const turso = vi.hoisted(() => ({
 	current: null as null | { d1: unknown; raw: import("node:sqlite").DatabaseSync },
 	broken: false,
-	status: { active: "primary", spareConfigured: false, spareSyncedAt: "", spareSince: "" },
+	newsBlocked: false,
+	spare: true,
 }));
 vi.mock("../src/lib/turso", () => ({
 	getTurso: () => {
-		if (turso.broken) return { prepare: () => ({ all: async () => { throw new Error("Turso down"); } }) };
-		return turso.current!.d1;
+		const fail = async () => {
+			throw new Error("Turso down");
+		};
+		if (turso.broken) return { prepare: () => ({ all: fail, first: fail }) };
+		const real = turso.current!.d1 as { prepare: (q: string) => unknown };
+		// DB 1 (BOT News) diblokir kuota, DB 2 (panel) tetap sehat
+		const blocked = async () => {
+			throw new Error("BLOCKED: reads are blocked, do you need to upgrade your plan?");
+		};
+		return { prepare: (q: string) => (turso.newsBlocked && /bot_kv/.test(q) ? { all: blocked, first: blocked } : real.prepare(q)) };
 	},
-	tursoStatus: async () => turso.status,
+	tursoLayout: () => ({ news: "primary", panel: turso.spare ? "spare" : "primary", spareConfigured: turso.spare }),
+	TURSO_QUOTA_RE: /\bBLOCKED\b|reads are blocked|writes are blocked|upgrade your plan/,
 	tursoGeneration: () => 0,
 }));
 
@@ -25,7 +35,8 @@ let ctx: ReturnType<typeof fakeEnv>;
 beforeEach(() => {
 	turso.current = fakeTurso();
 	turso.broken = false;
-	turso.status = { active: "primary", spareConfigured: false, spareSyncedAt: "", spareSince: "" };
+	turso.newsBlocked = false;
+	turso.spare = true;
 	ctx = fakeEnv();
 	resetSysCache();
 	Object.assign(ctx.env, { TURSO_URL: "libsql://fake", TURSO_TOKEN: "x" });
@@ -61,17 +72,23 @@ describe("deepHealth + Turso", () => {
 		expect(h.checks.turso.error).toContain("Turso down");
 	});
 
-	it("database cadangan: sedang dipakai / belum pernah disalin / salinan basi -> peringatan; salinan segar -> tanpa peringatan", async () => {
-		turso.status = { active: "spare", spareConfigured: true, spareSyncedAt: "2026-10-11 07:00:00", spareSince: "2026-10-11 07:10:00" };
-		expect((await deepHealth(ctx.env, now)).warnings.join(" ")).toContain("database CADANGAN sejak 2026-10-11 07:10:00");
-		turso.status = { active: "primary", spareConfigured: true, spareSyncedAt: "", spareSince: "" };
-		expect((await deepHealth(ctx.env, now)).warnings.join(" ")).toContain("belum pernah disalin");
-		turso.status = { active: "primary", spareConfigured: true, spareSyncedAt: "2026-10-11 02:00:00", spareSince: "" }; // 5,5 jam lalu
-		expect((await deepHealth(ctx.env, now)).warnings.join(" ")).toContain("basi");
-		turso.status = { active: "primary", spareConfigured: true, spareSyncedAt: "2026-10-11 07:20:00", spareSince: "" }; // 10 menit lalu
+	it("DB 1 (BOT News) kena kuota -> panel TETAP ok (DB 2), hanya peringatan BOT News", async () => {
+		turso.newsBlocked = true;
+		const h = await deepHealth(ctx.env, now);
+		expect(h.ok).toBe(true);
+		expect(h.checks.turso.ok).toBe(true);
+		expect(h.checks.turso.note).toContain("panel di DB 2 (cadangan)");
+		expect(h.checks.turso.note).toContain("DB 1 News: BERMASALAH");
+		expect(h.warnings.join(" ")).toContain("DB 1 (BOT News) kena kuota Turso");
+		expect(h.warnings.join(" ")).toContain("panel tetap jalan di DB 2");
+	});
+
+	it("tidak lagi memperingatkan 'memakai database CADANGAN' (itu kini pembagian yang disengaja)", async () => {
 		const h = await deepHealth(ctx.env, now);
 		expect(h.warnings).toEqual([]);
-		expect(h.checks.turso.note).toContain("cadangan disalin 2026-10-11 07:20:00");
+		expect(h.checks.turso.note).toBe("panel di DB 2 (cadangan) · BOT News di DB 1 (utama) · DB 1 News: ok");
+		turso.spare = false;
+		expect((await deepHealth(ctx.env, now)).checks.turso.note).toContain("DB 2 cadangan belum diatur");
 	});
 });
 

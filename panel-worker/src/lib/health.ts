@@ -3,7 +3,7 @@
 // Dipakai pil status di Dashboard dan workflow GitHub "Penjaga panel" (.github/workflows/watchdog.yml).
 import { getSys } from "./settings";
 import { deleteSession, loadSession } from "./session";
-import { getTurso, tursoStatus } from "./turso";
+import { getTurso, tursoLayout, TURSO_QUOTA_RE } from "./turso";
 
 type Check = { ok: boolean; ms: number; error?: string; note?: string };
 
@@ -177,6 +177,19 @@ async function sessionProbe(env: Env, warnings: string[]): Promise<string> {
 export async function deepHealth(env: Env, nowMs = Date.now(), opts: { session?: boolean } = {}): Promise<DeepHealth> {
 	const tursoOn = !!(String(env.TURSO_URL ?? "").trim() && String(env.TURSO_TOKEN ?? "").trim());
 	const warnings: string[] = [];
+	// DB 1 (utama) = BOT News, diperiksa paralel; gagal/kena kuota TIDAK mematikan panel (panel di DB 2) -> peringatan saja.
+	const newsP: Promise<Check> | null = tursoOn
+		? timed(async () => {
+				const r = await getTurso(env)
+					.prepare(`SELECT k, v FROM bot_kv WHERE k IN ('tg_channel_enabled', 'tg_channel_last_error')`)
+					.all<{ k: string; v: string }>();
+				const kvs: Record<string, string> = {};
+				for (const x of r.results ?? []) kvs[String(x.k)] = String(x.v ?? "");
+				if (kvs.tg_channel_enabled === "1" && kvs.tg_channel_last_error) {
+					warnings.push("Channel Telegram tidak bisa posting: " + kvs.tg_channel_last_error.slice(0, 160));
+				}
+			})
+		: null;
 	const [d1, kv, cron, turso] = await Promise.all([
 		timed(async () => void (await env.DB.prepare("SELECT 1 AS x").first())),
 		timed(async () => void (await env.SESS.get("health:probe"))),
@@ -190,30 +203,20 @@ export async function deepHealth(env: Env, nowMs = Date.now(), opts: { session?:
 		}),
 		tursoOn
 			? timed(async () => {
-					const st0 = await tursoStatus(env);
-					if (st0.active === "spare") {
-						// news (bot_kv) sengaja tetap di utama yang sedang diblokir; yang dicek di sini kesehatan database aktif (cadangan)
-						await getTurso(env).prepare(`SELECT 1 AS x`).first();
-						warnings.push(`Panel memakai database CADANGAN sejak ${st0.spareSince || "?"} (Turso utama kena kuota). BOT News tetap di utama, jadi berhenti sampai utama pulih.`);
-						return `aktif: CADANGAN sejak ${st0.spareSince || "?"} (news tetap di utama)`;
-					}
-					const r = await getTurso(env)
-						.prepare(`SELECT k, v FROM bot_kv WHERE k IN ('tg_channel_enabled', 'tg_channel_last_error')`)
-						.all<{ k: string; v: string }>();
-					const kvs: Record<string, string> = {};
-					for (const x of r.results ?? []) kvs[String(x.k)] = String(x.v ?? "");
-					if (kvs.tg_channel_enabled === "1" && kvs.tg_channel_last_error) {
-						warnings.push("Channel Telegram tidak bisa posting: " + kvs.tg_channel_last_error.slice(0, 160));
-					}
-					// database cadangan: sedang dipakai? sudah pernah disalin? salinan basi?
-					const ts = await tursoStatus(env);
-					if (ts.active === "spare") warnings.push(`Turso utama kena kuota — panel memakai database CADANGAN sejak ${ts.spareSince || "?"}. Kembalikan lewat workflow 'Turso sinkron cadangan' (mode failback) setelah utama pulih.`);
-					else if (ts.spareConfigured && !ts.spareSyncedAt) warnings.push("Database cadangan Turso belum pernah disalin — belum bisa dipakai bila utama kena kuota. Jalankan workflow 'Turso sinkron cadangan'.");
-					else if (ts.spareConfigured && cronAgeMin(ts.spareSyncedAt, nowMs) !== null && (cronAgeMin(ts.spareSyncedAt, nowMs) as number) > 180) warnings.push(`Salinan database cadangan Turso basi (terakhir ${ts.spareSyncedAt}). Cek workflow 'Turso sinkron cadangan'.`);
-					return ts.spareConfigured ? `aktif: ${ts.active === "spare" ? "CADANGAN" : "utama"}, cadangan disalin ${ts.spareSyncedAt || "belum pernah"}` : "aktif: utama (cadangan belum diatur)";
+					// DB 2 (cadangan) = database panel: inilah yang menentukan panel sehat atau tidak.
+					await getTurso(env).prepare(`SELECT 1 AS x`).first();
+					return tursoLayout(env).spareConfigured ? "panel di DB 2 (cadangan) · BOT News di DB 1 (utama)" : "satu database (utama) — DB 2 cadangan belum diatur";
 				})
 			: Promise.resolve<Check>({ ok: true, ms: 0, note: "tidak dikonfigurasi" }),
 	]);
+	const news = newsP && (await newsP);
+	if (news && !news.ok) {
+		const quota = TURSO_QUOTA_RE.test(news.error ?? "");
+		warnings.push(
+			`DB 1 (BOT News) ${quota ? "kena kuota Turso" : "gagal dibaca"}: BOT News berhenti sampai DB 1 pulih — panel tetap jalan di DB 2. (${String(news.error ?? "").slice(0, 140)})`,
+		);
+	}
+	if (news && turso.ok) turso.note = `${turso.note} · DB 1 News: ${news.ok ? "ok" : "BERMASALAH"}`;
 	const checks: Record<string, Check> = { d1, kv, turso, cron };
 	if (opts.session) checks.session = await timed(() => sessionProbe(env, warnings));
 	let autoInput: Record<string, unknown> | undefined;

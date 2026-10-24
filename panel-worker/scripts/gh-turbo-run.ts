@@ -22,7 +22,7 @@ import { botCfg, botCfgSet, botNewsRun } from "../src/lib/bot-news";
 const env = {
 	TURSO_URL: process.env.TURSO_URL,
 	TURSO_TOKEN: process.env.TURSO_TOKEN,
-	// cadangan (opsional): bila utama kena kuota dan panel sudah pindah, skrip ini ikut menulis ke cadangan (lib/turso.ts)
+	// DB 2 (cadangan): tabel panel yang mungkin disentuh BOT News (mis. catatan galat) ditulis ke sana -- lib/turso.ts
 	TURSO_SPARE_URL: process.env.TURSO_SPARE_URL,
 	TURSO_SPARE_TOKEN: process.env.TURSO_SPARE_TOKEN,
 } as any;
