@@ -8,7 +8,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 type Rec = { d1: unknown; raw: DatabaseSync; sqls: string[] };
 const turso = vi.hoisted(() => ({ current: null as null | Rec }));
-vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
+vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1, tursoGeneration: () => 0 }));
 
 import { botCfgSet, ensureNewsCategoryColumns, publicNewsList, publicNewsRandom, resetNewsColumnsGuard, resetNewsCountCache } from "../src/lib/bot-news";
 import { tgChannelRun } from "../src/lib/tg-channel";

@@ -11,7 +11,7 @@
 //   * satu result x satu website hanya boleh jalan SEKALI (UNIQUE di tabel);
 //   * ragu = berhenti dan minta input manual.
 import { adminDomain } from "./integrations";
-import { getTurso } from "./turso";
+import { getTurso, tursoGeneration } from "./turso";
 import { ensureColumns } from "./turso-schema";
 import { sharedOnce } from "./shared-once";
 import { getSys } from "./settings";
@@ -43,7 +43,7 @@ export type JobStatus = "QUEUED" | "RUNNING" | "DONE" | "FAILED" | "SKIPPED";
 const ENSURE_JOIN_WAIT_MS = 8000;
 /** Satu pembuatan skema bersama: tiga fungsi yang dipanggil paralel (Promise.all) di isolate dingin dulu masing-masing menjalankan
  *  SELURUH pembuatan skema (penanda baru diset sesudah selesai) -> subrequest dikali tiga -> "Too many subrequests". */
-export const ensureAutoInputTables = sharedOnce((env) => ensureAutoInputTablesOnce(env), ENSURE_JOIN_WAIT_MS);
+export const ensureAutoInputTables = sharedOnce((env) => ensureAutoInputTablesOnce(env), ENSURE_JOIN_WAIT_MS, tursoGeneration);
 /** Hanya untuk test (tiap test memakai database baru). */
 export function resetAutoInputTablesFlag(): void {
 	ensureAutoInputTables.reset();

@@ -333,10 +333,25 @@ for (const f of ["logo.png", "favicon.png"]) copyFileSync(resolve(root, "ui-src"
 for (const f of readdirSync(resolve(root, "ui-src"))) {
 	if (/^[A-Z]{2,8}\.svg$/.test(f)) copyFileSync(resolve(root, "ui-src", f), resolve(outDir, f));
 }
+// Ikon Font Awesome DISIMPAN DI SERVER PANEL (dulu dari cdnjs.cloudflare.com): CDN yang lambat/diblokir di jaringan
+// operator -> CSS terambil tapi file font gagal -> semua ikon jadi kotak "□" (laporan pemilik 24 Okt 2026). Versi terkunci di
+// package.json (devDependency) dan masuk ke nama folder, jadi cache panjang aman. Hanya woff2 (semua browser modern).
+const FA_VER = JSON.parse(readFileSync(resolve(root, "node_modules/@fortawesome/fontawesome-free/package.json"), "utf8")).version;
+const faDir = resolve(outDir, `vendor/fa-${FA_VER}`);
+if (!out.includes(`href="vendor/fa-${FA_VER}/css/all.min.css"`) || /cdnjs\.cloudflare\.com\/ajax\/libs\/font-awesome/.test(out)) {
+	console.error(`ERROR: Index.html harus memuat ikon dari vendor/fa-${FA_VER}/css/all.min.css (versi package.json), bukan CDN.`);
+	process.exit(1);
+}
+mkdirSync(resolve(faDir, "css"), { recursive: true });
+mkdirSync(resolve(faDir, "webfonts"), { recursive: true });
+copyFileSync(resolve(root, "node_modules/@fortawesome/fontawesome-free/css/all.min.css"), resolve(faDir, "css/all.min.css"));
+for (const f of readdirSync(resolve(root, "node_modules/@fortawesome/fontawesome-free/webfonts"))) {
+	if (f.endsWith(".woff2")) copyFileSync(resolve(root, "node_modules/@fortawesome/fontawesome-free/webfonts", f), resolve(faDir, "webfonts", f));
+}
 // Cache aset statis (dulu: validasi ulang tiap kunjungan). Logo/ikon jarang berubah -> 1 hari; skrip bot Live Chat selalu segar.
 writeFileSync(
 	resolve(outDir, "_headers"),
-	["/*.svg", "  Cache-Control: public, max-age=86400", "/logo.png", "  Cache-Control: public, max-age=86400", "/favicon.png", "  Cache-Control: public, max-age=86400", "/daylivechat-autobot.js", "  Cache-Control: no-cache", ""].join("\n"),
+	["/vendor/*", "  Cache-Control: public, max-age=2592000, immutable", "/*.svg", "  Cache-Control: public, max-age=86400", "/logo.png", "  Cache-Control: public, max-age=86400", "/favicon.png", "  Cache-Control: public, max-age=86400", "/daylivechat-autobot.js", "  Cache-Control: no-cache", ""].join("\n"),
 	"utf8",
 );
 // Bot Live Chat untuk BOOKMARKLET (tanpa Tampermonkey, tanpa file di laptop): kode yang sama dengan userscript,

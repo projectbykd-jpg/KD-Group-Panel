@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: import("node:sqlite").DatabaseSync } }));
-vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
+vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1, tursoGeneration: () => 0 }));
 
 import { livechatBotSync } from "../src/api/livechat";
 import { fakeD1 } from "./helpers/fake-env";

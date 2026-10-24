@@ -14,7 +14,7 @@
 // sudah terbit dalam 2 jam terakhir; angka harus tepat 4 digit (Toto Macau) / 5 digit (5D); jam baris harus jam draw yang dikenal;
 // halaman harus benar-benar halaman game yang diminta (bukan redirect). Ada yang meleset -> tidak dikirim, dicatat, dan
 // (kalau percobaan habis / sesi mati) user diberi popup peringatan.
-import { getTurso } from "./turso";
+import { getTurso, tursoGeneration } from "./turso";
 import { retentionFrom, tsNow, tsPlusMinutes } from "./time";
 import { getSys } from "./settings";
 import { getUserProfiles } from "./db";
@@ -101,12 +101,14 @@ function ageMin(row: TotoRow, nowMs: number): number {
 // ---------------------------------------------------------------------------
 // Tabel log (Turso)
 // ---------------------------------------------------------------------------
-let ensured = false;
+/** Generasi database Turso (tursoGeneration) tempat skema ini sudah disiapkan; -1 = belum. */
+let ensuredGen = -1;
 export function resetTotoTablesFlag(): void {
-	ensured = false;
+	ensuredGen = -1;
 }
 async function ensureTables(env: Env): Promise<void> {
-	if (ensured) return;
+	if (ensuredGen === tursoGeneration()) return;
+	const gen = tursoGeneration();
 	const db = getTurso(env);
 	await db
 		.prepare(
@@ -141,7 +143,7 @@ async function ensureTables(env: Env): Promise<void> {
 	await db
 		.prepare(`CREATE TABLE IF NOT EXISTS toto_macau_dismissed (website TEXT NOT NULL, game TEXT NOT NULL, period INTEGER NOT NULL, at TEXT NOT NULL DEFAULT '', by TEXT NOT NULL DEFAULT '', PRIMARY KEY (website, game, period))`)
 		.run();
-	ensured = true;
+	ensuredGen = gen;
 }
 
 export interface TotoLogRow {

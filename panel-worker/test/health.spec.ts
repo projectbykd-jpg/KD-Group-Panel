@@ -11,6 +11,7 @@ vi.mock("../src/lib/turso", () => ({
 		return turso.current!.d1;
 	},
 	tursoStatus: async () => turso.status,
+	tursoGeneration: () => 0,
 }));
 
 import { deepHealth } from "../src/lib/health";

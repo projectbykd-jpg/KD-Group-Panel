@@ -27,7 +27,7 @@
 //     membalas -- bot ini khusus pacify member spam/kasar, bukan FAQ, jadi
 //     balasannya TIDAK memandang isi keluhan member).
 //   - livechat_log      : jejak setiap balasan otomatis yang terkirim.
-import { getTurso } from "./turso";
+import { getTurso, tursoGeneration } from "./turso";
 import { tsNow } from "./time";
 import { ensureColumns } from "./turso-schema";
 import { sharedOnce } from "./shared-once";
@@ -36,7 +36,7 @@ import { sharedOnce } from "./shared-once";
  *  Dulu: 3 CREATE + 5 ALTER yang SELALU gagal "duplicate column" dijalankan satu-satu di tiap isolate dingin, dan dua request
  *  paralel (polling sesi + sinkron userscript) masing-masing mengulang semuanya -> boros subrequest (batas 50) dan menu Sesi Chat error.
  *  Request lain yang ikut menunggu dibatasi 8 dtk (lihat shared-once.ts) supaya tidak menggantung bersama. */
-const ensureTables = sharedOnce((env) => ensureTablesOnce(env), 8000);
+const ensureTables = sharedOnce((env) => ensureTablesOnce(env), 8000, tursoGeneration);
 /** Hanya untuk test. */
 export function resetLivechatTablesFlag(): void {
 	ensureTables.reset();

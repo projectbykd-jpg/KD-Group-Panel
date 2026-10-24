@@ -3,15 +3,17 @@
 // tabel ini -> paling sering dipanggil di seluruh app, growth tak terbatas
 // tanpa pruning. Dipindah spy tidak makan kuota rows-read/write harian D1.
 import { tsNow } from "./time";
-import { getTurso } from "./turso";
+import { getTurso, tursoGeneration } from "./turso";
 
 // Tabel ini tidak ada di migration/turso_*.sql lama (dulu hanya di D1 lewat
 // 001_init.sql, lalu kodenya pindah ke Turso tanpa skemanya). Dibuat otomatis
 // supaya instalasi/Turso baru tidak gagal "no such table: sent_registry" di
 // fitur inti kirim result. No-op kalau sudah ada; dicek sekali per isolate.
-let tableReady = false;
+/** Generasi database Turso (tursoGeneration) tempat skema ini sudah disiapkan; -1 = belum. */
+let tableReadyGen = -1;
 async function ensureTable(env: Env): Promise<void> {
-	if (tableReady) return;
+	if (tableReadyGen === tursoGeneration()) return;
+	const gen = tursoGeneration();
 	const db = getTurso(env);
 	await db
 		.prepare(
@@ -30,7 +32,7 @@ async function ensureTable(env: Env): Promise<void> {
 		)
 		.run();
 	await db.prepare(`CREATE INDEX IF NOT EXISTS ix_sent_registry_sent_at ON sent_registry(sent_at)`).run();
-	tableReady = true;
+	tableReadyGen = gen;
 }
 
 export interface RegEntry {
@@ -138,6 +140,6 @@ export async function upsertRegistry(
 }
 
 export function resetRegistryGuards(): void {
-	tableReady = false;
+	tableReadyGen = -1;
 	d1Ready = false;
 }

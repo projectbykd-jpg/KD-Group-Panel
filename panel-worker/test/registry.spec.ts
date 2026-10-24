@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown } }));
-vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
+vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1, tursoGeneration: () => 0 }));
 
 import { getRegistryEntry, resetRegistryGuards, upsertRegistry } from "../src/lib/registry";
 import { fakeD1, fakeEnv } from "./helpers/fake-env";

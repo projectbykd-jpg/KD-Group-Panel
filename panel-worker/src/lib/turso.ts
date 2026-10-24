@@ -62,6 +62,17 @@ interface FailoverState {
 	at: number;
 }
 let state: FailoverState | null = null;
+/** Naik setiap kali database AKTIF berganti (utama <-> cadangan), di isolate mana pun yang pertama melihatnya. Modul yang
+ *  membuat tabel/kolom "sekali per isolate" mencatat generasi ini: berganti -> skema disiapkan ulang di database yang baru
+ *  (dulu: penanda "sudah dibuat" ikut terbawa, query ke database tujuan gagal "no such table/column" sampai isolate diganti). */
+let generation = 0;
+export function tursoGeneration(): number {
+	return generation;
+}
+function setState(next: FailoverState): void {
+	if (state && state.active !== next.active) generation++;
+	state = next;
+}
 let failoverHook: ((env: Env, reason: string) => void | Promise<void>) | null = null;
 
 /** Dipanggil index.ts: catat ke Error & Bug (+ Telegram admin) saat panel pindah ke spare. */
@@ -72,6 +83,7 @@ export function onTursoFailover(cb: (env: Env, reason: string) => void | Promise
 export function resetTursoForTest(): void {
 	for (const k of Object.keys(clients) as TursoTarget[]) delete clients[k];
 	state = null;
+	generation = 0;
 	failoverHook = null;
 }
 
@@ -81,17 +93,17 @@ async function readState(env: Env, fresh = false): Promise<FailoverState> {
 	try {
 		const rs = await client(env, "spare").execute(`SELECT k, v, at FROM kd_failover WHERE k IN ('active', 'synced_at')`);
 		const m = new Map(rs.rows.map((r) => [String(r.k), { v: String(r.v ?? ""), at: String(r.at ?? "") }]));
-		state = {
+		setState({
 			active: m.get("active")?.v === "spare" ? "spare" : "primary",
 			syncedAt: m.get("synced_at")?.v ?? "",
 			since: m.get("active")?.v === "spare" ? (m.get("active")?.at ?? "") : "",
 			at: Date.now(),
-		};
+		});
 	} catch {
 		// tabel penanda belum ada (spare belum pernah disalin) / spare tidak terjangkau -> tetap utama, belum siap
 		state = { active: state?.active ?? "primary", syncedAt: state?.syncedAt ?? "", since: state?.since ?? "", at: Date.now() };
 	}
-	return state;
+	return state as FailoverState; // selalu terisi di kedua cabang di atas
 }
 
 async function declareFailover(env: Env, reason: string): Promise<void> {
@@ -104,7 +116,7 @@ async function declareFailover(env: Env, reason: string): Promise<void> {
 		],
 		"write",
 	);
-	state = { active: "spare", syncedAt: state?.syncedAt ?? "", since: now, at: Date.now() };
+	setState({ active: "spare", syncedAt: state?.syncedAt ?? "", since: now, at: Date.now() });
 	try {
 		await failoverHook?.(env, reason);
 	} catch {

@@ -11,7 +11,7 @@
 //
 // "Hilang dalam hitungan detik" tetap terpenuhi lewat STALE_MS: kalau tab Motion
 // berhenti mengirim snapshot, snapshot dianggap basi dan UI kembali kosong.
-import { getTurso } from "./turso";
+import { getTurso, tursoGeneration } from "./turso";
 
 export interface PgaPendingRow {
 	website: string;
@@ -50,9 +50,11 @@ function cleanRow(r: Record<string, unknown>): PgaPendingRow {
 	};
 }
 
-let ensured = false;
+/** Generasi database Turso (tursoGeneration) tempat skema ini sudah disiapkan; -1 = belum. */
+let ensuredGen = -1;
 async function ensureTable(env: Env): Promise<void> {
-	if (ensured) return;
+	if (ensuredGen === tursoGeneration()) return;
+	const gen = tursoGeneration();
 	await getTurso(env)
 		.prepare(
 			`CREATE TABLE IF NOT EXISTS pga_pending_state (
@@ -62,7 +64,7 @@ async function ensureTable(env: Env): Promise<void> {
 			)`,
 		)
 		.run();
-	ensured = true;
+	ensuredGen = gen;
 }
 
 // Per-isolate debounce. Cloudflare Workers may have multiple isolates, so this

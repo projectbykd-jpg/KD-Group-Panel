@@ -2,7 +2,7 @@
 // Bagian ini: kredensial per operator + snapshot hasil + helper umum.
 // Tabel lap_* ada di Turso (bukan D1) -> pakai getTurso(env).
 import { tsNow } from "./time";
-import { getTurso } from "./turso";
+import { getTurso, tursoGeneration } from "./turso";
 
 export interface LapCreds {
 	linkAdmin: string;
@@ -36,15 +36,17 @@ const EMPTY: LapCreds = {
 // yang situsnya sendiri kirim (lihat Network tab): asli = {page,start,limit,
 // count,vendor_id}, TANPA date1/date2/filter_status/filter_by/sort sama sekali
 // (skrip Console filter tanggal di sisi client, bukan server).
-let lapVendorColumnEnsured = false;
+/** Generasi database Turso (tursoGeneration) tempat skema ini sudah disiapkan; -1 = belum. */
+let lapVendorColumnEnsuredGen = -1;
 async function ensureLapVendorColumn(env: Env): Promise<void> {
-	if (lapVendorColumnEnsured) return;
+	if (lapVendorColumnEnsuredGen === tursoGeneration()) return;
+	const gen = tursoGeneration();
 	try {
 		await getTurso(env).prepare(`ALTER TABLE lap_credentials ADD COLUMN vendor_id_motion TEXT NOT NULL DEFAULT ''`).run();
 	} catch {
 		/* kolom sudah ada -> abaikan */
 	}
-	lapVendorColumnEnsured = true;
+	lapVendorColumnEnsuredGen = gen;
 }
 
 export async function lapLoadCreds(env: Env, username: string): Promise<LapCreds> {
