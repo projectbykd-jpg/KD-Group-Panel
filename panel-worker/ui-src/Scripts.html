@@ -4331,10 +4331,10 @@
       spNote('');
       const card = box.closest('.glass-card'); if (card) card.classList.remove('sp-on');
     }
-    function spFromSendResult(result) {
+    function spFromSendResult(result, only) {
       const st = { 'BERHASIL': ['ok', 'Terkirim'], 'GAGAL': ['fail', 'Gagal'], 'DIBLOKIR': ['skip', 'Diblokir'], 'SUDAH DIKIRIM': ['ok', 'Sudah'], 'SKIP': ['skip', '–'] };
       (Array.isArray(result && result.websiteResults) ? result.websiteResults : []).forEach(wr => {
-        ['telegram', 'linktree', 'panelz'].forEach(k => {
+        (only || ['telegram', 'linktree', 'panelz']).forEach(k => {
           const it = wr[k] || {};
           const m = st[String(it.status || 'SKIP').toUpperCase()] || ['skip', String(it.status || '–')];
           spSet(wr.website, k, m[0], m[1], it.reason);
@@ -4352,7 +4352,28 @@
       sendFlowBusy = true;
       pendingSendText = txt;
       spInit();
-      spNote('1/2 · Input angka → Hitung → catat Total Prediksi…');
+      // 1/3 Panel-Z DULU (25 Okt 2026, data produksi): urutan lama yang terbukti jalan (173-201 berhasil/hari) membuka admin
+      // SESUDAH Panel-Z. Auto Prediksi sebelum Panel-Z -> halaman Nomor Keluar admin tanpa form (0 berhasil / 16 gagal).
+      spNote('1/3 · Panel-Z…');
+      spEachSite(w => spSet(w, 'panelz', 'run', 'Mengirim'));
+      google.script.run
+        .withSuccessHandler(res => {
+          pzResult = res || null;
+          if (res) spFromSendResult(res, ['panelz']);
+          autoStage(txt, btn);
+        })
+        .withFailureHandler(err => {
+          pzResult = null;
+          spEachSite(w => spSet(w, 'panelz', 'fail', 'Gagal', (err && err.message) || 'Koneksi putus'));
+          autoStage(txt, btn);
+        })
+        .smartAutoSendFast(txt, currentSessionToken, true, ['panelz']);
+    }
+    let pzResult = null;
+
+    // 2/3 Auto Prediksi: input Nomor Keluar -> Hitung -> catat Total; lalu 3/3 Telegram & LinkTree.
+    function autoStage(txt, btn) {
+      spNote('2/3 · Input angka → Hitung → catat Total Prediksi…');
       let sent = false;
       let timer = null;
       const go = (autoDone, note) => {
@@ -4387,9 +4408,19 @@
     }
     let pendingAutoOut = null;
 
+    // Gabungkan hasil Panel-Z (tahap 1) ke hasil Telegram/LinkTree (tahap 3) supaya ringkasan & popup hasil tetap utuh.
+    function mergeSendResults(pz, rest) {
+      if (!pz || !rest) return rest || pz;
+      const byW = {};
+      (pz.websiteResults || []).forEach(w => { byW[w.website] = w; });
+      const websiteResults = (rest.websiteResults || []).map(w => byW[w.website] ? Object.assign({}, w, { panelz: byW[w.website].panelz }) : w);
+      const ok = r => !!(r && r.success), some = r => !!(r && (r.success || r.partial));
+      return Object.assign({}, rest, { websiteResults, success: ok(pz) && ok(rest), partial: !(ok(pz) && ok(rest)) && (some(pz) || some(rest)) });
+    }
+
     function sendNow(txt, btn, autoDone) {
-      spNote('2/2 · Mengirim Telegram · LinkTree · Panel-Z…');
-      spEachSite(w => ['telegram', 'linktree', 'panelz'].forEach(k => spSet(w, k, 'run', 'Mengirim')));
+      spNote('3/3 · Mengirim Telegram · LinkTree…');
+      spEachSite(w => ['telegram', 'linktree'].forEach(k => spSet(w, k, 'run', 'Mengirim')));
       const done = () => {
         sendFlowBusy = false;
         // semua beres -> tabel menutup sendiri (Live Preview kembali penuh); ada yang gagal -> tetap tampil sampai ditutup (×)
@@ -4401,10 +4432,12 @@
         if (out && out.length) setTimeout(() => autoInputShow(out), 400); // popup "perlu dicek MANUAL" sesudah hasil kirim
       };
       google.script.run
-        .withSuccessHandler(result => {
+        .withSuccessHandler(raw => {
           spNote('Selesai');
-          if (result) spFromSendResult(result);
-          else spEachSite(w => ['telegram', 'linktree', 'panelz'].forEach(k => spSet(w, k, 'fail', 'Tanpa respons')));
+          if (raw) spFromSendResult(raw, ['telegram', 'linktree']);
+          else spEachSite(w => ['telegram', 'linktree'].forEach(k => spSet(w, k, 'fail', 'Tanpa respons')));
+          const result = mergeSendResults(pzResult, raw);
+          pzResult = null;
           done();
           if (!result) {
             showActionPopup(
@@ -4435,7 +4468,8 @@
         })
         .withFailureHandler(err => {
           spNote('Gagal menghubungi server');
-          spEachSite(w => ['telegram', 'linktree', 'panelz'].forEach(k => spSet(w, k, 'fail', 'Gagal', (err && err.message) || '')));
+          spEachSite(w => ['telegram', 'linktree'].forEach(k => spSet(w, k, 'fail', 'Gagal', (err && err.message) || '')));
+          pzResult = null;
           done();
           showActionPopup(
             'ERROR',
@@ -4444,7 +4478,7 @@
             'fa-triangle-exclamation'
           );
         })
-        .smartAutoSendFast(txt, currentSessionToken, !!autoDone);
+        .smartAutoSendFast(txt, currentSessionToken, !!autoDone, ['telegram', 'linktree']);
     }
 
     // ===== Result: Total Omset / Referal / Menang (dibaca Auto Prediksi dari menu Prediksi admin) =====

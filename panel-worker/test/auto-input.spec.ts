@@ -1288,6 +1288,23 @@ describe("KIRIM SEMUA: input angka -> Hitung -> catat Total DULU, baru kirim (pe
 		expect(await listJobs(env, "Op")).toHaveLength(1);
 	});
 
+	it("KIRIM SEMUA bertahap: hanya sistem yang diminta yang dikirim (Panel-Z dulu, lalu Telegram & LinkTree); daftar ngawur = semua", async () => {
+		const pz = (await smartAutoSendFast(env, op, RAW, true, ["panelz"])) as unknown as { websiteResults: Record<string, { status: string }>[] };
+		for (const w of pz.websiteResults) {
+			expect(w.telegram.status).toBe("SKIP");
+			expect(w.linktree.status).toBe("SKIP");
+			expect(w.panelz.status).not.toBe("SKIP");
+		}
+		const rest = (await smartAutoSendFast(env, op, RAW, true, ["telegram", "linktree"])) as unknown as { websiteResults: Record<string, { status: string }>[] };
+		for (const w of rest.websiteResults) {
+			expect(w.panelz.status).toBe("SKIP");
+			expect(w.telegram.status).not.toBe("SKIP");
+		}
+		const junk = (await smartAutoSendFast(env, op, RAW, true, ["xx"])) as unknown as { websiteResults: Record<string, { status: string }>[] };
+		expect(junk.websiteResults[0].panelz.status).not.toBe("SKIP");
+		expect(await listJobs(env, "Op")).toHaveLength(0); // autoInputDone -> server tidak membuat job
+	});
+
 	it("galat di tahap 1 tidak menghalangi kiriman (dilaporkan GAGAL, success tetap true)", async () => {
 		turso.current = { d1: { prepare: () => { throw new Error("Turso mati"); }, batch: async () => { throw new Error("Turso mati"); } } } as never;
 		resetAutoInputTablesFlag();

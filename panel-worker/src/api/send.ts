@@ -293,9 +293,13 @@ async function runSend(env: Env, session: Session, rawText: string, opts: SendOp
 
 /** autoInputDone = browser sudah menjalankan input angka -> Hitung -> baca Total (autoInputBeforeSend) SEBELUM kirim.
  *  Browser lama (tanpa penanda) tetap memakai urutan lama: kirim dulu, Auto Prediksi sesudahnya. */
-export async function smartAutoSendFast(env: Env, token: string, rawText: string, autoInputDone = false) {
+/** systems (opsional) = bagian sistem yang dikirim di panggilan ini. KIRIM SEMUA (25 Okt 2026): Panel-Z DULU -> Auto Prediksi
+ *  -> Telegram & LinkTree. Data produksi: dengan Panel-Z sesudah Auto Prediksi, halaman Nomor Keluar admin tidak memberi form
+ *  (0 berhasil / 16 gagal), sedangkan urutan lama (Panel-Z sebelum admin dibuka) 173-201 berhasil per hari. */
+export async function smartAutoSendFast(env: Env, token: string, rawText: string, autoInputDone = false, systems?: unknown) {
 	const session = await requireSession(env, token, { menu: "result" });
-	return runSend(env, session, rawText, { targets: SYSTEMS, forceDuplicate: false, skipAutoInput: autoInputDone });
+	const pick = Array.isArray(systems) ? SYSTEMS.filter((k) => systems.map((x) => String(x).toLowerCase()).includes(k)) : [];
+	return runSend(env, session, rawText, { targets: pick.length ? pick : SYSTEMS, forceDuplicate: false, skipAutoInput: autoInputDone });
 }
 
 /**

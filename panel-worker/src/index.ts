@@ -197,7 +197,7 @@ const ROUTES: Record<string, Handler> = {
 		logClientActivity(env, s(b.token), s(b.action_name ?? b.act), s(b.detail), s(b.status), s(b.content)),
 
 	// kirim result
-	smartAutoSendFast: (env, b) => smartAutoSendFast(env, s(b.token), s(b.rawText), b.autoInputDone === true),
+	smartAutoSendFast: (env, b) => smartAutoSendFast(env, s(b.token), s(b.rawText), b.autoInputDone === true, b.systems),
 	autoInputBeforeSend: (env, b) => autoInputBeforeSend(env, s(b.token), s(b.rawText)),
 	retryFailedSystem: (env, b) =>
 		retryFailedSystem(env, s(b.token), s(b.rawText), s(b.systemName), b.website ? s(b.website) : undefined),
