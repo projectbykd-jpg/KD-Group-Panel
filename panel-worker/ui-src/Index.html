@@ -494,10 +494,17 @@
           <!-- Kolom Kanan: Monitor & Preview -->
           <div class="lg:col-span-7 flex flex-col gap-5">
             <div class="glass-card rounded-3xl p-5 flex flex-col gap-4">
-              <div class="panel-section-title">
+              <div class="panel-section-title sp-title">
                 <i class="fa-solid fa-chart-pie text-pink-400 text-sm"></i> MONITOR HASIL REAL-TIME
+                <span id="sendProgressNote" class="sp-note"></span>
               </div>
-              <div class="monitor-stats monitor-stats-sm grid grid-cols-3 gap-2">
+              <!-- Progres KIRIM SEMUA (pengganti popup loading): Prediksi dulu, baru Telegram / LinkTree / Panel-Z.
+                   Selama tampil, Live Preview mengecil (.sp-on) supaya ukuran menu Result tidak berubah. -->
+              <div id="sendProgress" class="send-progress" style="display:none">
+                <button type="button" class="sp-close" title="Sembunyikan" onclick="spHide()">&times;</button>
+                <table class="sp-table"><thead><tr><th>Website</th><th>Prediksi</th><th>Telegram</th><th>LinkTree</th><th>Panel-Z</th></tr></thead><tbody id="sendProgressBody"></tbody></table>
+              </div>
+              <div class="monitor-stats monitor-stats-sm monitor-stats-xs grid grid-cols-3 gap-2">
                 <div class="glass-inner rounded-xl px-3 py-2 flex flex-col justify-center min-h-[46px] border border-white/5">
                   <span class="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none">ANGKA 2D</span>
                   <div id="twoDigit" class="text-base font-black font-mono text-amber-400 mt-1 leading-none">-</div>

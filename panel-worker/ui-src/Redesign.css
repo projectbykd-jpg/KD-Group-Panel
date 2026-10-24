@@ -1597,3 +1597,34 @@ th.ai-sel, td.ai-sel { width: 36px; padding-right: 0 !important; }
 #omsetCopy .omset-copy-1 { border-color: rgba(251,191,36,.5) !important; background: rgba(180,83,9,.2) !important; color: #fde68a !important; }
 #omsetCopy .omset-copy-2 { border-color: rgba(52,211,153,.5) !important; background: rgba(5,150,105,.2) !important; color: #a7f3d0 !important; }
 #omsetCopy .omset-copy-3 { border-color: rgba(244,114,182,.5) !important; background: rgba(190,24,93,.2) !important; color: #fbcfe8 !important; }
+
+/* ---- Result: kartu Angka 2D / Shio / Status lebih kecil + tabel progres KIRIM SEMUA (24 Okt 2026) ---- */
+#result-page .monitor-stats-xs > div { min-height: 34px !important; padding: 4px 10px !important; }
+#result-page .monitor-stats-xs > div > span:first-child { font-size: 8.5px !important; }
+#result-page .monitor-stats-xs #twoDigit { font-size: 16px !important; margin-top: 2px !important; }
+#result-page .monitor-stats-xs #shio-box, #result-page .monitor-stats-xs #status { font-size: 11px !important; line-height: 13px !important; margin-top: 2px !important; }
+#result-page .monitor-stats-xs #twoDigit { line-height: 1 !important; }
+#result-page .monitor-stats-xs #shio-icon { font-size: 12px !important; line-height: 1 !important; display: inline-flex; align-items: center; max-height: 13px; overflow: visible; }
+#result-page .monitor-stats-xs #shio-icon img, #result-page .monitor-stats-xs #shio-icon svg { width: 13px !important; height: 13px !important; }
+#result-page .monitor-stats-xs #shio-box { line-height: 13px !important; max-height: 14px; }
+.send-progress { position: relative; border: 1px solid rgba(255,255,255,.06); border-radius: 10px; padding: 2px 18px 1px 6px; background: rgba(15,23,42,.35); margin: -6px 0 -6px; }
+.sp-title { display: flex; align-items: center; gap: 6px; }
+.sp-title .sp-note { margin-left: auto; font-size: 10px; font-weight: 600; color: #94a3b8; text-transform: none; letter-spacing: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%; }
+.send-progress .sp-close { position: absolute; top: 2px; right: 4px; font-size: 13px; line-height: 1; color: #64748b; background: none; border: 0; cursor: pointer; padding: 0 2px; }
+/* tabel progres tampil -> Live Preview yang mengecil, bukan halaman yang memanjang */
+#result-page .sp-on .beranda-flex { flex: 1 1 0 !important; min-height: 0 !important; }
+#result-page .sp-on #outputPreview { flex: 1 1 0 !important; height: 0 !important; min-height: 34px !important; }
+.send-progress .sp-table { width: 100%; border-collapse: collapse; font-size: 10.5px; table-layout: fixed; }
+.send-progress .sp-table th { text-align: left; font-size: 8.5px; letter-spacing: .06em; text-transform: uppercase; color: #64748b; font-weight: 700; padding: 1px 4px; }
+.send-progress .sp-table th:nth-child(1) { width: 24%; } .send-progress .sp-table th:nth-child(2) { width: 25%; }
+.send-progress .sp-table td { padding: 1px 4px; line-height: 15px; border-top: 1px solid rgba(255,255,255,.04); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.send-progress .sp-site { font-weight: 700; color: #67e8f9; }
+.send-progress .sp-chip { font-weight: 600; }
+.send-progress .sp-wait { color: #64748b; }
+.send-progress .sp-run { color: #7dd3fc; }
+.send-progress .sp-ok { color: #34d399; }
+.send-progress .sp-warn { color: #fbbf24; }
+.send-progress .sp-fail { color: #fb7185; }
+.send-progress .sp-skip { color: #94a3b8; }
+#result-page .send-progress .sp-table th, #result-page .send-progress .sp-table td { font-size: 10.5px !important; padding: 1px 4px !important; height: auto !important; line-height: 15px !important; background: transparent !important; }
+#result-page .send-progress .sp-table th { font-size: 8.5px !important; }

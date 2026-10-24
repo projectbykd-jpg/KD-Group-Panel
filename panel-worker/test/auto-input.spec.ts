@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: import("node:sqlite").DatabaseSync } }));
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1, tursoGeneration: () => 0 }));
@@ -10,6 +10,8 @@ import { hashPassword } from "../src/lib/crypto";
 import { getDisabledMarkets, setGlobalOffMarkets, cleanMarketList, hideJobs, pruneAutoInputJobs, pendingFailureAlerts, ackFailureAlerts, claimJob, parseCookieInput, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
 import { frameSources, parseAngkaPage, readTopRow, parseHitungPage, runAutoInput, buildPayload, parseForms, parseLastResult, parsePrediksiTotals, prediksiEchoProblem } from "../src/lib/auto-input-run";
 import { processText } from "../src/lib/parser";
+import { autoInputBeforeSend, smartAutoSendFast } from "../src/api/send";
+import { resetRegistryGuards } from "../src/lib/registry";
 import { fakeD1, fakeEnv } from "./helpers/fake-env";
 import type { UserProfile } from "../src/lib/db";
 
@@ -1207,5 +1209,57 @@ describe("pasaran dihitung MANUAL (tidak di-auto / Auto Prediksi OFF): KIRIM SEM
 
 	it("website di luar akses akun ditolak", async () => {
 		await expect(autoInputTotalsCheck(env, op, { website: "LAINTOTO", market: "FLORIDAEVE", prizes: ["9808"], date: "" })).rejects.toThrow(/tidak ada di akses/);
+	});
+});
+
+describe("KIRIM SEMUA: input angka -> Hitung -> catat Total DULU, baru kirim (perintah pemilik 24 Okt 2026)", () => {
+	let env: Env;
+	let op: string;
+	let sent: string[];
+	beforeEach(async () => {
+		setGlobalOffMarkets([]);
+		turso.current = fakeD1([]);
+		resetAutoInputTablesFlag();
+		resetRegistryGuards();
+		const ctx = fakeEnv();
+		env = ctx.env;
+		const hash = await hashPassword("pw");
+		ctx.db.prepare(`INSERT INTO users (username, username_lc, password_hash, role, status, websites, perm_telegram, perm_linktree, perm_panelz) VALUES ('Op', 'op', ?, 'OPERATOR', 'AKTIF', ?, 1, 1, 1)`).run(hash, JSON.stringify(["HUGOTOGEL", "FOLATOTO"]));
+		op = ((await checkLogin(env, "Op", "pw", "")) as { sessionToken: string }).sessionToken;
+		await setEnabled(env, "Op", true);
+		await saveSession(env, "Op", "HUGOTOGEL", "https://ag.suksesbogil.com", "PHPSESSID=" + SID1);
+		sent = [];
+		vi.stubGlobal("fetch", async (u: RequestInfo | URL) => {
+			sent.push(String(u));
+			return new Response("x", { status: 500 });
+		});
+	});
+	afterEach(() => vi.unstubAllGlobals());
+
+	it("tahap 1 hanya membuat job Auto Prediksi (tanpa kirim apa pun) + batas tunggu dari Pengaturan Sistem", async () => {
+		const r = (await autoInputBeforeSend(env, op, RAW)) as { autoInput: AutoInputNotice; waitSec: number };
+		expect(r.waitSec).toBe(90);
+		expect(r.autoInput.results.find((x) => x.website === "HUGOTOGEL")).toMatchObject({ status: "ANTRI" });
+		expect(r.autoInput.results.find((x) => x.website === "FOLATOTO")).toMatchObject({ status: "DILEWATI" }); // tanpa PHPSESSID
+		expect(sent).toHaveLength(0);
+		expect(await listJobs(env, "Op")).toHaveLength(1);
+	});
+
+	it("tahap 2 dengan penanda autoInputDone TIDAK membuat/menjalankan Auto Prediksi lagi; tanpa penanda = urutan lama", async () => {
+		await autoInputBeforeSend(env, op, RAW);
+		const done = (await smartAutoSendFast(env, op, RAW, true)) as unknown as { autoInput?: unknown; websiteResults: unknown[] };
+		expect(done.websiteResults.length).toBe(2);
+		expect(done.autoInput).toBeUndefined();
+		const old = (await smartAutoSendFast(env, op, RAW)) as unknown as { autoInput?: AutoInputNotice };
+		expect(old.autoInput?.results.find((x) => x.website === "HUGOTOGEL")?.status).toBe("SUDAH"); // klien lama: tetap jalan, tanpa dobel
+		expect(await listJobs(env, "Op")).toHaveLength(1);
+	});
+
+	it("galat di tahap 1 tidak menghalangi kiriman (dilaporkan GAGAL, success tetap true)", async () => {
+		turso.current = { d1: { prepare: () => { throw new Error("Turso mati"); }, batch: async () => { throw new Error("Turso mati"); } } } as never;
+		resetAutoInputTablesFlag();
+		const r = (await autoInputBeforeSend(env, op, RAW)) as { success: boolean; autoInput: AutoInputNotice };
+		expect(r.success).toBe(true);
+		expect(r.autoInput.results[0]).toMatchObject({ status: "GAGAL", manual: true });
 	});
 });

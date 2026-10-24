@@ -10,6 +10,7 @@ import { sendTelegram } from "../senders/telegram";
 import { sendLinktree } from "../senders/linktree";
 import { sendCustomPanelZ, sendPanelZ } from "../senders/panelz";
 import { autoInputAfterSend } from "./auto-input";
+import { getSys } from "../lib/settings";
 import { linktreeCfg } from "../lib/integrations";
 import { NET_FAIL_RE, netFailWhy, startSendDeadline, TIME_UP_NOT_SENT } from "../lib/send-deadline";
 
@@ -41,6 +42,8 @@ interface SendOpts {
 	forceDuplicate?: boolean;
 	onlyWebsites?: string[];
 	isPrediksiAuto?: boolean;
+	/** Tahap Auto Prediksi SUDAH dijalankan browser sebelum kirim (autoInputBeforeSend) -> jangan dibuat lagi di sini. */
+	skipAutoInput?: boolean;
 }
 
 async function runSend(env: Env, session: Session, rawText: string, opts: SendOpts) {
@@ -260,7 +263,7 @@ async function runSend(env: Env, session: Session, rawText: string, opts: SendOp
 	// KIRIM SEMUA SISTEM -- bukan retry satu sistem / prediksi. Kegagalan di sini
 	// TIDAK boleh merusak hasil kirim yang sudah jadi, jadi dibungkus try/catch.
 	let autoInput: Awaited<ReturnType<typeof autoInputAfterSend>>;
-	if (!opts.forceDuplicate && !opts.isPrediksiAuto) {
+	if (!opts.forceDuplicate && !opts.isPrediksiAuto && !opts.skipAutoInput) {
 		try {
 			autoInput = await autoInputAfterSend(env, profile, rawText, processed, websites);
 		} catch (e) {
@@ -288,9 +291,33 @@ async function runSend(env: Env, session: Session, rawText: string, opts: SendOp
 	};
 }
 
-export async function smartAutoSendFast(env: Env, token: string, rawText: string) {
+/** autoInputDone = browser sudah menjalankan input angka -> Hitung -> baca Total (autoInputBeforeSend) SEBELUM kirim.
+ *  Browser lama (tanpa penanda) tetap memakai urutan lama: kirim dulu, Auto Prediksi sesudahnya. */
+export async function smartAutoSendFast(env: Env, token: string, rawText: string, autoInputDone = false) {
 	const session = await requireSession(env, token, { menu: "result" });
-	return runSend(env, session, rawText, { targets: SYSTEMS, forceDuplicate: false });
+	return runSend(env, session, rawText, { targets: SYSTEMS, forceDuplicate: false, skipAutoInput: autoInputDone });
+}
+
+/**
+ * KIRIM SEMUA tahap 1 (perintah pemilik 24 Okt 2026: "input angka, hitung, catat angka prediksi dulu baru send ke tele,
+ * linktree, sosmed"). Membuat job Auto Prediksi untuk SEMUA website akun -- sama persis dengan yang dulu dibuat sesudah kirim --
+ * lalu browser menjalankannya (autoInputRun / autoInputTotalsCheck) dan baru memanggil smartAutoSendFast(..., true).
+ * Galat apa pun di sini tidak boleh menghalangi kiriman: dilaporkan sebagai hasil GAGAL, browser tetap mengirim.
+ */
+export async function autoInputBeforeSend(env: Env, token: string, rawText: string) {
+	const session = await requireSession(env, token, { menu: "result" });
+	const profile = session.profile;
+	const waitSec = await getSys(env, "sys_send_wait_auto_sec");
+	if (!profile.websites.length) return { success: true, autoInput: undefined, waitSec };
+	try {
+		return { success: true, autoInput: await autoInputAfterSend(env, profile, rawText, processText(rawText), profile.websites), waitSec };
+	} catch (e) {
+		return {
+			success: true,
+			waitSec,
+			autoInput: { results: [{ website: "-", status: "GAGAL" as const, detail: "Auto Prediksi error: " + (e instanceof Error ? e.message : String(e)), manual: true }] },
+		};
+	}
 }
 
 export async function retryFailedSystem(

@@ -16,7 +16,7 @@ import { deepHealth } from "./lib/health";
 import { adminNotifyTick, pruneAdminNotify } from "./lib/admin-notify";
 import { getBootstrapData, getDashboard, homeInsights } from "./api/dashboard";
 import { logClientActivity } from "./api/activity";
-import { retryFailedSystem, sendToPanelZOnly, smartAutoSendFast } from "./api/send";
+import { autoInputBeforeSend, retryFailedSystem, sendToPanelZOnly, smartAutoSendFast } from "./api/send";
 import {
 	adminDeleteUser,
 	adminListActiveSessions,
@@ -197,7 +197,8 @@ const ROUTES: Record<string, Handler> = {
 		logClientActivity(env, s(b.token), s(b.action_name ?? b.act), s(b.detail), s(b.status), s(b.content)),
 
 	// kirim result
-	smartAutoSendFast: (env, b) => smartAutoSendFast(env, s(b.token), s(b.rawText)),
+	smartAutoSendFast: (env, b) => smartAutoSendFast(env, s(b.token), s(b.rawText), b.autoInputDone === true),
+	autoInputBeforeSend: (env, b) => autoInputBeforeSend(env, s(b.token), s(b.rawText)),
 	retryFailedSystem: (env, b) =>
 		retryFailedSystem(env, s(b.token), s(b.rawText), s(b.systemName), b.website ? s(b.website) : undefined),
 	sendToPanelZOnly: (env, b) => sendToPanelZOnly(env, s(b.token), s(b.market), s(b.angka)),
