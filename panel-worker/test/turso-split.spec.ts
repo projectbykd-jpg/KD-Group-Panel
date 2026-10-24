@@ -67,7 +67,7 @@ describe("DB 1 = BOT News, DB 2 = panel", () => {
 		expect(await tables(spare)).toEqual(["livechat_log"]);
 		expect(tursoLayout(env())).toEqual({ news: "primary", panel: "spare", spareConfigured: true });
 		for (const t of ["news_article", "news_source", "bot_kv", "ai_usage"]) expect(tursoTargetFor(env(), `SELECT * FROM ${t}`)).toBe("primary");
-		for (const t of ["lap_job", "invest_raw", "auto_input_job", "livechat_session", "toto_macau_log", "wd_listed"]) expect(tursoTargetFor(env(), `SELECT * FROM ${t}`)).toBe("spare");
+		for (const t of ["lap_job", "invest_raw", "auto_input_job", "livechat_session", "toto_macau_log", "wd_listed", "assistant_usage"]) expect(tursoTargetFor(env(), `SELECT * FROM ${t}`)).toBe("spare");
 	});
 
 	it("DB 1 kena kuota: BOT News gagal apa adanya, panel TETAP jalan di DB 2 tanpa menyentuh DB 1", async () => {

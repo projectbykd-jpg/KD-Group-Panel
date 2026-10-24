@@ -15,7 +15,7 @@
 // key). Ganti key = counter mulai dari 0; riwayat key lama tetap tersimpan.
 // Kalau provider tidak mengirim `usage`, token DIPERKIRAKAN (karakter/4) dan
 // ditandai estimated=1 supaya kelihatan di panel.
-import { getTurso } from "./turso";
+import { getTurso, tursoGeneration } from "./turso";
 import { tsNow } from "./time";
 
 export const AI_PROVIDERS_KEY = "ai_providers";
@@ -430,18 +430,61 @@ export async function aiRecentUsage(env: Env, limit = 20) {
 	}));
 }
 
+/** Key khusus Asisten KD (Admin › Pengaturan Sistem). Datanya milik PANEL (DB 2), bukan BOT News (DB 1). */
+export const ASSISTANT_PROVIDER_ID = "assistant-dedicated";
+const isAssistantPurpose = (purpose: string) => purpose.startsWith("assistant");
+
+// Pemakaian AI Asisten KD dicatat di DB 2 (tabel panel), terpisah dari ai_usage BOT News di DB 1: kuota DB 1
+// habis tidak boleh ikut mematikan Asisten (perintah pemilik 25 Okt 2026).
+/** Generasi database Turso (tursoGeneration) tempat tabel ini sudah disiapkan; -1 = belum. */
+let assistantUsageGen = -1;
+async function ensureAssistantUsageTable(env: Env): Promise<void> {
+	if (assistantUsageGen === tursoGeneration()) return;
+	const gen = tursoGeneration();
+	await getTurso(env)
+		.prepare(
+			`CREATE TABLE IF NOT EXISTS assistant_usage (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				ts TEXT NOT NULL DEFAULT '',
+				key_id TEXT NOT NULL DEFAULT '',
+				provider TEXT NOT NULL DEFAULT '',
+				model TEXT NOT NULL DEFAULT '',
+				purpose TEXT NOT NULL DEFAULT '',
+				prompt_tokens INTEGER NOT NULL DEFAULT 0,
+				completion_tokens INTEGER NOT NULL DEFAULT 0,
+				total_tokens INTEGER NOT NULL DEFAULT 0,
+				estimated INTEGER NOT NULL DEFAULT 0,
+				ok INTEGER NOT NULL DEFAULT 1,
+				err TEXT NOT NULL DEFAULT '',
+				ms INTEGER NOT NULL DEFAULT 0
+			)`,
+		)
+		.run();
+	assistantUsageGen = gen;
+}
+
 async function recordUsage(
 	env: Env,
 	row: { keyId: string; provider: string; model: string; purpose: string; prompt: number; completion: number; total: number; estimated: boolean; ok: boolean; err: string; ms: number },
 ): Promise<void> {
 	try {
-		await withUsageTable(env, () => getTurso(env)
-			.prepare(
-				`INSERT INTO ai_usage (ts, key_id, provider, model, purpose, prompt_tokens, completion_tokens, total_tokens, estimated, ok, err, ms)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			)
-			.bind(tsNow(), row.keyId, row.provider.slice(0, 60), row.model, row.purpose, row.prompt, row.completion, row.total, row.estimated ? 1 : 0, row.ok ? 1 : 0, row.err.slice(0, 300), row.ms)
-			.run());
+		const args = [tsNow(), row.keyId, row.provider.slice(0, 60), row.model, row.purpose, row.prompt, row.completion, row.total, row.estimated ? 1 : 0, row.ok ? 1 : 0, row.err.slice(0, 300), row.ms];
+		const cols = `(ts, key_id, provider, model, purpose, prompt_tokens, completion_tokens, total_tokens, estimated, ok, err, ms)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+		if (isAssistantPurpose(row.purpose)) {
+			const insert = () => getTurso(env).prepare(`INSERT INTO assistant_usage ${cols}`).bind(...args).run();
+			await ensureAssistantUsageTable(env);
+			try {
+				await insert();
+			} catch (e) {
+				if (!/no such table: assistant_usage/i.test(String(e instanceof Error ? e.message : e))) throw e;
+				assistantUsageGen = -1; // penanda basi (database diganti) -> buat lalu ulangi sekali
+				await ensureAssistantUsageTable(env);
+				await insert();
+			}
+			return;
+		}
+		await withUsageTable(env, () => getTurso(env).prepare(`INSERT INTO ai_usage ${cols}`).bind(...args).run());
 		const hit = usageCache?.map.get(row.keyId);
 		if (hit) usageCache!.map.set(row.keyId, { ...hit, used: hit.used + row.total, calls: hit.calls + 1 });
 	} catch {
@@ -580,6 +623,7 @@ async function setCooldown(env: Env, cfg: Record<string, string>, p: AiProvider,
 	if (!ms) return;
 	const c: Cooldown = { sig: sigOf(p), until: Date.now() + ms, reason: err.slice(0, 160) };
 	memCooldowns.set(cdKey(p), c);
+	if (p.id === ASSISTANT_PROVIDER_ID) return; // jeda bersama ada di bot_kv (DB 1, BOT News); key khusus Asisten tidak menyentuhnya
 	await persistCooldowns(env, cfg, { ...storedCooldowns(cfg), [cdKey(p)]: c });
 }
 

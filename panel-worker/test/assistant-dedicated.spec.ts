@@ -1,7 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: import("node:sqlite").DatabaseSync } }));
-vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1, tursoGeneration: () => 0 }));
+const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: import("node:sqlite").DatabaseSync }, newsBlocked: false }));
+vi.mock("../src/lib/turso", () => ({
+	getTurso: () => {
+		const d = turso.current!.d1 as { prepare: (q: string) => unknown; batch: (s: unknown[]) => Promise<unknown> };
+		if (!turso.newsBlocked) return d;
+		// DB 1 (tabel BOT News) kena kuota Turso seperti produksi 17 Okt 2026; DB 2 (tabel panel) sehat
+		const BLOCKED = "BLOCKED: reads are blocked, do you need to upgrade your plan?";
+		const fail = async () => {
+			throw new Error(BLOCKED);
+		};
+		const blocked = { blocked: true, bind: () => blocked, run: fail, all: fail, first: fail };
+		return {
+			prepare: (q: string) => (/\b(news_article|news_source|bot_kv|ai_usage)\b/.test(q) ? blocked : d.prepare(q)),
+			batch: async (st: { blocked?: boolean }[]) => (st.some((x) => x.blocked) ? fail() : d.batch(st)),
+		};
+	},
+	tursoGeneration: () => 0,
+}));
 
 import { assistantAsk, assistantClearGaps, assistantGetConfig, assistantModels, assistantSaveConfig, assistantTest } from "../src/api/assistant";
 import { checkLogin } from "../src/api/auth";
@@ -17,6 +33,7 @@ let failHosts: string[] = [];
 
 beforeEach(async () => {
 	turso.current = fakeTurso();
+	turso.newsBlocked = false;
 	ctx = fakeEnv();
 	resetSysCache();
 	aiResetCooldowns();
@@ -206,5 +223,27 @@ describe("API key KHUSUS Asisten KD (terpisah dari provider bot)", () => {
 		const bad = (await assistantTest(ctx.env, boss)) as { success: boolean; message?: string };
 		expect(bad.success).toBe(false);
 		expect(bad.message).not.toContain(KEY);
+	});
+});
+
+describe("Asisten KD tetap jalan saat DB 1 (BOT News) kena kuota", () => {
+	it("key khusus: SIMPAN, TES KONEKSI & tanya tetap jalan; pemakaian dicatat di DB 2 (assistant_usage), bukan ai_usage", async () => {
+		const boss = await tok("Boss", "pw-boss");
+		turso.newsBlocked = true;
+		await assistantSaveConfig(ctx.env, boss, { base_url: "https://api.groq.com/openai/v1", key: KEY, model: "llama-3.3-70b-versatile" });
+		const t = (await assistantTest(ctx.env, boss)) as { success: boolean; reply: string };
+		expect(t.success).toBe(true);
+		expect(t.reply).toContain("OK dari api.groq.com");
+		const r = (await assistantAsk(ctx.env, boss, "cara tarik data lap admin?", [])) as { success: boolean; answer: string };
+		expect(r.success).toBe(true);
+		expect(r.answer).toContain("OK dari api.groq.com");
+		const rows = turso.current!.raw.prepare(`SELECT purpose, ok FROM assistant_usage ORDER BY id`).all() as { purpose: string; ok: number }[];
+		expect(rows.map((x) => x.purpose)).toEqual(["assistant-test", "assistant"]);
+	});
+
+	it("tanpa key khusus: pesan jelas (isi key khusus), bukan 'sibuk'", async () => {
+		const boss = await tok("Boss", "pw-boss");
+		turso.newsBlocked = true;
+		await expect(assistantAsk(ctx.env, boss, "halo", [])).rejects.toThrow(/key khusus.*DB 1/);
 	});
 });
