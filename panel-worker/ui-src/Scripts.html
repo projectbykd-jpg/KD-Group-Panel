@@ -4295,26 +4295,117 @@
       // Popup loading (menutupi seluruh kartu) sengaja ditunda sampai animasi
       // pesawat selesai terbang, supaya animasinya tidak langsung ketutupan.
       // Kalau animasi di-skip (mis. prefers-reduced-motion), jangan ikut menunda.
-      if (launch.animated) setTimeout(() => dispatchAutoSend(txt, btn, launch.landing), SEND_PLANE_DURATION_MS);
-      else dispatchAutoSend(txt, btn, null);
+      if (launch.animated) setTimeout(() => dispatchAutoSend(txt, btn), SEND_PLANE_DURATION_MS);
+      else dispatchAutoSend(txt, btn);
     }
 
-    function dispatchAutoSend(txt, btn, landingPoint) {
-      pendingSendText = txt;
-      // landingPoint (titik pesawat mendarat di layar) dipakai supaya popup Loading
-      // terasa "membuka" dari situ, bukan muncul begitu saja di tengah layar.
-      showActionPopup(
-        'LOADING',
-        'Auto Send Berjalan',
-        'Memeriksa izin, melewati duplikat, dan mengirim website yang belum...',
-        'fa-paper-plane',
-        landingPoint
-      );
+    // ===== Tabel progres KIRIM SEMUA (menggantikan popup loading): kecil, di atas Monitor hasil real-time =====
+    // Kolom: Prediksi (input angka -> Hitung -> baca Total menu Prediksi) lalu Telegram / LinkTree / Panel-Z.
+    const SP_COLS = ['auto', 'telegram', 'linktree', 'panelz'];
+    function spSites() { return ((currentProfile && currentProfile.websites) || []).map(w => String(w).toUpperCase()); }
+    function spEachSite(fn) { spSites().forEach(fn); }
+    let spFlow = 0;
+    function spInit() {
+      spFlow++;
+      const box = document.getElementById('sendProgress');
+      const body = document.getElementById('sendProgressBody');
+      if (!box || !body) return;
+      const esc = escapeHtml;
+      body.innerHTML = spSites().map(w => `<tr data-site="${esc(w)}"><td class="sp-site">${esc(w)}</td>${SP_COLS.map(c => `<td data-col="${c}"><span class="sp-chip sp-wait">${c === 'auto' ? 'Menyiapkan…' : 'Menunggu'}</span></td>`).join('')}</tr>`).join('');
+      spNote('');
+      box.style.display = '';
+      const card = box.closest('.glass-card'); if (card) card.classList.add('sp-on');
+    }
+    function spSet(site, col, state, text, title) {
+      const row = document.querySelector(`#sendProgressBody tr[data-site="${CSS.escape(String(site || '').toUpperCase())}"]`);
+      const cell = row && row.querySelector(`td[data-col="${col}"]`);
+      if (!cell) return;
+      const icon = { run: '<i class="fa-solid fa-spinner fa-spin"></i> ', ok: '<i class="fa-solid fa-check"></i> ', fail: '<i class="fa-solid fa-xmark"></i> ', warn: '<i class="fa-solid fa-triangle-exclamation"></i> ' }[state] || '';
+      cell.innerHTML = `<span class="sp-chip sp-${state}" title="${escapeHtml(String(title || text || ''))}">${icon}${escapeHtml(String(text || ''))}</span>`;
+    }
+    function spNote(text) { const n = document.getElementById('sendProgressNote'); if (n) n.textContent = text || ''; }
+    function spHide() {
+      const box = document.getElementById('sendProgress');
+      if (!box) return;
+      box.style.display = 'none';
+      spNote('');
+      const card = box.closest('.glass-card'); if (card) card.classList.remove('sp-on');
+    }
+    function spFromSendResult(result) {
+      const st = { 'BERHASIL': ['ok', 'Terkirim'], 'GAGAL': ['fail', 'Gagal'], 'DIBLOKIR': ['skip', 'Diblokir'], 'SUDAH DIKIRIM': ['ok', 'Sudah'], 'SKIP': ['skip', '–'] };
+      (Array.isArray(result && result.websiteResults) ? result.websiteResults : []).forEach(wr => {
+        ['telegram', 'linktree', 'panelz'].forEach(k => {
+          const it = wr[k] || {};
+          const m = st[String(it.status || 'SKIP').toUpperCase()] || ['skip', String(it.status || '–')];
+          spSet(wr.website, k, m[0], m[1], it.reason);
+        });
+      });
+    }
 
+    // KIRIM SEMUA (perintah pemilik 24 Okt 2026): 1) input angka -> Hitung -> baca Total menu Prediksi (Auto Prediksi) DULU,
+    // 2) baru kirim ke Telegram / LinkTree / Panel-Z. Tahap 1 dibatasi sys_send_wait_auto_sec (Admin > Pengaturan Sistem);
+    // lewat batas -> kirim tetap jalan, Auto Prediksi lanjut di latar. Tahap 1 gagal dihubungi -> urutan lama (server
+    // menjalankan Auto Prediksi sesudah kirim), jadi kiriman tidak pernah hilang karena tahap 1.
+    let sendFlowBusy = false;
+    function dispatchAutoSend(txt, btn) {
+      if (sendFlowBusy) { toast('KIRIM SEMUA masih berjalan…'); return; }
+      sendFlowBusy = true;
+      pendingSendText = txt;
+      spInit();
+      spNote('1/2 · Input angka → Hitung → catat Total Prediksi…');
+      let sent = false;
+      let timer = null;
+      const go = (autoDone, note) => {
+        if (sent) return;
+        sent = true;
+        clearTimeout(timer);
+        if (note) spNote(note);
+        sendNow(txt, btn, autoDone);
+      };
+      google.script.run
+        .withSuccessHandler(pre => {
+          if (apiFailed(pre)) { spEachSite(w => spSet(w, 'auto', 'skip', 'Dilewati', apiMessage(pre))); go(false, ''); return; }
+          const waitMs = Math.max(10, Number(pre && pre.waitSec) || 90) * 1000;
+          timer = setTimeout(() => go(true, 'Auto Prediksi belum selesai — kirim tetap dijalankan (Auto Prediksi lanjut di latar)'), waitMs);
+          if (!pre.autoInput) {
+            spEachSite(w => spSet(w, 'auto', 'skip', 'Tidak aktif', 'Auto Prediksi tidak aktif / PHPSESSID belum disimpan'));
+            go(true, '');
+            return;
+          }
+          autoInputNotify(pre.autoInput, out => {
+            // selesai SESUDAH batas tunggu & kiriman sudah beres -> tampilkan peringatannya sekarang
+            if (sent && !sendFlowBusy) { if (out.length) autoInputShow(out); return; }
+            pendingAutoOut = out;
+            go(true, '');
+          });
+        })
+        .withFailureHandler(() => {
+          spEachSite(w => spSet(w, 'auto', 'skip', 'Sesudah kirim', 'Tahap awal tidak terhubung — Auto Prediksi dijalankan sesudah kirim'));
+          go(false, '');
+        })
+        .autoInputBeforeSend(txt, currentSessionToken);
+    }
+    let pendingAutoOut = null;
+
+    function sendNow(txt, btn, autoDone) {
+      spNote('2/2 · Mengirim Telegram · LinkTree · Panel-Z…');
+      spEachSite(w => ['telegram', 'linktree', 'panelz'].forEach(k => spSet(w, k, 'run', 'Mengirim')));
+      const done = () => {
+        sendFlowBusy = false;
+        // semua beres -> tabel menutup sendiri (Live Preview kembali penuh); ada yang gagal -> tetap tampil sampai ditutup (×)
+        const flow = spFlow;
+        setTimeout(() => { if (flow === spFlow && !document.querySelector('#sendProgressBody .sp-fail, #sendProgressBody .sp-warn')) spHide(); }, 45000);
+        if (btn) delete btn.dataset.sending;
+        const out = pendingAutoOut;
+        pendingAutoOut = null;
+        if (out && out.length) setTimeout(() => autoInputShow(out), 400); // popup "perlu dicek MANUAL" sesudah hasil kirim
+      };
       google.script.run
         .withSuccessHandler(result => {
-          closeActionPopup();
-
+          spNote('Selesai');
+          if (result) spFromSendResult(result);
+          else spEachSite(w => ['telegram', 'linktree', 'panelz'].forEach(k => spSet(w, k, 'fail', 'Tanpa respons')));
+          done();
           if (!result) {
             showActionPopup(
               'ERROR',
@@ -4343,6 +4434,9 @@
           autoInputNotify(result.autoInput);
         })
         .withFailureHandler(err => {
+          spNote('Gagal menghubungi server');
+          spEachSite(w => ['telegram', 'linktree', 'panelz'].forEach(k => spSet(w, k, 'fail', 'Gagal', (err && err.message) || '')));
+          done();
           showActionPopup(
             'ERROR',
             'Pengiriman Gagal',
@@ -4350,7 +4444,7 @@
             'fa-triangle-exclamation'
           );
         })
-        .smartAutoSendFast(txt, currentSessionToken);
+        .smartAutoSendFast(txt, currentSessionToken, !!autoDone);
     }
 
     // ===== Result: Total Omset / Referal / Menang (dibaca Auto Prediksi dari menu Prediksi admin) =====
@@ -4440,9 +4534,10 @@
     // Worker paket gratis dibatasi 50 subrequest per panggilan.
     // Pasaran yang dihitung MANUAL (tidak di-auto / Auto Prediksi OFF): langsung baca Total dari menu Prediksi admin
     // (Last Result -> Submit -> baris Result), satu panggilan per website. Hanya membaca; hasilnya ke tabel Result & Riwayat Job.
-    function autoInputCheckTotals(list) {
-      if (!list.length) return;
+    function autoInputCheckTotals(list, onDone, afterFail) {
+      if (!list.length) { if (onDone) onDone(); return; }
       omsetMarkBusy(list, 'Membaca menu Prediksi (Last Result → Submit)…');
+      list.forEach(c => spSet(c.website, 'auto', 'run', 'Baca Total…'));
       let left = list.length;
       const got = [], bad = [];
       const fin = () => {
@@ -4452,45 +4547,69 @@
         loadOmsetTable(true);
         if (got.length) toast('Total Omset terbaca: ' + got.join(', '));
         if (bad.length) setTimeout(() => toast('Total Omset belum terbaca — ' + bad.join(' · ')), got.length ? 2600 : 0);
+        if (onDone) onDone();
       };
       list.forEach(c => {
         google.script.run
           .withSuccessHandler(res => {
-            if (res && res.success) got.push(c.website + (res.differs ? ' (Last Result beda)' : ''));
-            else bad.push(c.website + ': ' + apiMessage(res));
+            // afterFail = job Input/Hitung website ini GAGAL: Total tetap dibaca, tapi sel tidak boleh terlihat "beres"
+            if (res && res.success) { got.push(c.website + (res.differs ? ' (Last Result beda)' : '')); spSet(c.website, 'auto', afterFail || res.differs ? 'warn' : 'ok', (afterFail ? 'Gagal · ' : '') + (res.differs ? 'Total lama' : 'Total ✓'), apiMessage(res)); }
+            else { bad.push(c.website + ': ' + apiMessage(res)); spSet(c.website, 'auto', 'fail', 'Total gagal', apiMessage(res)); }
             fin();
           })
-          .withFailureHandler(err => { bad.push(c.website + ': ' + ((err && err.message) || 'koneksi putus')); fin(); })
+          .withFailureHandler(err => { bad.push(c.website + ': ' + ((err && err.message) || 'koneksi putus')); spSet(c.website, 'auto', 'fail', 'Total gagal', (err && err.message) || 'koneksi putus'); fin(); })
           .autoInputTotalsCheck(currentSessionToken, c);
       });
     }
 
-    function autoInputNotify(a) {
-      if (!a) return;
-      if (Array.isArray(a.totalsCheck) && a.totalsCheck.length) autoInputCheckTotals(a.totalsCheck);
-      if (a.skippedReason) { setTimeout(() => toast('Auto Prediksi dilewati: ' + a.skippedReason), 1800); return; }
+    // onDone(out) (opsional) = dipanggil SETELAH semua job Auto Prediksi + pembacaan Total selesai; dipakai KIRIM SEMUA yang kini
+    // menjalankan Auto Prediksi DULU baru mengirim. Dengan onDone, popup "perlu dicek MANUAL" diserahkan ke pemanggil (ditampilkan
+    // sesudah hasil kirim) supaya tidak menumpuk di tengah proses. Tanpa onDone = perilaku lama.
+    function autoInputNotify(a, onDone) {
+      let pending = 1;
+      const outAll = [];
+      const finishOne = () => { if (--pending === 0 && onDone) onDone(outAll); };
+      if (!a) { finishOne(); return; }
+      const checks = Array.isArray(a.totalsCheck) ? a.totalsCheck : [];
+      if (checks.length) { pending++; autoInputCheckTotals(checks, finishOne); }
+      if (a.skippedReason) {
+        const checked = new Set(checks.map(c => String(c.website).toUpperCase()));
+        spEachSite(w => { if (!checked.has(w)) spSet(w, 'auto', 'skip', 'Dilewati', a.skippedReason); });
+        setTimeout(() => toast('Auto Prediksi dilewati: ' + a.skippedReason), 1800);
+        finishOne();
+        return;
+      }
       const rs = Array.isArray(a.results) ? a.results : [];
       const queued = rs.filter(r => r.status === 'ANTRI' && r.jobId);
       const out = rs.filter(r => r.status !== 'ANTRI');
-      if (!queued.length) { autoInputShow(out); return; }
+      const autoLabel = { BERHASIL: ['ok', 'Dihitung'], GAGAL: ['fail', 'Gagal'], DILEWATI: ['skip', 'Dilewati'], SUDAH: ['ok', 'Sudah'] };
+      out.forEach(r => { const m = autoLabel[r.status] || ['skip', r.status]; spSet(r.website, 'auto', m[0], m[1], r.detail); });
+      if (!queued.length) {
+        if (onDone) outAll.push(...out); else autoInputShow(out);
+        finishOne();
+        return;
+      }
       setTimeout(() => toast('Auto Prediksi: memproses ' + queued.map(q => q.website).join(', ') + '…'), 1500);
+      queued.forEach(q => spSet(q.website, 'auto', 'run', 'Hitung…'));
       if (a.plan) omsetMarkBusy(queued.map(q => ({ website: q.website, market: a.plan.market })), 'Auto Prediksi: input → Hitung → baca menu Prediksi…');
       let left = queued.length;
       const notDone = [];
       const finish = () => {
         if (--left > 0) return;
         queued.forEach(q => omsetDone(q.website));
-        autoInputShow(out);
+        if (onDone) outAll.push(...out); else autoInputShow(out);
         omsetState.at = 0;
         loadOmsetTable(true);
         // Job yang TIDAK berhasil: Total tetap dibaca dari menu Prediksi (hanya membaca, tanpa input/Hitung).
-        if (a.plan && notDone.length) autoInputCheckTotals(notDone.map(w => Object.assign({ website: w }, a.plan)));
+        if (a.plan && notDone.length) { pending++; autoInputCheckTotals(notDone.map(w => Object.assign({ website: w }, a.plan)), finishOne, true); }
+        finishOne();
       };
       queued.forEach(q => {
         google.script.run
           .withSuccessHandler(res => {
             const ok = !!(res && res.success);
             if (!ok) notDone.push(q.website);
+            spSet(q.website, 'auto', ok ? 'ok' : 'fail', ok ? 'Dihitung' : 'Gagal', res && res.detail);
             out.push({
               website: (res && res.website && res.website !== '-') ? res.website : q.website,
               status: ok ? 'BERHASIL' : ((res && res.status) || 'GAGAL'),
@@ -4501,6 +4620,7 @@
           })
           .withFailureHandler(err => {
             notDone.push(q.website);
+            spSet(q.website, 'auto', 'fail', 'Gagal', (err && err.message) || 'Koneksi putus');
             out.push({ website: q.website, status: 'GAGAL', detail: ((err && err.message) || 'Koneksi putus') + ' — CEK MANUAL di admin website.', manual: true });
             finish();
           })
