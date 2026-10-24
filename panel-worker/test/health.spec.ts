@@ -122,7 +122,7 @@ describe("deepHealth: ringkasan Auto Prediksi untuk watchdog (tanpa data rahasia
 		expect(h.ok).toBe(true);
 		expect(h.autoInput).toMatchObject({ switchOn: 1, accounts: 2, sessions: 1, lastSessionSaved: "2026-10-20 10:00:00" });
 		expect(h.autoInput!.lastJobs).toEqual([
-			{ status: "FAILED", stage: "cek", at: "2026-10-24 21:00:00", why: "sesi admin habis" },
+			{ status: "FAILED", stage: "cek", at: "2026-10-24 21:00:00", why: "sesi admin habis (PHPSESSID)" },
 			{ status: "DONE", stage: "selesai", at: "2026-10-24 20:00:00", why: "dihitung + Total tercatat" },
 		]);
 		const out = JSON.stringify(h);
@@ -140,6 +140,14 @@ describe("deepHealth: ringkasan Auto Prediksi untuk watchdog (tanpa data rahasia
 		expect(autoInputWhy("Pasaran X tidak di-auto — input manual.", "SKIPPED")).toBe("pasaran tidak di-auto");
 		expect(autoInputWhy("x [Omset belum terbaca: HTTP 404]", "DONE")).toBe("dihitung, Total belum terbaca");
 		expect(autoInputWhy("", "QUEUED")).toBe("antre (belum dijalankan browser)");
-		expect(autoInputWhy("Admin tidak menjawab 25 dtk (timeout)", "FAILED")).toBe("admin tidak menjawab (timeout)");
+		expect(autoInputWhy("Admin tidak menjawab 25 dtk (timeout)", "FAILED")).toBe("admin tidak menjawab (timeout/jaringan)");
+		// pesan ASLI dari auto-input-run.ts (tahap cek)
+		expect(autoInputWhy('Server tidak dianggap sedang login di HUGOTOGEL (sidebar "Agent (...)" tidak ada) — PHPSESSID salah/habis', "FAILED")).toBe("sesi admin habis (PHPSESSID)");
+		expect(autoInputWhy("Sesi (PHPSESSID) sudah habis — ambil yang baru dari Chrome", "FAILED")).toBe("sesi admin habis (PHPSESSID)");
+		expect(autoInputWhy("Tanggal form 2026-10-25 ≠ tanggal result 2026-10-24. Input manual.", "FAILED")).toBe("tanggal form admin ≠ tanggal result");
+		expect(autoInputWhy("Periode form 120 ≠ periode terakhir 118 + 1. Ada periode terlewat / sudah terinput.", "FAILED")).toBe("periode admin tidak berurutan (terlewat/sudah terinput)");
+		expect(autoInputWhy('Pasaran "X" tidak ditemukan (atau ganda) di dropdown website ini.', "FAILED")).toBe("pasaran tidak ada di dropdown admin");
+		expect(autoInputWhy("Halaman Nomor Keluar X tidak berisi form input (sesi login OK)", "FAILED")).toBe("halaman Nomor Keluar tanpa form (pasaran diinput di halaman lain?)");
+		expect(autoInputWhy("Cookie ini milik SENJATOGEL.COM (agen a), bukan HUGOTOGEL", "FAILED")).toBe("cookie website lain");
 	});
 });

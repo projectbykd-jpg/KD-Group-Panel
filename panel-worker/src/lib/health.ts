@@ -40,14 +40,27 @@ export function autoInputWhy(detail: string, status: string): string {
 	if (status === "DONE") return /\[Omset belum terbaca/.test(d) ? "dihitung, Total belum terbaca" : "dihitung + Total tercatat";
 	if (status === "QUEUED") return "antre (belum dijalankan browser)";
 	if (status === "RUNNING") return "sedang berjalan";
-	if (/PHPSESSID belum/i.test(d)) return "PHPSESSID belum disimpan";
-	if (/tidak di-auto/i.test(d)) return "pasaran tidak di-auto";
-	if (/belum login|sesi (habis|tidak)|login\.php|kedaluwarsa|Agent \(/i.test(d)) return "sesi admin habis";
-	if (/dropdown|tidak ada di daftar|pasaran .*tidak/i.test(d)) return "pasaran tidak ditemukan di admin";
-	if (/URL admin|host/i.test(d)) return "URL admin ditolak";
-	if (/waktu|timeout|menggantung|tidak menjawab|aborted/i.test(d)) return "admin tidak menjawab (timeout)";
-	if (/Hitung/i.test(d)) return "gagal di tahap Hitung";
-	if (/Kirim|kirim/.test(d)) return "gagal di tahap input angka";
+	// Urutan penting: pesan paling spesifik dulu (teks persis dari auto-input-run.ts / api/auto-input.ts).
+	const rules: [RegExp, string][] = [
+		[/PHPSESSID belum/i, "PHPSESSID belum disimpan"],
+		[/tidak di-auto/i, "pasaran tidak di-auto"],
+		[/tidak dianggap sedang login|Sesi \(PHPSESSID\) sudah habis|login\.php/i, "sesi admin habis (PHPSESSID)"],
+		[/Cookie ini milik/i, "cookie website lain"],
+		[/URL admin .*ditolak/i, "URL admin ditolak"],
+		[/tidak ditemukan \(atau ganda\) di dropdown/i, "pasaran tidak ada di dropdown admin"],
+		[/Tanggal form .* ≠ tanggal result/i, "tanggal form admin ≠ tanggal result"],
+		[/Periode form .* ≠ periode terakhir/i, "periode admin tidak berurutan (terlewat/sudah terinput)"],
+		[/Kolom angka sudah terisi/i, "angka sudah terisi di admin"],
+		[/tidak berisi form input/i, "halaman Nomor Keluar tanpa form (pasaran diinput di halaman lain?)"],
+		[/Pasaran di halaman .* ≠ pasaran result/i, "pasaran di halaman admin beda"],
+		[/butuh \d+ angka/i, "jumlah prize kurang"],
+		[/Halaman Nomor Keluar tidak dikenali|Tabel Daftar Nomor|Kolom Periode|Nilai Periode|Pilihan tanggal|Form dengan tombol Kirim|Kolom angka/i, "halaman Nomor Keluar tidak dikenali"],
+		[/Terlalu banyak redirect|HTTP \d{3}/i, "admin menjawab HTTP galat/redirect"],
+		[/waktu|timeout|menggantung|tidak menjawab|aborted|fetch failed|network/i, "admin tidak menjawab (timeout/jaringan)"],
+		[/halaman Hitung|tombol Hitung/i, "gagal di tahap Hitung"],
+		[/TIDAK muncul di tabel/i, "angka dikirim tapi tidak muncul"],
+	];
+	for (const [re, label] of rules) if (re.test(d)) return label;
 	return "lain";
 }
 
