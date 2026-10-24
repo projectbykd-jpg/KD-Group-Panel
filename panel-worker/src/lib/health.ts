@@ -3,6 +3,7 @@
 // Dipakai pil status di Dashboard dan workflow GitHub "Penjaga panel" (.github/workflows/watchdog.yml).
 import { getSys } from "./settings";
 import { deleteSession, loadSession } from "./session";
+import { db1Gate, db1Settle, type Db1Gate } from "./db1-gate";
 import { getTurso, tursoLayout, TURSO_QUOTA_RE } from "./turso";
 
 type Check = { ok: boolean; ms: number; error?: string; note?: string };
@@ -134,6 +135,8 @@ export interface DeepHealth {
 	autoInput?: Record<string, unknown>;
 	/** Masalah yang tidak mematikan panel tetapi membuat fitur berhenti diam-diam (mis. channel Telegram gagal posting). */
 	warnings: string[];
+	/** BOT News dijeda karena DB 1 kena kuota (tidak memengaruhi ok, tidak masuk warnings supaya watchdog tidak merah tiap 5 menit). */
+	newsDb1?: { paused: boolean; since?: string; nextProbeAt?: string; message: string };
 	at: string;
 }
 
@@ -178,7 +181,10 @@ export async function deepHealth(env: Env, nowMs = Date.now(), opts: { session?:
 	const tursoOn = !!(String(env.TURSO_URL ?? "").trim() && String(env.TURSO_TOKEN ?? "").trim());
 	const warnings: string[] = [];
 	// DB 1 (utama) = BOT News, diperiksa paralel; gagal/kena kuota TIDAK mematikan panel (panel di DB 2) -> peringatan saja.
-	const newsP: Promise<Check> | null = tursoOn
+	// Sudah dijeda karena kuota (lib/db1-gate.ts) -> DB 1 TIDAK disentuh tiap 5 menit dan tidak diperingatkan lagi (watchdog tidak
+	// merah terus): cukup dilaporkan di `newsDb1`. Peringatan hanya sekali, saat kuota pertama kali terdeteksi.
+	const gate = tursoOn ? await db1Gate(env, { nowMs }) : ({ open: true } as Db1Gate);
+	const newsP: Promise<Check> | null = tursoOn && gate.open
 		? timed(async () => {
 				const r = await getTurso(env)
 					.prepare(`SELECT k, v FROM bot_kv WHERE k IN ('tg_channel_enabled', 'tg_channel_last_error')`)
@@ -210,13 +216,17 @@ export async function deepHealth(env: Env, nowMs = Date.now(), opts: { session?:
 			: Promise.resolve<Check>({ ok: true, ms: 0, note: "tidak dikonfigurasi" }),
 	]);
 	const news = newsP && (await newsP);
+	let newsDb1: DeepHealth["newsDb1"];
 	if (news && !news.ok) {
 		const quota = TURSO_QUOTA_RE.test(news.error ?? "");
+		const paused = quota && (await db1Settle(env, nowMs));
 		warnings.push(
-			`DB 1 (BOT News) ${quota ? "kena kuota Turso" : "gagal dibaca"}: BOT News berhenti sampai DB 1 pulih — panel tetap jalan di DB 2. (${String(news.error ?? "").slice(0, 140)})`,
+			`DB 1 (BOT News) ${quota ? "kena kuota Turso" : "gagal dibaca"}: BOT News berhenti sampai DB 1 pulih — panel tetap jalan di DB 2.${paused ? ` Proses otomatis BOT News dijeda & DB 1 diuji ulang tiap ${await getSys(env, "sys_db1_probe_hours")} jam (peringatan ini tidak diulang).` : ""} (${String(news.error ?? "").slice(0, 140)})`,
 		);
 	}
-	if (news && turso.ok) turso.note = `${turso.note} · DB 1 News: ${news.ok ? "ok" : "BERMASALAH"}`;
+	if (!gate.open) newsDb1 = { paused: true, since: gate.since, nextProbeAt: new Date(gate.nextProbeAt).toISOString(), message: gate.message };
+	else if (gate.recovered) newsDb1 = { paused: false, message: "DB 1 pulih — BOT News jalan lagi." };
+	if (turso.ok && tursoOn) turso.note = `${turso.note} · DB 1 News: ${!gate.open ? "DIJEDA (kuota)" : news?.ok ? "ok" : "BERMASALAH"}`;
 	const checks: Record<string, Check> = { d1, kv, turso, cron };
 	if (opts.session) checks.session = await timed(() => sessionProbe(env, warnings));
 	let autoInput: Record<string, unknown> | undefined;
@@ -224,5 +234,5 @@ export async function deepHealth(env: Env, nowMs = Date.now(), opts: { session?:
 		const t = await timed(async () => void (autoInput = await autoInputSummary(env)), 6000);
 		if (!t.ok) autoInput = { error: t.error };
 	}
-	return { ok: Object.values(checks).every((c) => c.ok), checks, warnings, autoInput, at: new Date(nowMs).toISOString() };
+	return { ok: Object.values(checks).every((c) => c.ok), checks, warnings, autoInput, ...(newsDb1 ? { newsDb1 } : {}), at: new Date(nowMs).toISOString() };
 }

@@ -36,6 +36,11 @@ else
   problems+=("/health?deep=1 tidak menjawab normal (HTTP $code): $(head -c 200 "$TMP/h.json" 2>/dev/null | tr -d '\n')")
 fi
 
+# BOT News dijeda karena DB 1 kena kuota (panel tetap sehat di DB 2): hanya dicatat, TIDAK membuat run merah. Peringatan merah
+# + Telegram cukup SEKALI saat kuota pertama terdeteksi (warnings dari /health); sesudah itu DB 1 diuji ulang sekali per hari.
+db1note=$(jq -r '.newsDb1.message // empty' "$TMP/h.json" 2>/dev/null || true)
+[ -n "$db1note" ] && echo "::notice title=BOT News::$db1note"
+
 # Ringkasan Auto Prediksi (hanya hitungan & kategori alasan; tidak memengaruhi hasil) -> terbaca di log run ini.
 jq -r 'if .autoInput then "Auto Prediksi: saklar ON \(.autoInput.switchOn // 0)/\(.autoInput.accounts // 0) akun · PHPSESSID tersimpan \(.autoInput.sessions // 0) (terakhir \(.autoInput.lastSessionSaved // "-")) · job terakhir: \([(.autoInput.lastJobs // [])[] | "\(.at) \(.market // "") \(.status)/\(.stage) (\(.why))\(if .page then " [\(.page)]" else "" end)"] | join(" | "))\(if .autoInput.error then " · galat: \(.autoInput.error)" else "" end)" else empty end' "$TMP/h.json" 2>/dev/null || true
 
@@ -123,7 +128,8 @@ Cek: $BASE/health?deep=1
 (Kuota Cloudflare harian reset 07:00 WIB. Detail: Cloudflare Dashboard › Workers › panel-worker.)"
   fi
 elif [ "${PREV:-}" = "failure" ]; then
-  tg "🟢 KD-Group Panel normal kembali — semua pemeriksaan sehat."
+  tg "🟢 KD-Group Panel normal kembali — semua pemeriksaan sehat.${db1note:+
+ℹ️ $db1note}"
 fi
 
 if [ "$bad" = 1 ]; then

@@ -18,6 +18,7 @@
 // TURSO_TOKEN ter-set (lihat .github/workflows/news-turbo.yml).
 import { aiClearAllCooldowns, aiNextReadyInMs } from "../src/lib/ai-provider";
 import { botCfg, botCfgSet, botNewsRun } from "../src/lib/bot-news";
+import { db1Gate, db1Settle } from "../src/lib/db1-gate";
 
 const env = {
 	TURSO_URL: process.env.TURSO_URL,
@@ -117,6 +118,14 @@ async function main() {
 	if (token.length < 50) {
 		throw new Error(`TURSO_TOKEN kependekan (${token.length} karakter) utk sebuah JWT asli -- cek lagi, mungkin ketuker dengan TURSO_URL atau ke-potong pas paste.`);
 	}
+	// DB 1 dijeda karena kuota (lib/db1-gate.ts, penanda di DB 2) -> selesai HIJAU tanpa menyentuh DB 1. Pemicu otomatis
+	// (cron-job.org -> worker) sudah berhenti memicu workflow ini selama dijeda; ini jaring pengaman untuk Run workflow manual.
+	const db1 = await db1Gate(env);
+	if (!db1.open) {
+		console.log(`::notice title=BOT News dijeda::${db1.message}`);
+		return;
+	}
+	if (db1.recovered) console.log("[diag] DB 1 pulih dari kuota -- BOT News jalan lagi.");
 	if (runCount) console.log(`[diag] RUN_COUNT custom = ${runCount} (dipicu tombol panel, bukan jadwal otomatis)`);
 	if (runTarget !== "both") console.log(`[diag] RUN_TARGET custom = ${runTarget} (dipicu tombol panel, bukan jadwal otomatis)`);
 	if (fullDrain) console.log(`[diag] FULL_DRAIN=1 (tombol panel, kolom "Jumlah artikel" dikosongkan) -- boleh sampai ${MAX_ROUNDS} putaran.`);
@@ -160,7 +169,12 @@ async function main() {
 	}
 }
 
-main().catch((e) => {
+main().catch(async (e) => {
+	// Kuota DB 1 baru terdeteksi -> tutup gerbang (run berikutnya dilewati) dan selesai hijau dengan anotasi, bukan run merah berulang.
+	if (await db1Settle(env).catch(() => false)) {
+		console.log(`::warning title=DB 1 kena kuota::BOT News dijeda otomatis; DB 1 diuji ulang sekali per hari. (${e instanceof Error ? e.message : String(e)})`);
+		return;
+	}
 	console.error("GAGAL:", e instanceof Error ? e.stack || e.message : e);
 	process.exit(1);
 });
