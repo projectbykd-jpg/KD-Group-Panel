@@ -1463,6 +1463,40 @@
       'lap-setting': []
     };
 
+    // Lap Admin PER WEBSITE: akun dengan 1, 2, 3+ website otomatis mendapat Lap Admin tiap website (lapConfig.adminSites,
+    // urutan = akses akun). Kosong = mode lama satu set Setting. Website terpilih diingat per browser.
+    let lapAdminSite = (() => { try { return localStorage.getItem('lap_admin_site') || ''; } catch (e) { return ''; } })();
+    function lapSites() { return (lapConfig && Array.isArray(lapConfig.adminSites)) ? lapConfig.adminSites : []; }
+    function lapCurSite() { const s = lapSites(); if (!s.length) return ''; return s.some(x => x.website === lapAdminSite) ? lapAdminSite : s[0].website; }
+    function lapCacheKey(page) { return page === 'lap-admin' ? page + '|' + lapCurSite() : page; }
+    function lapSelectSite(w) {
+      lapAdminSite = String(w || '');
+      try { localStorage.setItem('lap_admin_site', lapAdminSite); } catch (e) {}
+      renderLapPage('lap-admin');
+    }
+    function lapRegisterText(rmeta) {
+      const rsum = (rmeta && rmeta.summary) || {};
+      // Nama website (◉➣ HUGOTOGEL) diisi server: website job-nya, atau ditebak dari Cookie Admin untuk data lama.
+      const regSite = /^[A-Z0-9]{2,30}$/.test(String((rmeta && rmeta.website) || '')) ? `◉➣ ${rmeta.website}\n` : '';
+      return rmeta && rmeta.dateLabel
+        ? `${regSite}Tanggal ${rmeta.dateLabel}\n~ DAFTAR Non Reff = ${rsum.daftarNonRef||0}\n~ DAFTAR Menggunakan Reff = ${rsum.daftarWithRef||0}\n~ NDP Non Reff = ${rsum.ndpNonRef||0}\n~ NDP Menggunakan Reff = ${rsum.ndpWithRef||0}` : '';
+    }
+    // COPY SEMUA: Laporan Register semua website akun, berurutan, dipisah satu baris kosong.
+    function lapCopyAllRegister() {
+      const sites = lapSites();
+      if (!sites.length) { window.__lapCopyLaporan && window.__lapCopyLaporan(); return; }
+      toast('Menyiapkan Laporan Register semua website...');
+      Promise.all(sites.map(x => new Promise(res => {
+        google.script.run.withSuccessHandler(r => res(lapRegisterText(((r && r.results && r.results.registerMeta) || [])[0])))
+          .withFailureHandler(() => res('')).lapGetResults(currentSessionToken, ['registerMeta'], x.website);
+      }))).then(texts => {
+        const out = texts.filter(Boolean);
+        if (!out.length) { toast('Belum ada Laporan Register. Klik TARIK DATA.'); return; }
+        const missing = sites.filter((x, i) => !texts[i]).map(x => x.brand);
+        navigator.clipboard.writeText(out.join('\n\n')).then(() => toast(out.length + ' website disalin' + (missing.length ? ' (belum ada: ' + missing.join(', ') + ')' : '')));
+      });
+    }
+
     let lapConfigWaiters = null;
     function lapEnsureConfig(cb) {
       if (lapConfig) { cb && cb(); return; }
@@ -1492,26 +1526,30 @@
     function lapFetchResults(page, cb) {
       const modules = LAP_PAGE_MODULES[page] || [];
       if (!modules.length) { cb && cb(true, {}, false); return; }
-      if (lapInflight[page]) { lapInflight[page].push(cb); return; }
-      lapInflight[page] = [cb];
-      const finish = (ok, results, changed) => { const cbs = lapInflight[page] || []; delete lapInflight[page]; cbs.forEach(f => f && f(ok, results, changed)); };
+      const key = lapCacheKey(page);
+      const site = page === 'lap-admin' ? lapCurSite() : '';
+      if (lapInflight[key]) { lapInflight[key].push(cb); return; }
+      lapInflight[key] = [cb];
+      const finish = (ok, results, changed) => { const cbs = lapInflight[key] || []; delete lapInflight[key]; cbs.forEach(f => f && f(ok, results, changed)); };
       google.script.run.withSuccessHandler(res => {
         const ok = !!(res && res.success);
         const results = ok && res.results ? res.results : {};
-        const prev = lapPageCache[page];
+        const prev = lapPageCache[key];
         const sig = ok ? lapResultsSig(results) : '';
         const changed = !prev || prev.sig !== sig;
-        if (ok) lapPageCache[page] = { at: Date.now(), results, sig };
+        if (ok) lapPageCache[key] = { at: Date.now(), results, sig };
         finish(ok, results, changed);
-      }).withFailureHandler(() => finish(false, {}, false)).lapGetResults(currentSessionToken, modules);
+      }).withFailureHandler(() => finish(false, {}, false)).lapGetResults(currentSessionToken, modules, site);
     }
     // Dipanggil saat kursor/jari menyentuh menu laporan: data mulai diambil
     // ~100-300 ms sebelum menu benar-benar terbuka.
     function lapPrefetch(page) {
       if (!LAP_PAGES.includes(page) || !menuAllowed(page)) return;
-      lapEnsureConfig();
-      const c = lapPageCache[page];
-      if (!c || Date.now() - c.at > LAP_CACHE_MS) lapFetchResults(page);
+      // Lap Admin butuh daftar website (config) dulu untuk tahu website mana yang diambil.
+      lapEnsureConfig(() => {
+        const c = lapPageCache[lapCacheKey(page)];
+        if (!c || Date.now() - c.at > LAP_CACHE_MS) lapFetchResults(page);
+      });
     }
 
     function lapRefresh(page) {
@@ -1557,7 +1595,13 @@
         }
         FX.countUp(host);
       };
-      const cached = lapPageCache[page];
+      // Lap Admin: website yang ditampilkan baru diketahui setelah config (daftar website akun) termuat.
+      if (page === 'lap-admin' && !lapConfig) {
+        if (!force || !host.querySelector('.glass-card')) host.innerHTML = lapSkeletonHtml(page);
+        lapEnsureConfig(() => { if (seq === lapRenderSeq && lapConfig) renderLapPage(page, force); else if (seq === lapRenderSeq) paint({}); });
+        return;
+      }
+      const cached = lapPageCache[lapCacheKey(page)];
       // 1) Instan: data terakhir dari cache (umur berapa pun). Kalau sudah basi,
       //    ambil yang baru di belakang layar & gambar ulang HANYA bila berubah.
       if (!force && lapConfig && (cached || !(LAP_PAGE_MODULES[page] || []).length)) {
@@ -1806,15 +1850,9 @@
           </label>`;
       host.innerHTML = lapHeaderCard('fa-sliders', 'Setting Laporan Harian', 'Kredensial per operator — tersimpan di database panel, dipakai semua menu Laporan Harian.', `
         <div class="callout callout-info"><i class="fa-solid fa-circle-info"></i><span>Ambil di DevTools (F12): <b>Cookie Admin</b> → Application ▸ Cookies ▸ nilai <code>PHPSESSID</code> (format <code>PHPSESSID=xxx</code>). <b>Token Motion</b> → Network ▸ header <code>x-access-token</code>.</span></div>
+        ${lapAdminSettingHtml(c, field)}
         <div class="lap-setting-section">
-          <div class="lap-setting-title"><i class="fa-solid fa-table-list"></i>Panel Admin <span>dipakai Lap Admin</span></div>
-          <div class="grid sm:grid-cols-2 gap-3">
-            ${field('lapLinkAdmin', 'Link Admin', c.linkAdmin, 'https://ag.suksesbogil.com')}
-            ${field('lapCookieAdmin', 'Cookie Admin', c.cookiesAdmin, 'PHPSESSID=...')}
-          </div>
-        </div>
-        <div class="lap-setting-section">
-          <div class="lap-setting-title"><i class="fa-solid fa-bolt-lightning"></i>Motion <span>dipakai Lap Motion &amp; PGA Pending</span></div>
+          <div class="lap-setting-title"><i class="fa-solid fa-bolt-lightning"></i>Motion <span>dipakai Lap Motion &amp; PGA Pending · satu login untuk semua website</span></div>
           <div class="grid sm:grid-cols-2 gap-3">
             ${field('lapLinkMotion', 'Link Motion', c.linkMotion, 'https://motionv2.com')}
             ${field('lapTokenMotion', 'Token Motion (x-access-token)', c.tokenMotion, 'isi manual dari tab Network', 'Dipakai skrip Console.')}
@@ -1834,13 +1872,44 @@
           <span id="lapSaveStatus" class="text-[11px] text-slate-400"></span>
         </div>`);
     }
+    // Panel Admin: SATU baris per website akun (otomatis dari akses akun). Link Admin terisi bawaan server admin website;
+    // Cookie kosong = memakai cookie website itu di menu Auto Prediksi. Akun tanpa website: dua kolom lama.
+    function lapAdminSettingHtml(c, field) {
+      const sites = Array.isArray(c.adminSites) ? c.adminSites : [];
+      if (!sites.length) return `
+        <div class="lap-setting-section">
+          <div class="lap-setting-title"><i class="fa-solid fa-table-list"></i>Panel Admin <span>dipakai Lap Admin</span></div>
+          <div class="grid sm:grid-cols-2 gap-3">
+            ${field('lapLinkAdmin', 'Link Admin', c.linkAdmin, 'https://ag.suksesbogil.com')}
+            ${field('lapCookieAdmin', 'Cookie Admin', c.cookiesAdmin, 'PHPSESSID=...')}
+          </div>
+        </div>`;
+      const status = x => x.source === 'setting' ? '<span class="lap-site-src is-ok">Dipakai: cookie di sini</span>'
+        : x.source === 'auto-prediksi' ? '<span class="lap-site-src is-ok">Dipakai: cookie Auto Prediksi ' + escapeHtml(x.autoHint || '') + '</span>'
+        : '<span class="lap-site-src is-bad">Belum ada cookie — Lap Admin website ini dilewati</span>';
+      return `
+        <div class="lap-setting-section">
+          <div class="lap-setting-title"><i class="fa-solid fa-table-list"></i>Panel Admin per website <span>dipakai Lap Admin · otomatis untuk ${sites.length} website akun ini</span></div>
+          ${sites.map((x, i) => `
+          <div class="lap-site-row">
+            <div class="lap-site-row-head"><b>${escapeHtml(x.brand)}</b>${status(x)}</div>
+            <div class="grid sm:grid-cols-2 gap-3">
+              ${field('lapSiteLink' + i, 'Link Admin', x.linkAdmin, 'https://ag.suksesbogil.com', 'Terisi otomatis sesuai server admin website ini.')}
+              ${field('lapSiteCookie' + i, 'Cookie Admin (opsional)', x.cookieAdmin, x.autoHint ? 'Kosong = pakai cookie Auto Prediksi ' + x.autoHint : 'PHPSESSID=...', 'Kosongkan untuk memakai cookie website ini di menu Auto Prediksi.')}
+            </div>
+          </div>`).join('')}
+        </div>`;
+    }
     function lapSaveSetting() {
       // Link/Cookie Mozart sengaja TIDAK dikirim: tidak dipakai lagi (data
       // Mozart masuk lewat skrip Console). Field yang tidak dikirim tetap
       // memakai nilai lama di server (pick() di lapSaveCreds), jadi aman.
+      const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : undefined; };
+      const sites = lapSites();
       const payload = {
-        linkAdmin: document.getElementById('lapLinkAdmin').value.trim(),
-        cookiesAdmin: document.getElementById('lapCookieAdmin').value.trim(),
+        linkAdmin: val('lapLinkAdmin'),
+        cookiesAdmin: val('lapCookieAdmin'),
+        adminSites: sites.map((x, i) => ({ website: x.website, linkAdmin: val('lapSiteLink' + i), cookieAdmin: val('lapSiteCookie' + i) })),
         linkMotion: document.getElementById('lapLinkMotion').value.trim(),
         tokenMotion: document.getElementById('lapTokenMotion').value.trim(),
         vendorIdMotion: document.getElementById('lapVendorIdMotion').value.trim(),
@@ -1850,7 +1919,13 @@
       if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>MENYIMPAN...'; }
       google.script.run.withSuccessHandler(res => {
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN KONFIGURASI'; }
-        if (res && res.success) { lapConfig = res.config; if (st) st.textContent = 'Tersimpan ✓'; toast('Konfigurasi tersimpan'); }
+        if (res && res.success) {
+          lapConfig = res.config;
+          Object.keys(lapPageCache).forEach(k => { if (k.indexOf('lap-admin|') === 0) delete lapPageCache[k]; });
+          if (st) st.textContent = 'Tersimpan ✓';
+          toast('Konfigurasi tersimpan');
+          if (currentPage === 'lap-setting') renderLapPage('lap-setting');
+        }
         else { if (st) st.textContent = (res && res.message) || 'Gagal'; toast('Gagal menyimpan'); }
       }).withFailureHandler(e => {
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN KONFIGURASI'; }
@@ -2722,12 +2797,14 @@
       const idS = lapResults.idSelisih || [];
       const wd = lapResults.withdrawPgaIdf || [];
       const rmeta = (lapResults.registerMeta && lapResults.registerMeta[0]) || {};
-      const rsum = rmeta.summary || {};
       const ccmeta = (lapResults.checkCoinMeta && lapResults.checkCoinMeta[0]) || {};
-      // Nama website (◉➣ HUGOTOGEL) diisi server dari Cookie Admin yang cocok dengan cookie website di Auto Prediksi.
-      const regSite = /^[A-Z0-9]{2,30}$/.test(String(rmeta.website || '')) ? `◉➣ ${rmeta.website}\n` : '';
-      const laporan = rmeta.dateLabel
-        ? `${regSite}Tanggal ${rmeta.dateLabel}\n~ DAFTAR Non Reff = ${rsum.daftarNonRef||0}\n~ DAFTAR Menggunakan Reff = ${rsum.daftarWithRef||0}\n~ NDP Non Reff = ${rsum.ndpNonRef||0}\n~ NDP Menggunakan Reff = ${rsum.ndpWithRef||0}` : '';
+      const laporan = lapRegisterText(rmeta);
+      const sites = lapSites(), cur = lapCurSite();
+      const curSite = sites.find(x => x.website === cur);
+      // Pilihan website: hanya bila akun punya lebih dari satu website. Tabel & kartu di bawahnya tetap sama.
+      const siteBar = sites.length > 1 ? `<div class="lap-site-bar" role="tablist" aria-label="Website">${sites.map(x =>
+        `<button type="button" role="tab" class="lap-site-chip${x.website === cur ? ' is-on' : ''}" aria-selected="${x.website === cur}" onclick="lapSelectSite(${jsArg(x.website)})">${escapeHtml(x.brand)}${x.source ? '' : ' <i class="fa-solid fa-triangle-exclamation" title="Cookie Admin belum ada untuk website ini"></i>'}</button>`).join('')}</div>` : '';
+      const noCookie = curSite && !curSite.source ? `<div class="callout callout-warn mt-2"><i class="fa-solid fa-triangle-exclamation"></i><span>Cookie Admin <b>${escapeHtml(curSite.brand)}</b> belum ada: simpan cookie website ini di menu Auto Prediksi, atau isi di Setting Laporan Harian.</span></div>` : '';
       window.__lapCopyLaporan = () => { if (!laporan) { toast('Belum ada'); return; } navigator.clipboard.writeText(laporan).then(() => toast('Laporan disalin')); };
       // Hasil sama persis dengan tombol COPY pada tabel ID Selisih.
       window.__lapCopyIdSelisih = () => {
@@ -2740,11 +2817,13 @@
       lapAdminF = { refType:'all', actions:new Set(acts), agents:new Set(ops) };
 
       host.innerHTML = lapHeaderCard('fa-table-list', 'Lap Admin', 'Register · Report Agent · Check Selisih Koin · Withdraw PGA-IDF', `
+        ${siteBar}
         ${lapDateBar('lapAdmin', lapRunAdmin)}
+        ${noCookie}
         ${lapJobsCardHtml('admin')}
         <div class="glass-inner rounded-2xl p-3 mt-3">
-          <div class="flex items-center justify-between mb-1.5"><span class="text-[10px] font-bold text-slate-400 uppercase">Laporan Register</span>
-            <button onclick="window.__lapCopyLaporan()" class="glass-inner px-3 py-1 rounded-lg text-[10px] font-bold"><i class="fa-regular fa-copy mr-1"></i>COPY</button></div>
+          <div class="flex items-center justify-between mb-1.5"><span class="text-[10px] font-bold text-slate-400 uppercase">Laporan Register${curSite && sites.length > 1 ? ' · ' + escapeHtml(curSite.brand) : ''}</span>
+            <span class="flex gap-1.5">${sites.length > 1 ? '<button onclick="lapCopyAllRegister()" class="glass-inner px-3 py-1 rounded-lg text-[10px] font-bold" title="Salin Laporan Register semua website"><i class="fa-regular fa-copy mr-1"></i>COPY SEMUA</button>' : ''}<button onclick="window.__lapCopyLaporan()" class="glass-inner px-3 py-1 rounded-lg text-[10px] font-bold"><i class="fa-regular fa-copy mr-1"></i>COPY</button></span></div>
           <pre class="text-[11px] text-slate-300 whitespace-pre-wrap font-mono">${laporan || 'Belum ada data. Klik TARIK DATA.'}</pre>
         </div>
         <div class="lap-stat-grid mt-3" id="lapOpCards">${lapOpCardsHtml()}</div>
@@ -2809,21 +2888,27 @@
     }
     function lapRunAdmin() {
       lapEnsureConfig(() => {
-        if (!lapConfig || !lapConfig.linkAdmin || !lapConfig.cookiesAdmin) { toast('Isi Link & Cookie Admin di Setting dulu'); switchPage('lap-setting'); return; }
+        const sites = lapSites();
+        if (sites.length) {
+          // Semua website akun ditarik sekaligus; website tanpa cookie dilewati server dengan alasan.
+          if (!sites.some(x => x.source)) { toast('Cookie Admin belum ada untuk website mana pun — simpan di Auto Prediksi atau isi di Setting'); switchPage('lap-setting'); return; }
+        } else if (!lapConfig || !lapConfig.linkAdmin || !lapConfig.cookiesAdmin) { toast('Isi Link & Cookie Admin di Setting dulu'); switchPage('lap-setting'); return; }
         const sd = lapDateVal('lapAdminStart'), ed = lapDateVal('lapAdminEnd');
         if (!sd || !ed) { toast('Pilih tanggal'); return; }
         lapBusy('lapAdmin', true, 'Memicu GitHub Actions...');
         google.script.run.withSuccessHandler(res => {
           if (apiFailed(res)) { lapBusy('lapAdmin', false, ''); toast(apiMessage(res, 'Gagal memicu tarik data')); return; }
-          // Tampilkan progres SEKETIKA (tidak menunggu putaran polling pertama).
-          if (res.jobId && !lapJobsState.jobs.some(j => j.id === res.jobId)) {
-            lapJobsState.jobs.unshift({ id: res.jobId, kind: 'admin', status: 'pending', message: res.message || '', startDate: sd, endDate: ed, source: 'github', createdAt: lapWibNow(), updatedAt: lapWibNow() });
-          }
+          // Tampilkan progres SEKETIKA (tidak menunggu putaran polling pertama) -- satu baris per website.
+          (res.jobs || (res.jobId ? [{ jobId: res.jobId }] : [])).forEach(j => {
+            if (!j.jobId || lapJobsState.jobs.some(x => x.id === j.jobId)) return;
+            lapJobsState.jobs.unshift({ id: j.jobId, kind: 'admin', status: 'pending', message: 'Menunggu GitHub Actions...', startDate: sd, endDate: ed, source: 'github', website: j.website || '', brand: j.brand || '', createdAt: lapWibNow(), updatedAt: lapWibNow() });
+          });
+          if (res.skipped && res.skipped.length) toast('Dilewati: ' + res.skipped.join(' | '));
           lapBusy('lapAdmin', true, res.reused ? 'Proses sebelumnya masih berjalan — progres di bawah.' : 'Berjalan — boleh pindah menu, progres tetap tersimpan.');
           lapJobsPaint();
           lapJobsFetch();
         }).withFailureHandler(e => { lapBusy('lapAdmin', false, ''); toast((e && e.message) || 'Gagal'); })
-          .lapRunAdmin(currentSessionToken, sd, ed);
+          .lapRunAdmin(currentSessionToken, sd, ed, '');
       });
     }
 
@@ -2869,16 +2954,17 @@
       if (busyMobile) busyMobile.hidden = !active;
     }
     function lapJobFinished(j) {
-      const label = LAP_JOB_KIND_LABEL[j.kind] || 'Laporan';
+      const label = (LAP_JOB_KIND_LABEL[j.kind] || 'Laporan') + (j.brand ? ' ' + j.brand : '');
+      const adminIdle = () => !lapJobsState.jobs.some(x => x.kind === 'admin' && lapJobIsActive(x));
       if (j.status === 'done') {
         if (j.kind === 'admin') {
-          lapPageCache['lap-admin'] = null;
-          lapBusy('lapAdmin', false, '');
-          if (currentPage === 'lap-admin') renderLapPage('lap-admin', true);
+          delete lapPageCache['lap-admin|' + (j.website || '')];
+          if (adminIdle()) lapBusy('lapAdmin', false, '');
+          if (currentPage === 'lap-admin' && (!j.website || j.website === lapCurSite())) renderLapPage('lap-admin', true);
         }
         toast(label + ' selesai — data terbaru sudah tersimpan.');
       } else {
-        if (j.kind === 'admin') lapBusy('lapAdmin', false, '');
+        if (j.kind === 'admin' && adminIdle()) lapBusy('lapAdmin', false, '');
         toast(label + ' gagal: ' + (j.message || j.status));
       }
     }
@@ -2910,29 +2996,33 @@
       document.querySelectorAll('[data-lap-jobs]').forEach(box => {
         const kind = box.getAttribute('data-lap-jobs');
         const jobs = lapJobsState.jobs.filter(j => j.kind === kind);
-        const active = jobs.find(lapJobIsActive);
+        // Banyak website = beberapa job berjalan bersamaan: tampilkan semuanya.
+        const actives = jobs.filter(lapJobIsActive);
+        const active = actives[0];
+        const withSite = jobs.some(j => j.brand);
         const label = LAP_JOB_KIND_LABEL[kind] || 'Laporan';
         let html = '<div class="lap-jobs-head"><span><i class="fa-solid fa-list-check"></i>Progres &amp; Riwayat Tarik Data</span>' +
           '<button type="button" class="lap-jobs-refresh" onclick="lapJobsFetch()" title="Muat ulang progres" aria-label="Muat ulang progres"><i class="fa-solid fa-rotate"></i></button></div>';
-        if (active) {
+        actives.forEach(active => {
           html += '<div class="lap-job-active">' +
-            '<div class="lap-job-active-top"><b>' + escapeHtml(label) + ' · ' + escapeHtml(active.startDate || '') + (active.endDate && active.endDate !== active.startDate ? ' s/d ' + escapeHtml(active.endDate) : '') + '</b>' +
+            '<div class="lap-job-active-top"><b>' + escapeHtml(label) + (active.brand ? ' ' + escapeHtml(active.brand) : '') + ' · ' + escapeHtml(active.startDate || '') + (active.endDate && active.endDate !== active.startDate ? ' s/d ' + escapeHtml(active.endDate) : '') + '</b>' +
             '<span class="lap-job-elapsed-wrap"><i class="fa-regular fa-clock"></i><span data-lap-since="' + escapeHtml(active.createdAt) + '">' + lapFmtDur(Date.now() + lapJobsState.offsetMs - lapWibMs(active.createdAt)) + '</span></span></div>' +
             lapJobSteps(active) +
             '<div class="lap-job-note">' + escapeHtml(active.message || '') + ' <span class="text-slate-500">— boleh ditinggal ke menu lain, progres tetap tersimpan.</span></div></div>';
-        }
-        const rows = jobs.filter(j => j !== active).slice(0, 5);
+        });
+        const rows = jobs.filter(j => !lapJobIsActive(j)).slice(0, withSite ? 8 : 5);
         if (rows.length) {
-          html += '<div class="lap-jobs-table-wrap"><table class="lap-jobs-table stack-sm"><thead><tr><th>Waktu</th><th>Periode</th><th>Status</th><th>Durasi</th><th>Keterangan</th></tr></thead><tbody>' +
+          html += '<div class="lap-jobs-table-wrap"><table class="lap-jobs-table stack-sm"><thead><tr><th>Waktu</th>' + (withSite ? '<th>Website</th>' : '') + '<th>Periode</th><th>Status</th><th>Durasi</th><th>Keterangan</th></tr></thead><tbody>' +
             rows.map(j => {
               const dur = lapWibMs(j.updatedAt) - lapWibMs(j.createdAt);
               return '<tr><td data-label="Waktu">' + escapeHtml(String(j.createdAt).slice(5, 16)) + '</td>' +
+                (withSite ? '<td data-label="Website">' + escapeHtml(j.brand || '-') + '</td>' : '') +
                 '<td data-label="Periode">' + escapeHtml(j.startDate || '-') + (j.endDate && j.endDate !== j.startDate ? '<br><span class="text-slate-500">s/d ' + escapeHtml(j.endDate) + '</span>' : '') + '</td>' +
                 '<td data-label="Status">' + lapJobStatusBadge(j) + '</td>' +
                 '<td data-label="Durasi">' + (j.source === 'import' ? '<span class="text-slate-500">import</span>' : (dur > 0 ? lapFmtDur(dur) : '-')) + '</td>' +
                 '<td class="lap-job-msg stack-full" data-label="Keterangan">' + escapeHtml(j.message || '') + '</td></tr>';
             }).join('') + '</tbody></table></div>';
-        } else if (!active) {
+        } else if (!actives.length) {
           html += '<div class="lap-jobs-empty">' + (lapJobsState.fetchedAt ? 'Belum ada riwayat tarik data ' + escapeHtml(label) + '.' : '<i class="fa-solid fa-circle-notch fa-spin mr-1.5"></i>Memuat riwayat...') + '</div>';
         }
         box.innerHTML = html;

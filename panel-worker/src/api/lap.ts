@@ -11,13 +11,17 @@ import { tsNow, tsPlusMinutes } from "../lib/time";
 import { getTurso } from "../lib/turso"; // tabel lap_* ada di Turso, bukan D1
 import { rawJson } from "../lib/respond";
 import { cookieHeader, getSessions, parsePhpSessId, siteBrand } from "../lib/auto-input";
+import type { UserProfile } from "../lib/db";
 import {
 	LapCreds,
 	extractPureUsername,
+	lapAdminSites,
 	lapLoadCreds,
 	lapLoadResultsModules,
 	lapLoadResultsModulesRaw,
 	LAP_RESULT_MODULES,
+	lapMigrateLegacyAdmin,
+	lapSaveAdminSite,
 	lapSaveCreds,
 	lapSaveResults,
 	num,
@@ -46,18 +50,44 @@ function lapModuleMenu(module: string): MenuKey {
 	return "lap-admin";
 }
 
+/** Website yang dimiliki akun (urutan profil). Kosong (mis. ADMIN tanpa daftar website) = mode lama satu set Setting. */
+export function lapUserSites(profile: Pick<UserProfile, "websites">): string[] {
+	return [...new Set((profile.websites ?? []).map((w) => String(w).trim().toUpperCase()).filter(Boolean))];
+}
+/** Website yang diminta browser, hanya bila memang milik akun; selain itu website pertama ("" = mode lama). */
+function pickSite(profile: Pick<UserProfile, "websites">, website: unknown): string {
+	const sites = lapUserSites(profile);
+	const w = String(website ?? "").trim().toUpperCase();
+	return sites.includes(w) ? w : (sites[0] ?? "");
+}
+
+/** Kredensial per website untuk browser: cookie Auto Prediksi TIDAK pernah dikirim (hanya 4 karakter terakhir). */
+async function adminSitesForClient(env: Env, username: string, sites: string[]) {
+	return (await lapAdminSites(env, username, sites)).map((x) => ({
+		website: x.website,
+		brand: x.brand,
+		linkAdmin: x.linkAdmin,
+		cookieAdmin: x.settingCookie,
+		source: x.source,
+		autoHint: x.autoHint,
+	}));
+}
+
 export async function lapGetConfig(env: Env, token: string) {
 	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: LAP_MENU_KEYS });
 	// Konfigurasi dipisah dari hasil. Snapshot laporan bisa besar; jangan ikut
 	// ditarik setiap kali operator membuka/pindah menu.
+	const sites = lapUserSites(s.profile);
+	await lapMigrateLegacyAdmin(env, s.username, sites);
 	const creds = await lapLoadCreds(env, s.username);
-	return { success: true, config: credsForClient(creds) };
+	return { success: true, config: { ...credsForClient(creds), adminSites: await adminSitesForClient(env, s.username, sites) } };
 }
 
-export async function lapGetResults(env: Env, token: string, modules: unknown) {
+export async function lapGetResults(env: Env, token: string, modules: unknown, website?: unknown) {
 	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: LAP_MENU_KEYS });
 	const wanted = (Array.isArray(modules) ? modules.map(String) : []).filter((m) => hasMenu(s.profile, lapModuleMenu(m)));
-	return rawJson('{"success":true,"results":' + (await lapLoadResultsModulesRaw(env, s.username, wanted)) + "}");
+	await lapMigrateLegacyAdmin(env, s.username, lapUserSites(s.profile));
+	return rawJson('{"success":true,"results":' + (await lapLoadResultsModulesRaw(env, s.username, wanted, pickSite(s.profile, website))) + "}");
 }
 
 export async function lapSaveConfig(env: Env, token: string, data: Record<string, unknown>) {
@@ -72,8 +102,15 @@ export async function lapSaveConfig(env: Env, token: string, data: Record<string
 		cookieMozart: str(data.tokenMozart ?? data.cookieMozart),
 		mozartAccounts: str(data.mozartAccounts),
 	});
+	// Panel Admin per website: hanya website milik akun ini yang disimpan.
+	const sites = lapUserSites(s.profile);
+	for (const it of Array.isArray(data.adminSites) ? data.adminSites : []) {
+		const o = (it ?? {}) as Record<string, unknown>;
+		const w = String(o.website ?? "").trim().toUpperCase();
+		if (sites.includes(w)) await lapSaveAdminSite(env, s.username, w, { linkAdmin: str(o.linkAdmin), cookieAdmin: str(o.cookieAdmin) });
+	}
 	await logActivity(env, s.username, "LAP SIMPAN SETTING", "Kredensial Laporan Harian diperbarui", "BERHASIL", "");
-	return { success: true, message: "Konfigurasi Laporan Harian tersimpan.", config: credsForClient(c) };
+	return { success: true, message: "Konfigurasi Laporan Harian tersimpan.", config: { ...credsForClient(c), adminSites: await adminSitesForClient(env, s.username, sites) } };
 }
 const str = (v: unknown) => (v === undefined ? undefined : String(v ?? "").trim());
 
@@ -578,21 +615,23 @@ async function dispatchScrapeJob(
 	startDate: string,
 	endDate: string,
 	sourceUrl: string,
+	website = "",
 ) {
 	if (!ghToken(env) || !ghRepo(env)) {
 		return { success: false as const, message: "GitHub Actions belum dikonfigurasi (token/repo GitHub). Isi di Admin > Integrasi." };
 	}
 	const running = await getTurso(env).prepare(
 		`SELECT id FROM lap_job WHERE username = ? AND kind = ? AND status IN ('pending','running')
+		 AND COALESCE(json_extract(params, '$.website'), '') = ?
 		 AND created_at > datetime('now','+7 hours', ?) LIMIT 1`,
 	)
-		.bind(username, kind, `-${await getSys(env, "sys_lap_dup_job_min")} minutes`)
+		.bind(username, kind, website, `-${await getSys(env, "sys_lap_dup_job_min")} minutes`)
 		.first<{ id: string }>();
 	if (running) return { success: true as const, jobId: running.id, message: "Proses sebelumnya masih berjalan.", reused: true };
 
 	const jobId = crypto.randomUUID().replace(/-/g, "");
 	const key = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "").slice(0, 16);
-	const params = JSON.stringify({ kind, startDate, endDate, key });
+	const params = JSON.stringify({ kind, startDate, endDate, key, ...(website ? { website } : {}) });
 	await getTurso(env).prepare(
 		`INSERT INTO lap_job (id, username, kind, status, params, message, created_at, updated_at)
 		 VALUES (?, ?, ?, 'pending', ?, 'Menunggu GitHub Actions...', ?, ?)`,
@@ -693,7 +732,7 @@ export async function lapJobs(env: Env, token: string) {
 	const jobs = rows
 		.filter((r) => hasMenu(s.profile, JOB_MENU[String(r.kind)] || "lap-admin"))
 		.map((r) => {
-			let p: { startDate?: string; endDate?: string; source?: string } = {};
+			let p: { startDate?: string; endDate?: string; source?: string; website?: string } = {};
 			try {
 				p = JSON.parse(r.params || "{}");
 			} catch {
@@ -717,6 +756,8 @@ export async function lapJobs(env: Env, token: string) {
 				startDate: String(p.startDate || ""),
 				endDate: String(p.endDate || ""),
 				source: p.source === "import" ? "import" : "github",
+				website: String(p.website || ""),
+				brand: p.website ? (siteBrand(p.website) ?? String(p.website)) : "",
 				createdAt: String(r.created_at),
 				updatedAt: String(r.updated_at),
 			};
@@ -724,15 +765,50 @@ export async function lapJobs(env: Env, token: string) {
 	return { success: true, now: tsNow(), jobs: jobs.slice(0, 10) };
 }
 
-export async function lapRunAdmin(env: Env, token: string, startDate: string, endDate: string) {
+/**
+ * TARIK DATA Lap Admin. Akun dengan website: SEMUA website-nya ditarik sekaligus (satu job per website, berjalan
+ * paralel di GitHub Actions; satu server admin tetap antre), atau satu website bila `website` diisi. Website tanpa
+ * cookie (Setting kosong & belum ada di Auto Prediksi) dilewati dengan keterangan.
+ */
+export async function lapRunAdmin(env: Env, token: string, startDate: string, endDate: string, website?: unknown) {
 	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: "lap-admin" });
-	const c = await lapLoadCreds(env, s.username);
-	if (!c.linkAdmin || !c.cookieAdmin) return { success: false, message: "Link & Cookie Admin belum diisi di menu Setting!" };
-	const r = await dispatchScrapeJob(env, s.username, "admin", startDate, endDate, c.linkAdmin);
-	if (r.success && !("reused" in r)) {
-		await logActivity(env, s.username, "LAP ADMIN", `Scan ${startDate}..${endDate} dipicu`, "INFO", "");
+	const sites = lapUserSites(s.profile);
+	if (!sites.length) {
+		const c = await lapLoadCreds(env, s.username);
+		if (!c.linkAdmin || !c.cookieAdmin) return { success: false, message: "Link & Cookie Admin belum diisi di menu Setting!" };
+		const r = await dispatchScrapeJob(env, s.username, "admin", startDate, endDate, c.linkAdmin);
+		if (r.success && !("reused" in r)) {
+			await logActivity(env, s.username, "LAP ADMIN", `Scan ${startDate}..${endDate} dipicu`, "INFO", "");
+		}
+		return r;
 	}
-	return r;
+	await lapMigrateLegacyAdmin(env, s.username, sites);
+	const want = String(website ?? "").trim() ? [pickSite(s.profile, website)] : sites;
+	const creds = await lapAdminSites(env, s.username, want);
+	const jobs: { website: string; brand: string; jobId: string; reused: boolean }[] = [];
+	const problems: string[] = [];
+	for (const c of creds) {
+		if (!c.cookieAdmin || !c.linkAdmin) {
+			problems.push(`${c.brand}: Cookie Admin belum ada (isi di Setting atau simpan cookie website ini di Auto Prediksi)`);
+			continue;
+		}
+		const r = await dispatchScrapeJob(env, s.username, "admin", startDate, endDate, c.linkAdmin, c.website);
+		if (r.success) jobs.push({ website: c.website, brand: c.brand, jobId: r.jobId, reused: "reused" in r });
+		else problems.push(`${c.brand}: ${r.message}`);
+	}
+	if (jobs.some((j) => !j.reused)) {
+		await logActivity(env, s.username, "LAP ADMIN", `Scan ${startDate}..${endDate} dipicu: ${jobs.map((j) => j.brand).join(", ")}`, "INFO", "");
+	}
+	if (!jobs.length) return { success: false, message: problems.join(" | ") || "Tidak ada website untuk ditarik." };
+	const names = jobs.map((j) => j.brand).join(", ");
+	return {
+		success: true,
+		jobId: jobs[0].jobId,
+		jobs,
+		reused: jobs.every((j) => j.reused) ? true : undefined,
+		message: `Dijalankan di GitHub Actions untuk ${names} — ~1-3 menit.` + (problems.length ? ` Dilewati: ${problems.join(" | ")}` : ""),
+		skipped: problems,
+	};
 }
 
 export async function lapAdminStatus(env: Env, token: string, jobId: string) {
@@ -749,8 +825,14 @@ export async function lapAdminStatus(env: Env, token: string, jobId: string) {
 	};
 	if (row.status === "done") {
 		const modules = LAP_RESULT_MODULES.filter((m) => hasMenu(s.profile, lapModuleMenu(m)));
-		const head = JSON.stringify(out);
-		return rawJson(head.slice(0, -1) + ',"results":' + (await lapLoadResultsModulesRaw(env, s.username, modules)) + "}");
+		let site = "";
+		try {
+			site = String(JSON.parse(row.params || "{}").website || "");
+		} catch {
+			/* job lama tanpa website */
+		}
+		const head = JSON.stringify({ ...out, website: site });
+		return rawJson(head.slice(0, -1) + ',"results":' + (await lapLoadResultsModulesRaw(env, s.username, modules, site)) + "}");
 	}
 	return out;
 }
@@ -780,7 +862,7 @@ export async function lapJobStart(env: Env, jobId: string, key: string) {
 		.bind(jobId)
 		.first<{ username: string; status: string; params: string; created_at: string; updated_at: string }>();
 	if (!row) return { success: false, message: "job tidak ada" };
-	let p: { kind?: string; startDate?: string; endDate?: string; key?: string } = {};
+	let p: { kind?: string; startDate?: string; endDate?: string; key?: string; website?: string } = {};
 	try {
 		p = JSON.parse(row.params || "{}");
 	} catch {
@@ -793,12 +875,16 @@ export async function lapJobStart(env: Env, jobId: string, key: string) {
 		.run();
 	const c = await lapLoadCreds(env, row.username);
 	const kind = p.kind || "admin";
+	// Job per website: kredensial website itu (Setting, atau cookie Auto Prediksi bila Setting kosong).
+	const site = kind === "admin" && p.website ? (await lapAdminSites(env, row.username, [String(p.website)]))[0] : null;
 	return {
 		success: true,
 		creds:
 			kind === "mozart"
 				? { linkMozart: c.linkMozart, cookieMozart: c.cookieMozart }
-				: { linkAdmin: c.linkAdmin, cookieAdmin: c.cookieAdmin },
+				: site
+					? { linkAdmin: site.linkAdmin, cookieAdmin: site.cookieAdmin }
+					: { linkAdmin: c.linkAdmin, cookieAdmin: c.cookieAdmin },
 		params: { kind, startDate: p.startDate, endDate: p.endDate },
 	};
 }
@@ -837,13 +923,14 @@ export async function lapJobResult(
 		.bind(jobId)
 		.first<{ username: string; status: string; params: string; created_at: string }>();
 	if (!row) return { success: false, message: "job tidak ada" };
-	let p: { key?: string } = {};
+	let p: { key?: string; website?: string } = {};
 	try {
 		p = JSON.parse(row.params || "{}");
 	} catch {
 		/* ignore */
 	}
 	if (!p.key || !constEq(p.key, String(key ?? ""))) return { success: false, message: "key salah" };
+	const site = String(p.website || "");
 	// Hasil yang sudah diterima tidak boleh ditimpa (key bisa bocor lewat log
 	// publik). Pengiriman ulang dari scraper (balasan pertama hilang di jalan)
 	// dijawab sukses supaya scraper tidak mengulang scrape.
@@ -856,10 +943,11 @@ export async function lapJobResult(
 		for (const k of Object.keys(data)) if (Array.isArray(data[k])) save[k] = data[k];
 		const meta = save.registerMeta?.[0];
 		if (meta && typeof meta === "object") {
-			const website = await lapAdminWebsite(env, row.username, (await lapLoadCreds(env, row.username)).cookieAdmin);
+			// Job per website: nama website sudah pasti; job lama (tanpa website): ditebak dari cookie.
+			const website = site ? (siteBrand(site) ?? site) : await lapAdminWebsite(env, row.username, (await lapLoadCreds(env, row.username)).cookieAdmin);
 			if (website) save.registerMeta = [{ ...(meta as Record<string, unknown>), website }, ...save.registerMeta!.slice(1)];
 		}
-		if (Object.keys(save).length) await lapSaveResults(env, row.username, save);
+		if (Object.keys(save).length) await lapSaveResults(env, row.username, save, site);
 	}
 	const errMsg = errors && Object.keys(errors).length ? " | error: " + Object.values(errors).join("; ") : "";
 	await getTurso(env).prepare(`UPDATE lap_job SET status=?, message=?, updated_at=? WHERE id=?`)
