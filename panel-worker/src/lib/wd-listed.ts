@@ -10,7 +10,7 @@
 // lihat baris yang sama. Operator yang websites-nya tidak cocok TIDAK melihat
 // baris itu sama sekali.
 import { strukBaseUrl } from "./integrations";
-import { getTurso } from "./turso";
+import { getTurso, tursoGeneration } from "./turso";
 import { tsNow } from "./time";
 
 export interface WdListedRow {
@@ -41,13 +41,15 @@ export interface WdListedInput {
 	vendorName: string;
 }
 
-let ensured = false;
+/** Generasi database Turso (tursoGeneration) tempat skema ini sudah disiapkan; -1 = belum. */
+let ensuredGen = -1;
 /** Hanya untuk test. */
 export function resetWdListedTableFlag(): void {
-	ensured = false;
+	ensuredGen = -1;
 }
 async function ensureTable(env: Env): Promise<void> {
-	if (ensured) return;
+	if (ensuredGen === tursoGeneration()) return;
+	const gen = tursoGeneration();
 	await getTurso(env)
 		.prepare(
 			`CREATE TABLE IF NOT EXISTS wd_listed (
@@ -69,7 +71,7 @@ async function ensureTable(env: Env): Promise<void> {
 		)
 		.run();
 	await getTurso(env).prepare(`CREATE TABLE IF NOT EXISTS wd_listed_rev (k INTEGER PRIMARY KEY CHECK (k = 1), rev INTEGER NOT NULL DEFAULT 0)`).run();
-	ensured = true;
+	ensuredGen = gen;
 }
 
 // Nomor revisi daftar: naik setiap ada tambah/ubah/hapus. Halaman PGA Pending memeriksa daftar tiap 8 dtk; dulu SETIAP

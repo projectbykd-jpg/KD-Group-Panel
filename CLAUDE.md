@@ -31,3 +31,8 @@ Perintah pemilik: semua pengaturan yang masuk akal diubah admin harus ada di men
 - Desain: tanpa neon/glow, tanpa backdrop-filter di elemen besar, animasi pendek, popup minimal (`claude-memory/panel-*.md`).
 - Jangan menyentuh database produksi dari sandbox; jangan memakai/meminta key asli pemilik.
 - Setelah perubahan selesai: merge ke `main` dan pantau deploy (otorisasi tetap dari pemilik).
+- **Database Turso UTAMA dan CADANGAN harus berperilaku sama** (perintah pemilik 24 Okt 2026). Tabel/kolom Turso yang dibuat
+  lazy WAJIB mencatat generasi database: `let xGen = -1` + `tursoGeneration()` atau `sharedOnce(..., tursoGeneration)` --
+  bukan boolean per isolate. `test/turso-schema-parity.spec.ts` menggagalkan CI bila dilanggar. Tabel news tetap di utama.
+- Aset UI (ikon, font, skrip) sebisa mungkin disajikan dari server panel sendiri, bukan CDN (ikon Font Awesome:
+  `vendor/fa-<versi>` dari devDependency, disalin `scripts/build-ui.mjs`).

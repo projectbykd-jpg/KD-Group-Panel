@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: import("node:sqlite").DatabaseSync } }));
-vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1 }));
+vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1, tursoGeneration: () => 0 }));
 
 import { botCfgSet, ensureNewsCategoryColumns, publicNewsRssXml, resetNewsColumnsGuard, tgPromoUrl } from "../src/lib/bot-news";
 import { explainTgError, tgChannelPost, tgChannelRun, tgChannelTest } from "../src/lib/tg-channel";

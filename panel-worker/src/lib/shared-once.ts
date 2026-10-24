@@ -14,13 +14,16 @@ export interface SharedOnce {
 	reset(): void;
 }
 
-export function sharedOnce(run: (env: Env) => Promise<void>, joinWaitMs: number): SharedOnce {
-	let done = false;
+// `gen` = generasi database (turso.ts tursoGeneration): panel pindah utama <-> cadangan -> skema disiapkan ulang di database
+// yang baru, jadi kedua database selalu punya tabel/kolom yang sama dan perilaku panel tidak berbeda.
+export function sharedOnce(run: (env: Env) => Promise<void>, joinWaitMs: number, gen: () => number = () => 0): SharedOnce {
+	let doneGen = -1;
 	let inflight: Promise<void> | null = null;
 	const start = (env: Env): Promise<void> => {
+		const g = gen();
 		const p: Promise<void> = run(env).then(
 			() => {
-				done = true;
+				doneGen = g;
 				if (inflight === p) inflight = null;
 			},
 			(e) => {
@@ -32,7 +35,7 @@ export function sharedOnce(run: (env: Env) => Promise<void>, joinWaitMs: number)
 		return p;
 	};
 	const fn = (async (env: Env): Promise<void> => {
-		if (done) return;
+		if (doneGen === gen()) return;
 		const joined = inflight;
 		if (!joined) return start(env);
 		let timer: ReturnType<typeof setTimeout> | undefined;
@@ -42,14 +45,16 @@ export function sharedOnce(run: (env: Env) => Promise<void>, joinWaitMs: number)
 				timer = setTimeout(() => res(true), joinWaitMs);
 			}),
 		]).finally(() => timer && clearTimeout(timer));
-		if (!timedOut || done) return;
+		if (doneGen === gen()) return;
+		if (!timedOut) return start(env); // janji lama untuk database sebelumnya -> siapkan di database yang aktif sekarang
 		if (inflight === joined) inflight = null;
 		console.error(`sharedOnce: menunggu pembuatan skema request lain > ${joinWaitMs} ms, jalankan sendiri`);
+		const g = gen();
 		await run(env); // milik request ini, tidak dibagi -> tidak bisa tersangkut janji request lain
-		done = true;
+		doneGen = g;
 	}) as SharedOnce;
 	fn.reset = () => {
-		done = false;
+		doneGen = -1;
 		inflight = null;
 	};
 	return fn;

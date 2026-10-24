@@ -10,7 +10,8 @@ import { createClient, type Client } from "@libsql/client";
 const dbs = vi.hoisted(() => ({ map: new Map<string, unknown>() }));
 vi.mock("@libsql/client/web", () => ({ createClient: ({ url }: { url: string }) => dbs.map.get(url) }));
 
-import { getTurso, onTursoFailover, resetTursoForTest, tursoStatus } from "../src/lib/turso";
+import { getTurso, onTursoFailover, resetTursoForTest, tursoGeneration, tursoStatus } from "../src/lib/turso";
+import { sharedOnce } from "../src/lib/shared-once";
 import { runSync } from "../scripts/turso-sync";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -181,5 +182,55 @@ describe("mulai-baru di cadangan kosong (utama diblokir): news tetap di utama, s
 		const db = getTurso(env());
 		await expect(db.prepare(`SELECT * FROM news_article`).all()).rejects.toThrow(/BLOCKED/);
 		expect(await db.prepare(`SELECT v FROM bot_kv`).all().catch(() => "err")).toBe("err");
+	});
+});
+
+describe("utama & cadangan berperilaku SAMA: skema dibuat ulang di database yang baru aktif", () => {
+	it("tabel yang dibuat 'sekali per isolate' di utama ikut disiapkan di cadangan begitu panel pindah (dulu: 'no such table' sampai isolate diganti)", async () => {
+		await runSync({ primary, spare, mode: "sync", exclude: [] }); // cadangan siap dipakai (synced_at), app_new BELUM ada di sana
+		let runs = 0;
+		const ensure = sharedOnce(
+			async (e) => {
+				runs++;
+				await getTurso(e).prepare(`CREATE TABLE IF NOT EXISTS app_new (id INTEGER PRIMARY KEY, note TEXT NOT NULL DEFAULT '')`).run();
+			},
+			1000,
+			tursoGeneration,
+		);
+		const write = async (note: string) => {
+			await ensure(env());
+			await getTurso(env()).prepare(`INSERT INTO app_new (note) VALUES (?)`).bind(note).run();
+		};
+		await write("utama");
+		expect(runs).toBe(1);
+		const g0 = tursoGeneration();
+		primaryBlocked = true;
+		// permintaan yang MEMICU pindah: utama ditolak -> cadangan (generasi naik)
+		await getTurso(env()).prepare(`SELECT COUNT(*) AS n FROM app_item`).first();
+		expect(tursoGeneration()).toBe(g0 + 1);
+		await write("cadangan"); // skema disiapkan ulang di cadangan, lalu tulis berhasil
+		expect(runs).toBe(2);
+		expect((await spare.execute(`SELECT note FROM app_new`)).rows.map((r) => String(r.note))).toEqual(["cadangan"]);
+		await write("cadangan-2"); // generasi sama -> tidak membuat ulang
+		expect(runs).toBe(2);
+	});
+
+	it("isolate lain yang melihat penanda berganti (tanpa memicu sendiri) juga menaikkan generasi", async () => {
+		await runSync({ primary, spare, mode: "sync", exclude: [] });
+		await tursoStatus(env()); // baca penanda: utama
+		const g0 = tursoGeneration();
+		await spare.execute(`INSERT OR REPLACE INTO kd_failover (k, v, at) VALUES ('active', 'spare', 'x')`);
+		resetTursoForTest(); // isolate baru tidak membawa generasi lama -> lihat penanda langsung
+		await tursoStatus(env());
+		const g1 = tursoGeneration();
+		await spare.execute(`INSERT OR REPLACE INTO kd_failover (k, v, at) VALUES ('active', 'primary', 'y')`);
+		vi.useFakeTimers({ now: Date.now() + 61_000, toFake: ["Date"] });
+		try {
+			await tursoStatus(env()); // cache 60 dtk habis -> penanda dibaca ulang -> berganti
+		} finally {
+			vi.useRealTimers();
+		}
+		expect(tursoGeneration()).toBe(g1 + 1);
+		expect(g0).toBeGreaterThanOrEqual(0);
 	});
 });

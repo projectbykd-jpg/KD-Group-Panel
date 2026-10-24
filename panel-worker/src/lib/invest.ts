@@ -3,7 +3,7 @@
 // Tabel invest_* ada di Turso (bukan D1) -> pakai getTurso(env).
 import { tsNow } from "./time";
 import { getSys } from "./settings";
-import { getTurso } from "./turso";
+import { getTurso, tursoGeneration } from "./turso";
 
 export const INVEST_DEFAULT_CONFIG = {
 	BASE_URL: "https://ag.suksesbogil.com/",
@@ -98,15 +98,17 @@ export function normalizeInvestBaseUrl(raw: string): string {
 // (hanya di database produksi yang sudah dipatch tangan). Tanpa ini Turso baru
 // gagal "table invest_config has no column named pasaran_json". Dicek sekali
 // per isolate; ALTER yang gagal (kolom sudah ada) diabaikan.
-let pasaranColumnReady = false;
+/** Generasi database Turso (tursoGeneration) tempat skema ini sudah disiapkan; -1 = belum. */
+let pasaranColumnReadyGen = -1;
 export async function ensureInvestPasaranColumn(env: Env): Promise<void> {
-	if (pasaranColumnReady) return;
+	if (pasaranColumnReadyGen === tursoGeneration()) return;
+	const gen = tursoGeneration();
 	try {
 		await getTurso(env).prepare(`ALTER TABLE invest_config ADD COLUMN pasaran_json TEXT NOT NULL DEFAULT ''`).run();
 	} catch {
 		/* kolom sudah ada */
 	}
-	pasaranColumnReady = true;
+	pasaranColumnReadyGen = gen;
 }
 
 export async function investLoadConfig(env: Env, user: string): Promise<InvestConfig> {

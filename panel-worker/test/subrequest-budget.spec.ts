@@ -12,6 +12,7 @@ vi.mock("../src/lib/turso", () => {
 		first: (c?: string) => (turso.calls++, turso.log.push(sql.replace(/\s+/g, " ").slice(0, 90)), st.first(c)),
 	});
 	return {
+		tursoGeneration: () => 0,
 		getTurso: () => {
 			const d1 = turso.current!.d1;
 			return {
