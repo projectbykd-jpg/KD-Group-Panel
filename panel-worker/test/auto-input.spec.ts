@@ -286,6 +286,25 @@ describe("runAutoInput", () => {
 		const { cleanReason } = await import("../src/lib/admin-notify");
 		expect(cleanReason(r.detail)).not.toContain("Diterima:"); // Telegram tetap ringkas & bisa digabung antar website
 	});
+	it("halaman diawali daftar 'Pools : [..]' (data produksi FLORIDAMID 25 Okt): daftar dilewati, pesan sesudahnya + ada/tidaknya pasaran di daftar tercatat", async () => {
+		const m = mockSite();
+		const pools = "Pools : [streamspin] [sbosportsbook] [pp] [INDIA] [CAROLINADAY] [KENTUCKYEVE] [BALI] [MANILA] [IDAHO] [NEBRASKA] [PANAMA] [SAPPORO] [NIPPON LOTTO] [SYDNEY] [SINGAPORE] [HONGKONG]";
+		const f = async (u: string, i?: RequestInit) =>
+			new URL(u).pathname === "/admin_angka13.php" && i?.method !== "POST"
+				? new Response(`<html><body><div>${pools}</div><h3>Pasaran FLORIDAEVE belum tutup</h3><p>Input angka dibuka setelah pasaran tutup.</p></body></html>`, { status: 200 })
+				: m.fetchFn(u, i);
+		const r = await runAutoInput({ session: sess, plan: plan(), fetchFn: f });
+		expect(r.ok).toBe(false);
+		expect(r.stage).toBe("cek");
+		expect(r.detail).toContain("form=0");
+		expect(r.detail).toContain("FLORIDAEVE TIDAK ada di daftar Pools");
+		expect(r.detail).toContain('heading "Pasaran FLORIDAEVE belum tutup"');
+		expect(r.detail).toMatch(/isi "Pasaran FLORIDAEVE belum tutup Input angka dibuka setelah pasaran tutup\."/);
+		expect(m.st.posts).toHaveLength(0);
+		const { autoInputPageMeta } = await import("../src/lib/health");
+		expect(autoInputPageMeta(r.detail)).toContain("FLORIDAEVE TIDAK ada di daftar Pools");
+		expect(autoInputPageMeta(r.detail)).toContain('isi "Pasaran FLORIDAEVE belum tutup');
+	});
 	it("uji kering: validasi lolos, TIDAK ada POST", async () => {
 		const m = mockSite();
 		const r = await runAutoInput({ session: sess, plan: plan(), dryRun: true, fetchFn: m.fetchFn });
