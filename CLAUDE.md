@@ -31,8 +31,12 @@ Perintah pemilik: semua pengaturan yang masuk akal diubah admin harus ada di men
 - Desain: tanpa neon/glow, tanpa backdrop-filter di elemen besar, animasi pendek, popup minimal (`claude-memory/panel-*.md`).
 - Jangan menyentuh database produksi dari sandbox; jangan memakai/meminta key asli pemilik.
 - Setelah perubahan selesai: merge ke `main` dan pantau deploy (otorisasi tetap dari pemilik).
-- **Database Turso UTAMA dan CADANGAN harus berperilaku sama** (perintah pemilik 24 Okt 2026). Tabel/kolom Turso yang dibuat
-  lazy WAJIB mencatat generasi database: `let xGen = -1` + `tursoGeneration()` atau `sharedOnce(..., tursoGeneration)` --
-  bukan boolean per isolate. `test/turso-schema-parity.spec.ts` menggagalkan CI bila dilanggar. Tabel news tetap di utama.
+- **Pembagian database Turso TETAP** (perintah pemilik 25 Okt 2026, menggantikan aturan "utama = cadangan" 24 Okt):
+  DB 1 = Turso UTAMA hanya untuk BOT News (`news_article`, `news_source`, `bot_kv`, `ai_usage`); DB 2 = Turso CADANGAN
+  untuk SEMUA data panel lain (Result/Auto Prediksi, Laporan, Live Chat, Invest, Toto, WD, notifikasi). Rute ada di
+  `src/lib/turso.ts` (`tursoTargetFor`); tabel BOT News baru WAJIB ditambahkan ke `NEWS_TABLES_RE`. Jangan menambah
+  failover/sinkron/failback antar database, dan jangan mencampur tabel News + panel dalam satu batch (ditolak).
+  Dijaga `test/turso-split.spec.ts`. Penanda skema lazy tetap memakai `tursoGeneration()`/`sharedOnce(..., tursoGeneration)`
+  (`test/turso-schema-parity.spec.ts`).
 - Aset UI (ikon, font, skrip) sebisa mungkin disajikan dari server panel sendiri, bukan CDN (ikon Font Awesome:
   `vendor/fa-<versi>` dari devDependency, disalin `scripts/build-ui.mjs`).
