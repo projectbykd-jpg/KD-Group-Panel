@@ -656,9 +656,17 @@ export async function runAutoInput(opts: {
 				if (e instanceof Stop && /tidak dikenali/i.test(e.message)) {
 					const title = (angkaHtml.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
 					const pool = home.match(new RegExp(`id=["']param${code}["'][^>]*value=["']([^"']*)`, "i"))?.[1] ?? home.match(new RegExp(`value=["']([^"']*)["'][^>]*id=["']param${code}["']`, "i"))?.[1] ?? "-";
+					// Halaman admin diawali daftar "Pools : [..] [..] ..." (menu tautan pasaran) yang menutupi pesan sebenarnya
+					// (data produksi 25 Okt: FLORIDAMID/KENTUCKYMID). Lewati daftar itu; catat juga apakah pasaran ini ada di daftar.
+					const txt = htmlText(angkaHtml);
+					const pools = txt.match(/^\s*Pools\s*:\s*((?:\[[^\]]*\]\s*)+)/i);
+					const inPools = pools ? new RegExp(`\\[${plan.market.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]`, "i").test(pools[1]) : null;
+					const rest = (pools ? txt.slice(pools[0].length) : txt).trim();
+					const heads = [...angkaHtml.matchAll(/<h[1-4][^>]*>([\s\S]*?)<\/h[1-4]>/gi)].map((m) => htmlText(m[1]).trim()).filter(Boolean).slice(0, 4).join(" | ");
+					const nForms = (angkaHtml.match(/<form\b/gi) ?? []).length;
 					throw new Stop(
 						`Halaman Nomor Keluar ${plan.market} tidak berisi form input (sesi login OK) — kemungkinan pasaran ini diinput di halaman lain atau belum waktunya; matikan pasaran ini di Auto Prediksi bila selalu gagal. ` +
-							`Diterima: HTTP ${angkaMeta.status} [${angkaMeta.trail.join(" ")}] psr=${code} pool=${pool} judul "${title}" isi "${htmlText(angkaHtml).slice(0, 240)}"`,
+							`Diterima: HTTP ${angkaMeta.status} [${angkaMeta.trail.join(" ")}] psr=${code} pool=${pool} judul "${title}" form=${nForms} ${plan.market}${inPools === null ? "" : inPools ? " ADA" : " TIDAK ada"} di daftar Pools; heading "${heads.slice(0, 120)}" isi "${rest.slice(0, 240)}"`,
 						"cek",
 					);
 				}
