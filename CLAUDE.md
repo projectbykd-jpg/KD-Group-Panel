@@ -33,7 +33,8 @@ Perintah pemilik: semua pengaturan yang masuk akal diubah admin harus ada di men
 - Setelah perubahan selesai: merge ke `main` dan pantau deploy (otorisasi tetap dari pemilik).
 - **Pembagian database Turso TETAP** (perintah pemilik 25 Okt 2026, menggantikan aturan "utama = cadangan" 24 Okt):
   DB 1 = Turso UTAMA hanya untuk BOT News (`news_article`, `news_source`, `bot_kv`, `ai_usage`); DB 2 = Turso CADANGAN
-  untuk SEMUA data panel lain (Result/Auto Prediksi, Laporan, Live Chat, Invest, Toto, WD, notifikasi). Rute ada di
+  untuk SEMUA data panel lain (Result/Auto Prediksi, Laporan, Live Chat, Asisten KD (`assistant_usage`; dengan key khusus
+  Asisten tidak membaca `bot_kv`), Invest, Toto, WD, notifikasi). Rute ada di
   `src/lib/turso.ts` (`tursoTargetFor`); tabel BOT News baru WAJIB ditambahkan ke `NEWS_TABLES_RE`. Jangan menambah
   failover/sinkron/failback antar database, dan jangan mencampur tabel News + panel dalam satu batch (ditolak).
   Dijaga `test/turso-split.spec.ts`. Penanda skema lazy tetap memakai `tursoGeneration()`/`sharedOnce(..., tursoGeneration)`

@@ -4,7 +4,7 @@
 // dijalankan, tidak ada data/rahasia pengguna yang dikirim ke AI.
 import { requireSession } from "./auth";
 import { logActivity } from "../lib/activity";
-import { AI_USER_AGENT, assertKeyNotReused, aiChatProvider, aiClearCooldown, aiCooldown, aiListModels, aiUsableProviders, AiUnavailableError, maskKey, modelChain, normalizeBaseUrl, type AiProvider } from "../lib/ai-provider";
+import { AI_USER_AGENT, ASSISTANT_PROVIDER_ID, assertKeyNotReused, aiChatProvider, aiClearCooldown, aiCooldown, aiListModels, aiUsableProviders, AiUnavailableError, maskKey, modelChain, normalizeBaseUrl, type AiProvider } from "../lib/ai-provider";
 import { ASSISTANT_KB_VERSION, selectKnowledge } from "../lib/assistant-kb";
 import { botCfg } from "../lib/bot-news";
 import { MENU_ITEMS, parseMenus } from "../lib/menus";
@@ -101,10 +101,19 @@ export async function assistantAsk(env: Env, token: string, message: unknown, hi
 	let answer = "";
 	let via = "";
 	let ms = 0;
+	// Key khusus diisi -> Asisten tidak membaca DB 1 sama sekali (setelan & jeda AI Provider BOT News ada di bot_kv DB 1;
+	// DB 1 kena kuota dulu ikut mematikan Asisten walau key khususnya sehat). Tanpa key khusus baru memakai provider bersama.
+	const dedicated = await loadDedicated(env);
+	let cfg: Record<string, string> = {};
+	if (!dedicated) {
+		try {
+			cfg = await botCfg(env);
+		} catch {
+			throw new Error("Asisten belum punya key khusus, dan AI Provider BOT News (database DB 1) sedang tidak bisa dibaca. Minta admin mengisi key khusus di Admin → Pengaturan Sistem → Asisten KD.");
+		}
+	}
 	try {
-		const cfg = await botCfg(env);
 		const maxTokens = await getSys(env, "sys_assistant_max_tokens");
-		const dedicated = await loadDedicated(env);
 		// Key khusus asisten DIPAKAI SENDIRI (tidak pernah jatuh ke provider Bot News/lainnya).
 		// Provider bersama hanya dipakai bila admin belum mengisi key khusus.
 		const candidates: AiProvider[] = [];
@@ -178,7 +187,7 @@ async function readDedicated(env: Env): Promise<Dedicated | null> {
 }
 
 function toProvider(d: Dedicated): AiProvider {
-	return { id: "assistant-dedicated", name: "Asisten (key khusus)", base_url: d.base_url, key: d.key, model: d.model, enabled: true, quota: 0, activated: "", valid_days: 0, used_adjust: 0, created_at: "" };
+	return { id: ASSISTANT_PROVIDER_ID, name: "Asisten (key khusus)", base_url: d.base_url, key: d.key, model: d.model, enabled: true, quota: 0, activated: "", valid_days: 0, used_adjust: 0, created_at: "" };
 }
 
 async function loadDedicated(env: Env): Promise<AiProvider | null> {
@@ -263,7 +272,7 @@ export async function assistantSaveConfig(env: Env, token: string, dedicated?: u
 			await env.DB.prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
 				.bind(DEDICATED_KEY, JSON.stringify({ base_url, key, model }))
 				.run();
-			await aiClearCooldown(env, await botCfg(env), "assistant-dedicated").catch(() => {});
+			await aiClearCooldown(env, {}, ASSISTANT_PROVIDER_ID).catch(() => {}); // jeda key khusus hanya di memori (tanpa DB 1)
 			note = `Key khusus asisten disimpan (${new URL(base_url).host}, ${model})`;
 		}
 	}
@@ -276,9 +285,8 @@ export async function assistantTest(env: Env, token: string) {
 	await requireSession(env, token, { admin: true });
 	const p = await loadDedicated(env);
 	if (!p) throw new Error("Belum ada key khusus yang disimpan.");
-	const cfg = await botCfg(env);
 	try {
-		const call = await callFast(env, cfg, p, {
+		const call = await callFast(env, {}, p, {
 			purpose: "assistant-test",
 			temperature: 0,
 			maxTokens: 40,
