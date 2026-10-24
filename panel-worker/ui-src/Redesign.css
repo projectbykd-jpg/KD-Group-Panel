@@ -1640,3 +1640,6 @@ th.ai-sel, td.ai-sel { width: 36px; padding-right: 0 !important; }
 .lap-site-src { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 8px; border: 1px solid transparent; }
 .lap-site-src.is-ok { color: #6ee7b7; border-color: rgba(52, 211, 153, .25); background: rgba(16, 185, 129, .08); }
 .lap-site-src.is-bad { color: #fde68a; border-color: rgba(251, 191, 36, .28); background: rgba(245, 158, 11, .08); }
+/* Setting per website: satu panel per tab website (hidden = tab lain). */
+.lap-site-panel { display: flex; flex-direction: column; gap: 12px; padding: 12px; border-radius: 16px; border: 1px solid rgba(148, 163, 184, .10); background: rgba(2, 6, 23, .22); }
+.lap-site-panel[hidden] { display: none; }

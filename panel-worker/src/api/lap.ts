@@ -71,6 +71,8 @@ async function adminSitesForClient(env: Env, username: string, sites: string[]) 
 		source: x.source,
 		autoHint: x.autoHint,
 		vendorIdMotion: x.vendorIdMotion,
+		linkMotion: x.linkMotion,
+		tokenMotion: x.tokenMotion,
 	}));
 }
 
@@ -108,7 +110,7 @@ export async function lapSaveConfig(env: Env, token: string, data: Record<string
 	for (const it of Array.isArray(data.adminSites) ? data.adminSites : []) {
 		const o = (it ?? {}) as Record<string, unknown>;
 		const w = String(o.website ?? "").trim().toUpperCase();
-		if (sites.includes(w)) await lapSaveAdminSite(env, s.username, w, { linkAdmin: str(o.linkAdmin), cookieAdmin: str(o.cookieAdmin), vendorIdMotion: str(o.vendorIdMotion) });
+		if (sites.includes(w)) await lapSaveAdminSite(env, s.username, w, { linkAdmin: str(o.linkAdmin), cookieAdmin: str(o.cookieAdmin), vendorIdMotion: str(o.vendorIdMotion), linkMotion: str(o.linkMotion), tokenMotion: str(o.tokenMotion) });
 	}
 	await logActivity(env, s.username, "LAP SIMPAN SETTING", "Kredensial Laporan Harian diperbarui", "BERHASIL", "");
 	return { success: true, message: "Konfigurasi Laporan Harian tersimpan.", config: { ...credsForClient(c), adminSites: await adminSitesForClient(env, s.username, sites) } };

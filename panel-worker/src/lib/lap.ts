@@ -249,16 +249,20 @@ async function ensureLapAdminSiteTable(env: Env): Promise<void> {
 				link_admin   TEXT NOT NULL DEFAULT '',
 				cookie_admin TEXT NOT NULL DEFAULT '',
 				vendor_id_motion TEXT NOT NULL DEFAULT '',
+				link_motion  TEXT NOT NULL DEFAULT '',
+				token_motion TEXT NOT NULL DEFAULT '',
 				updated_at   TEXT NOT NULL DEFAULT '',
 				PRIMARY KEY (username, website)
 			)`,
 		)
 		.run();
-	try {
-		// tabel yang sudah dibuat sebelum kolom Vendor ID per website ada
-		await getTurso(env).prepare(`ALTER TABLE lap_admin_site ADD COLUMN vendor_id_motion TEXT NOT NULL DEFAULT ''`).run();
-	} catch {
-		/* kolom sudah ada */
+	// tabel yang sudah dibuat sebelum kolom Motion per website ada
+	for (const col of ["vendor_id_motion", "link_motion", "token_motion"]) {
+		try {
+			await getTurso(env).prepare(`ALTER TABLE lap_admin_site ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`).run();
+		} catch {
+			/* kolom sudah ada */
+		}
 	}
 	lapAdminSiteGen = gen;
 }
@@ -283,6 +287,9 @@ export interface LapAdminSite {
 	autoHint: string;
 	/** Vendor ID Motion website ini (Motion: tiap website punya vendor_id sendiri; boleh beberapa, dipisah koma). */
 	vendorIdMotion: string;
+	/** Link & token Motion khusus website ini; kosong = memakai Motion bawaan (Setting "Semua website"). */
+	linkMotion: string;
+	tokenMotion: string;
 }
 
 /** Kredensial Lap Admin untuk tiap website (satu query tabel + satu baca sesi Auto Prediksi). */
@@ -290,7 +297,7 @@ export async function lapAdminSites(env: Env, username: string, websites: string
 	if (!websites.length) return [];
 	await ensureLapAdminSiteTable(env);
 	const rows =
-		(await getTurso(env).prepare(`SELECT website, link_admin, cookie_admin, vendor_id_motion FROM lap_admin_site WHERE username = ?`).bind(username).all<Record<string, string>>())
+		(await getTurso(env).prepare(`SELECT website, link_admin, cookie_admin, vendor_id_motion, link_motion, token_motion FROM lap_admin_site WHERE username = ?`).bind(username).all<Record<string, string>>())
 			.results ?? [];
 	const saved = new Map(rows.map((r) => [String(r.website), r]));
 	let sessions: Awaited<ReturnType<typeof getSessions>> = [];
@@ -314,6 +321,8 @@ export async function lapAdminSites(env: Env, username: string, websites: string
 			source: settingCookie ? "setting" : autoCookie ? "auto-prediksi" : "",
 			autoHint: auto?.phpsessid ? sessionHint(auto.phpsessid) : "",
 			vendorIdMotion: String(row?.vendor_id_motion ?? ""),
+			linkMotion: String(row?.link_motion ?? ""),
+			tokenMotion: String(row?.token_motion ?? ""),
 		};
 	});
 }
@@ -323,13 +332,13 @@ export async function lapSaveAdminSite(
 	env: Env,
 	username: string,
 	website: string,
-	data: { linkAdmin?: string; cookieAdmin?: string; vendorIdMotion?: string },
+	data: { linkAdmin?: string; cookieAdmin?: string; vendorIdMotion?: string; linkMotion?: string; tokenMotion?: string },
 ): Promise<void> {
 	await ensureLapAdminSiteTable(env);
 	const cur = await getTurso(env)
-		.prepare(`SELECT link_admin, cookie_admin, vendor_id_motion FROM lap_admin_site WHERE username = ? AND website = ?`)
+		.prepare(`SELECT link_admin, cookie_admin, vendor_id_motion, link_motion, token_motion FROM lap_admin_site WHERE username = ? AND website = ?`)
 		.bind(username, website)
-		.first<{ link_admin: string; cookie_admin: string; vendor_id_motion: string }>();
+		.first<{ link_admin: string; cookie_admin: string; vendor_id_motion: string; link_motion: string; token_motion: string }>();
 	// Link sama dengan server admin bawaan disimpan kosong: tetap ikut otomatis bila server website diganti di Data Master.
 	const typed = data.linkAdmin === undefined ? undefined : data.linkAdmin.trim() ? hostOnly(data.linkAdmin) : "";
 	const link = typed === undefined ? String(cur?.link_admin ?? "") : typed === hostOnly(defaultAdminBase(website)) ? "" : typed;
@@ -338,13 +347,17 @@ export async function lapSaveAdminSite(
 		data.vendorIdMotion === undefined
 			? String(cur?.vendor_id_motion ?? "")
 			: data.vendorIdMotion.split(/[\s,]+/).map((v) => v.trim()).filter((v) => /^[A-Za-z0-9_-]{1,40}$/.test(v)).join(",");
+	const linkMotion = data.linkMotion === undefined ? String(cur?.link_motion ?? "") : data.linkMotion.trim() ? hostOnly(data.linkMotion) : "";
+	// token (x-access-token JWT): tanpa spasi; "Bearer " dibuang
+	const tokenMotion = data.tokenMotion === undefined ? String(cur?.token_motion ?? "") : data.tokenMotion.replace(/^Bearer\s+/i, "").replace(/\s+/g, "").slice(0, 4000);
 	await getTurso(env)
 		.prepare(
-			`INSERT INTO lap_admin_site (username, website, link_admin, cookie_admin, vendor_id_motion, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+			`INSERT INTO lap_admin_site (username, website, link_admin, cookie_admin, vendor_id_motion, link_motion, token_motion, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(username, website) DO UPDATE SET link_admin = excluded.link_admin, cookie_admin = excluded.cookie_admin,
-			   vendor_id_motion = excluded.vendor_id_motion, updated_at = excluded.updated_at`,
+			   vendor_id_motion = excluded.vendor_id_motion, link_motion = excluded.link_motion, token_motion = excluded.token_motion,
+			   updated_at = excluded.updated_at`,
 		)
-		.bind(username, website, link, cookie, vendor, tsNow())
+		.bind(username, website, link, cookie, vendor, linkMotion, tokenMotion, tsNow())
 		.run();
 }
 
