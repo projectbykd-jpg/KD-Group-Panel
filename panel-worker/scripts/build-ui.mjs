@@ -32,7 +32,7 @@ const ARG_MAP = {
 	getLivePanelData: ["token", "opts"],
 	getCurrentUserProfile: ["token"],
 	logClientActivity: ["token", "act", "detail", "status", "content"],
-	smartAutoSendFast: ["rawText", "token", "autoInputDone"],
+	smartAutoSendFast: ["rawText", "token", "autoInputDone", "systems"],
 	autoInputBeforeSend: ["rawText", "token"],
 	retryFailedSystem: ["rawText", "token", "systemName", "website"],
 	sendToPanelZOnly: ["market", "angka", "token"],
