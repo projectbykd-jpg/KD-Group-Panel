@@ -1864,9 +1864,7 @@
 
     // ---------- SETTING ----------
     // Setting Laporan Harian. Akun dengan website: TAB PER WEBSITE (otomatis dari akses akun) berisi SEMUA pengaturan
-    // website itu -- Panel Admin (Lap Admin) & Motion (Lap Motion) -- plus kartu "Bawaan semua website" (Motion bawaan,
-    // Mozart). Kolom Motion website yang kosong memakai bawaan; bawaan TIDAK disalin ke tiap website (Vendor ID satu
-    // website yang tersalin ke website lain membuat data Motion tercatat di website yang salah).
+    // website itu -- Panel Admin (Lap Admin) & Motion (Lap Motion) -- plus Mozart (satu untuk semua website).
     let lapSettingSite = '';
     function lapRenderSetting(host) {
       const c = lapConfig || {};
@@ -1880,13 +1878,12 @@
             ${hint ? `<span class="lap-field-hint">${hint}</span>` : ''}
           </label>`;
       const sites = Array.isArray(c.adminSites) ? c.adminSites : [];
-      const tail = s => s ? '…' + String(s).slice(-6) : '';
-      const motionFields = (prefix, v, bawaan) => `
-            ${field(prefix + 'LinkMotion', 'Link Motion', v.linkMotion, bawaan ? 'Kosong = bawaan ' + (c.linkMotion || 'https://motionv2.com') : 'https://motionv2.com')}
-            ${field(prefix + 'TokenMotion', 'Token Motion (x-access-token)', v.tokenMotion, bawaan ? (c.tokenMotion ? 'Kosong = token bawaan ' + tail(c.tokenMotion) : 'isi manual dari tab Network') : 'isi manual dari tab Network', bawaan ? 'Isi hanya bila website ini login Motion-nya berbeda.' : 'Dipakai skrip Console.')}
-            ${field(prefix + 'Vendor', 'Vendor ID Motion', v.vendorIdMotion, bawaan ? (c.vendorIdMotion ? 'Kosong = Vendor ID bawaan ' + c.vendorIdMotion : 'mis. 12') : 'mis. 12 atau 12,15',
-              bawaan ? 'Vendor ID milik website INI saja (di Motion: dropdown "By Website"). Kosong = skrip memakai bawaan dan panel memilah per website otomatis dari nama website di data Motion.'
-                : 'Dipakai skrip Deposit bila Vendor ID per website kosong (satu login menangani beberapa website: isi beberapa Vendor ID dipisah koma). Hasilnya tetap dipilah per website otomatis.', true)}`;
+      const motionFields = (prefix, v, perSite) => `
+            ${field(prefix + 'LinkMotion', 'Link Motion', v.linkMotion, 'https://motionv2.com')}
+            ${field(prefix + 'TokenMotion', 'Token Motion (x-access-token)', v.tokenMotion, 'isi manual dari tab Network', 'Dipakai skrip Console.')}
+            ${field(prefix + 'Vendor', 'Vendor ID Motion', v.vendorIdMotion, perSite && c.vendorIdMotion ? 'Kosong = otomatis (Vendor ID akun ' + c.vendorIdMotion + ', data dipilah per website)' : 'mis. 12 atau 12,15',
+              perSite ? 'Vendor ID milik website INI (di Motion: dropdown "By Website"). Kosong = data Motion dipilah per website otomatis dari nama website.'
+                : 'Dipakai skrip Deposit (satu login menangani beberapa website: isi beberapa Vendor ID dipisah koma).', true)}`;
       const mozart = `
         <div class="lap-setting-section">
           <div class="lap-setting-title"><i class="fa-solid fa-cubes-stacked"></i>Mozart <span>label tabel Bank Deposit / Withdraw</span></div>
@@ -1925,7 +1922,14 @@
         : x.source === 'auto-prediksi' ? '<span class="lap-site-src is-ok">Lap Admin: cookie Auto Prediksi ' + escapeHtml(x.autoHint || '') + '</span>'
         : '<span class="lap-site-src is-bad">Lap Admin: belum ada cookie (dilewati)</span>';
       const motionStatus = x => x.vendorIdMotion ? '<span class="lap-site-src is-ok">Lap Motion: Vendor ID sendiri</span>'
-        : '<span class="lap-site-src is-ok">Lap Motion: bawaan, dipilah otomatis</span>';
+        : '<span class="lap-site-src is-ok">Lap Motion: dipilah otomatis</span>';
+      // Link & Token Motion (satu login biasanya untuk semua website) langsung terisi di tiap tab dari isian akun yang ada.
+      // Vendor ID TIDAK disalin ke banyak website (data satu website bisa tercatat di website lain); 1 website = diisi.
+      const motionOf = x => ({
+        linkMotion: x.linkMotion || c.linkMotion || '',
+        tokenMotion: x.tokenMotion || c.tokenMotion || '',
+        vendorIdMotion: x.vendorIdMotion || (sites.length === 1 ? c.vendorIdMotion || '' : ''),
+      });
       const tabs = `<div class="lap-site-bar" role="tablist" aria-label="Website">${sites.map(x =>
         `<button type="button" role="tab" data-site-tab="${escapeHtml(x.website)}" class="lap-site-chip${x.website === cur ? ' is-on' : ''}" aria-selected="${x.website === cur}" onclick="lapSettingTab(${jsArg(x.website)})">${escapeHtml(x.brand)}${x.source ? '' : ' <i class="fa-solid fa-triangle-exclamation" title="Cookie Admin belum ada"></i>'}</button>`).join('')}</div>`;
       const panels = sites.map((x, i) => `
@@ -1939,18 +1943,14 @@
             </div>
           </div>
           <div class="lap-setting-section">
-            <div class="lap-setting-title"><i class="fa-solid fa-bolt-lightning"></i>Motion <span>dipakai Lap Motion ${escapeHtml(x.brand)} · kosong = bawaan</span></div>
-            <div class="grid sm:grid-cols-2 gap-3">${motionFields('lapSite' + i + '_', x, true)}</div>
+            <div class="lap-setting-title"><i class="fa-solid fa-bolt-lightning"></i>Motion <span>dipakai Lap Motion ${escapeHtml(x.brand)}</span></div>
+            <div class="grid sm:grid-cols-2 gap-3">${motionFields('lapSite' + i + '_', motionOf(x), true)}</div>
           </div>
         </div>`).join('');
       host.innerHTML = lapHeaderCard('fa-sliders', 'Setting Laporan Harian', 'Otomatis per website akun ini (' + sites.length + ' website) — pilih website di bawah. Tersimpan di database panel.', `
         ${help}
         ${tabs}
         ${panels}
-        <div class="lap-setting-section">
-          <div class="lap-setting-title"><i class="fa-solid fa-layer-group"></i>Bawaan semua website <span>Motion bawaan (dipakai website yang kolom Motion-nya kosong &amp; PGA Pending) · Mozart</span></div>
-          <div class="grid sm:grid-cols-2 gap-3">${motionFields('lap', c, false)}</div>
-        </div>
         ${mozart}${saveBar}`);
     }
     // Ganti tab website TANPA menggambar ulang: isian yang belum disimpan di tab lain tetap ada & ikut tersimpan.

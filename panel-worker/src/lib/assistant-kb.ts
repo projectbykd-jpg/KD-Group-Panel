@@ -9,7 +9,7 @@
 // Jangan menulis rahasia (password, key, token) di sini.
 // ============================================================================
 
-export const ASSISTANT_KB_VERSION = "2026-10-25.101";
+export const ASSISTANT_KB_VERSION = "2026-10-25.102";
 
 /** Penjelasan per menu. Kunci = id navigasi (nav-<kunci>) di ui-src/Index.html. */
 export const KB_PAGES: Record<string, { title: string; text: string }> = {
@@ -51,7 +51,7 @@ export const KB_PAGES: Record<string, { title: string; text: string }> = {
 	},
 	"lap-setting": {
 		title: "Setting (Laporan Harian)",
-		text: "Kredensial Laporan Harian milik akun Anda. Akun dengan website: TAB per website (tombol nama website, otomatis sesuai akses akun) berisi semua pengaturan website itu: Panel Admin (Link Admin terisi otomatis; Cookie Admin kosong = memakai cookie website itu di Auto Prediksi) untuk Lap Admin, dan Motion (Link, Token x-access-token, Vendor ID) untuk Lap Motion -- kolom Motion kosong = memakai 'Bawaan semua website'. Isi Vendor ID website hanya bila website itu punya Vendor ID sendiri (dropdown 'By Website' di Motion): skrip Deposit di Lap Motion (website terpilih) lalu langsung masuk website itu. Label kanan atas = cookie/Motion yang dipakai. Kartu 'Bawaan semua website' = Motion bawaan (juga PGA Pending) + Mozart (nama rekening/panel). Ganti tab tidak menghapus isian; SIMPAN menyimpan semua tab. Akun tanpa daftar website: satu Link + Cookie Admin dan satu Motion. Cookie/token bisa kedaluwarsa -- ambil baru dari DevTools (F12).",
+		text: "Kredensial Laporan Harian milik akun Anda. Akun dengan website: TAB per website (tombol nama website, otomatis sesuai akses akun) berisi semua pengaturan website itu: Panel Admin (Link Admin terisi otomatis; Cookie Admin kosong = memakai cookie website itu di Auto Prediksi) untuk Lap Admin, dan Motion (Link & Token x-access-token terisi otomatis dari isian akun yang ada; Vendor ID) untuk Lap Motion. Isi Vendor ID website hanya bila website itu punya Vendor ID sendiri (dropdown 'By Website' di Motion): skrip Deposit di Lap Motion (website terpilih) lalu langsung masuk website itu; kosong = data dipilah per website otomatis. Label kanan atas = cookie/Motion yang dipakai. Di bawah tab: Mozart (nama rekening/panel) untuk semua website. Ganti tab tidak menghapus isian; SIMPAN menyimpan semua tab. Akun tanpa daftar website: satu Link + Cookie Admin dan satu Motion. Cookie/token bisa kedaluwarsa -- ambil baru dari DevTools (F12).",
 	},
 	activity: {
 		title: "Aktivitas",
