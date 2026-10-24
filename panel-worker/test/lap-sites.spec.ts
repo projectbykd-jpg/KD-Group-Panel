@@ -45,8 +45,8 @@ describe("Lap Admin otomatis untuk setiap website akun", () => {
 		await saveSession(env, "Op", "HUGO", "https://ag.suksesbogil.com/", "PHPSESSID=hugoauto00000000aaaa; lastuser=vldaacs3");
 		const cfg = (await lapGetConfig(env, tok)) as { config: { adminSites: Record<string, string>[] } };
 		expect(cfg.config.adminSites).toEqual([
-			{ website: "HUGO", brand: "HUGOTOGEL", linkAdmin: "https://ag.suksesbogil.com", cookieAdmin: "", source: "auto-prediksi", autoHint: "••••aaaa", vendorIdMotion: "" },
-			{ website: "FOLA", brand: "FOLATOTO", linkAdmin: "https://agwl12.suksesbogil.com", cookieAdmin: "", source: "", autoHint: "", vendorIdMotion: "" },
+			{ website: "HUGO", brand: "HUGOTOGEL", linkAdmin: "https://ag.suksesbogil.com", cookieAdmin: "", source: "auto-prediksi", autoHint: "••••aaaa", vendorIdMotion: "", linkMotion: "", tokenMotion: "" },
+			{ website: "FOLA", brand: "FOLATOTO", linkAdmin: "https://agwl12.suksesbogil.com", cookieAdmin: "", source: "", autoHint: "", vendorIdMotion: "", linkMotion: "", tokenMotion: "" },
 		]);
 		expect(JSON.stringify(cfg)).not.toContain("hugoauto00000000aaaa");
 		// Setting per website: hanya website milik akun yang disimpan
@@ -151,6 +151,10 @@ describe("Lap Motion per website", () => {
 		await lapSaveConfig(env, tok, { adminSites: [{ website: "HUGO", vendorIdMotion: "12" }, { website: "FOLA", vendorIdMotion: "15, 16" }] });
 		const cfg = (await lapGetConfig(env, tok)) as { config: { adminSites: { website: string; vendorIdMotion: string }[] } };
 		expect(cfg.config.adminSites.map((x) => [x.website, x.vendorIdMotion])).toEqual([["HUGO", "12"], ["FOLA", "15,16"]]);
+		// Link & Token Motion per website (kosong = bawaan semua website)
+		await lapSaveConfig(env, tok, { adminSites: [{ website: "FOLA", linkMotion: "https://motionv2.com/riwayat-pga", tokenMotion: "Bearer eyJ.abc. def" }] });
+		const c2 = (await lapGetConfig(env, tok)) as { config: { adminSites: { website: string; linkMotion: string; tokenMotion: string; vendorIdMotion: string }[] } };
+		expect(c2.config.adminSites.map((x) => [x.website, x.linkMotion, x.tokenMotion, x.vendorIdMotion])).toEqual([["HUGO", "", "", "12"], ["FOLA", "https://motionv2.com", "eyJ.abc.def", "15,16"]]);
 		const ok = (await lapMotionImport(env, tok, "2026-10-24", "2026-10-24", undefined, undefined, [wdRow("W1", 100, { vendor_id: 12 }), wdRow("W2", 200, { vendor_id: 16 }), wdRow("W3", 300, { game_name: "FOLATOTO" })])) as { perSite: Record<string, { wd: number }> };
 		expect(ok.perSite).toEqual({ HUGOTOGEL: { dp: 0, pending: 0, wd: 1 }, FOLATOTO: { dp: 0, pending: 0, wd: 2 } });
 		const fola = await res(tok, "FOLA");
