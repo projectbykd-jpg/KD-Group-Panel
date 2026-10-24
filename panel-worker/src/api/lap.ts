@@ -70,6 +70,7 @@ async function adminSitesForClient(env: Env, username: string, sites: string[]) 
 		cookieAdmin: x.settingCookie,
 		source: x.source,
 		autoHint: x.autoHint,
+		vendorIdMotion: x.vendorIdMotion,
 	}));
 }
 
@@ -107,7 +108,7 @@ export async function lapSaveConfig(env: Env, token: string, data: Record<string
 	for (const it of Array.isArray(data.adminSites) ? data.adminSites : []) {
 		const o = (it ?? {}) as Record<string, unknown>;
 		const w = String(o.website ?? "").trim().toUpperCase();
-		if (sites.includes(w)) await lapSaveAdminSite(env, s.username, w, { linkAdmin: str(o.linkAdmin), cookieAdmin: str(o.cookieAdmin) });
+		if (sites.includes(w)) await lapSaveAdminSite(env, s.username, w, { linkAdmin: str(o.linkAdmin), cookieAdmin: str(o.cookieAdmin), vendorIdMotion: str(o.vendorIdMotion) });
 	}
 	await logActivity(env, s.username, "LAP SIMPAN SETTING", "Kredensial Laporan Harian diperbarui", "BERHASIL", "");
 	return { success: true, message: "Konfigurasi Laporan Harian tersimpan.", config: { ...credsForClient(c), adminSites: await adminSitesForClient(env, s.username, sites) } };
@@ -184,6 +185,43 @@ export async function lapSaveSpecialOps(env: Env, token: string, operators: unkn
 // disimpan. Ini juga otomatis menghilangkan masalah "data terpotong" pada
 // periode besar (dulu dibatasi MOTION_FETCH_BUDGET=44 subrequest/invocation).
 // =========================================================================
+/** "HUGOTOGEL.COM" / "Hugo Togel" -> "HUGOTOGEL" (untuk mencocokkan nama website di data Motion). */
+const normSiteName = (v: unknown) => String(v ?? "").toUpperCase().replace(/\.COM\b/g, "").replace(/[^A-Z0-9]/g, "");
+
+/**
+ * Pilah baris Motion (Deposit PAID/CREATE, Withdraw) ke website akun. Pemilik baris: nama website di data Motion
+ * (game_name, kolom WEBSITE di tabel) -> cadangan Vendor ID Motion per website di Setting. null = ada baris yang
+ * pemiliknya tidak pasti (jangan menebak: simpan gabungan). Daftar yang tidak dikirim tetap `undefined` per website.
+ */
+async function splitMotionBySite(env: Env, username: string, sites: string[], paid: unknown, create: unknown, wd: unknown) {
+	const byName = new Map<string, string>();
+	for (const w of sites) {
+		byName.set(normSiteName(w), w);
+		byName.set(normSiteName(siteBrand(w) ?? w), w);
+	}
+	const byVendor = new Map<string, string>();
+	for (const x of await lapAdminSites(env, username, sites)) for (const v of x.vendorIdMotion.split(",").filter(Boolean)) byVendor.set(v, x.website);
+	const owner = (item: Rec): string => {
+		const n = normSiteName(item.game_name);
+		if (n && byName.has(n)) return byName.get(n)!;
+		const v = String(item.vendor_id ?? item.vendorId ?? (item.vendor as Rec | undefined)?.id ?? "").trim();
+		return (v && byVendor.get(v)) || "";
+	};
+	const lists = { paid, create, wd } as Record<"paid" | "create" | "wd", unknown>;
+	const parts = new Map(sites.map((w) => [w, { paid: undefined as Rec[] | undefined, create: undefined as Rec[] | undefined, wd: undefined as Rec[] | undefined }]));
+	for (const key of ["paid", "create", "wd"] as const) {
+		const list = lists[key];
+		if (!Array.isArray(list)) continue;
+		for (const w of sites) parts.get(w)![key] = [];
+		for (const item of list as Rec[]) {
+			const w = owner(item);
+			if (!w) return null;
+			parts.get(w)![key]!.push(item);
+		}
+	}
+	return parts;
+}
+
 export async function lapMotionImport(
 	env: Env,
 	token: string,
@@ -192,8 +230,30 @@ export async function lapMotionImport(
 	depoPaidRows: unknown,
 	depoCreateRows: unknown,
 	wdRows: unknown,
+	website?: unknown,
 ) {
 	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: "lap-motion" });
+	// Website tujuan (skrip Deposit per website mengirimnya); hanya website milik akun. Kosong = gabungan / dipilah di bawah.
+	const sites = lapUserSites(s.profile);
+	const site = sites.includes(String(website ?? "").trim().toUpperCase()) ? String(website).trim().toUpperCase() : "";
+	if (!site && sites.length) {
+		// Satu skrip menarik semua website sekaligus; tiap baris dipilah ke website pemiliknya lalu diproses per website
+		// (logika hitung per website persis sama). Tidak bisa dipastikan untuk SEMUA baris -> disimpan gabungan seperti dulu.
+		const parts = await splitMotionBySite(env, s.username, sites, depoPaidRows, depoCreateRows, wdRows);
+		if (parts) {
+			const perSite: Record<string, { dp: number; pending: number; wd: number }> = {};
+			let dp = 0, pending = 0, wd = 0;
+			for (const w of sites) {
+				const part = parts.get(w)!;
+				const r = (await lapMotionImport(env, token, startDate, endDate, part.paid, part.create, part.wd, w)) as { dp: number; pending: number; wd: number };
+				perSite[siteBrand(w) ?? w] = { dp: r.dp, pending: r.pending, wd: r.wd };
+				dp += r.dp;
+				pending += r.pending;
+				wd += r.wd;
+			}
+			return { success: true, dp, pending, wd, hasDepo: Array.isArray(depoPaidRows) || Array.isArray(depoCreateRows), hasWd: Array.isArray(wdRows), perSite, shared: false };
+		}
+	}
 	const listPaid = (Array.isArray(depoPaidRows) ? depoPaidRows : []) as Rec[];
 	const listCreate = (Array.isArray(depoCreateRows) ? depoCreateRows : []) as Rec[];
 	const listWd = (Array.isArray(wdRows) ? wdRows : []) as Rec[];
@@ -345,30 +405,37 @@ export async function lapMotionImport(
 	// otomatis tidak tersentuh/tidak ketimpa kosong.
 	const hasDepo = Array.isArray(depoPaidRows) || Array.isArray(depoCreateRows);
 	const hasWd = Array.isArray(wdRows);
-	// Hanya modul _motionMeta yang dibutuhkan -- jangan muat SELURUH snapshot laporan
-	// user (Register/Check Koin/dst bisa beberapa MB) cuma untuk membaca ringkasannya.
-	const prevMeta = (((await lapLoadResultsModules(env, s.username, ["_motionMeta"]))._motionMeta as Rec[] | undefined)?.[0]?.summary as Rec | undefined) || {};
-	const summary = {
-		totalTransaksiPaid: hasDepo ? totalTransaksiPaid : Number(prevMeta.totalTransaksiPaid || 0),
-		totalNominalPaidAt: hasDepo ? totalNominalPaidAt : Number(prevMeta.totalNominalPaidAt || 0),
-		totalTransaksiCreate: hasDepo ? totalTransaksiCreate : Number(prevMeta.totalTransaksiCreate || 0),
-		totalNominalCreatedAt: hasDepo ? totalNominalCreatedAt : Number(prevMeta.totalNominalCreatedAt || 0),
-		totalPendingErrorCount: hasDepo ? pgaPendingError.length : Number(prevMeta.totalPendingErrorCount || 0),
-		totalWdRecords: hasWd ? motionWdPga.length : Number(prevMeta.totalWdRecords || 0),
-		totalWdAmount: hasWd ? totalWdAmount : Number(prevMeta.totalWdAmount || 0),
+	// Simpan ke satu "tempat" (website, atau "" = gabungan). Modul yang tidak diimpor kali ini tidak tersentuh, dan
+	// ringkasannya diambil dari _motionMeta tempat yang sama (jangan muat seluruh snapshot laporan untuk itu).
+	const saveTo = async (key: string, depo: boolean, wdRows: Rec[] | null, wdAmount: number) => {
+		const prevMeta = (((await lapLoadResultsModules(env, s.username, ["_motionMeta"], key))._motionMeta as Rec[] | undefined)?.[0]?.summary as Rec | undefined) || {};
+		const summary = {
+			totalTransaksiPaid: depo ? totalTransaksiPaid : Number(prevMeta.totalTransaksiPaid || 0),
+			totalNominalPaidAt: depo ? totalNominalPaidAt : Number(prevMeta.totalNominalPaidAt || 0),
+			totalTransaksiCreate: depo ? totalTransaksiCreate : Number(prevMeta.totalTransaksiCreate || 0),
+			totalNominalCreatedAt: depo ? totalNominalCreatedAt : Number(prevMeta.totalNominalCreatedAt || 0),
+			totalPendingErrorCount: depo ? pgaPendingError.length : Number(prevMeta.totalPendingErrorCount || 0),
+			totalWdRecords: wdRows ? wdRows.length : Number(prevMeta.totalWdRecords || 0),
+			totalWdAmount: wdRows ? wdAmount : Number(prevMeta.totalWdAmount || 0),
+		};
+		const toSave: Record<string, unknown[]> = { _motionMeta: [{ summary, source: "browser", at: startDate + "|" + endDate }] };
+		if (depo) {
+			toSave.motionDpPga = motionDpPga;
+			toSave.motionPendingError = pgaPendingError;
+		}
+		if (wdRows) toSave.motionWd = wdRows;
+		await lapSaveResults(env, s.username, toSave, key);
+		return summary;
 	};
-	const toSave: Record<string, unknown[]> = { _motionMeta: [{ summary, source: "browser", at: startDate + "|" + endDate }] };
-	if (hasDepo) {
-		toSave.motionDpPga = motionDpPga;
-		toSave.motionPendingError = pgaPendingError;
-	}
-	if (hasWd) toSave.motionWd = motionWdPga;
-	await lapSaveResults(env, s.username, toSave);
+
+	const summary = await saveTo(site, hasDepo, hasWd ? motionWdPga : null, totalWdAmount);
+	const shared = !site && sites.length > 0;
+	const where = site ? ` [${siteBrand(site) ?? site}]` : shared ? " [gabungan semua website]" : "";
 	await logActivity(
 		env,
 		s.username,
 		"LAP MOTION",
-		`Impor browser ${startDate}..${endDate} — ` +
+		`Impor browser ${startDate}..${endDate}${where} — ` +
 			(hasDepo ? `DP ${motionDpPga.length}, pending ${pgaPendingError.length}` : "(depo dilewati)") +
 			", " +
 			(hasWd ? `WD ${motionWdPga.length}` : "(wd dilewati)"),
@@ -376,8 +443,8 @@ export async function lapMotionImport(
 		"",
 	);
 	await recordLapImport(env, s.username, "motion", startDate, endDate,
-		[hasDepo ? `DP ${motionDpPga.length}` : "", hasDepo ? `Pending/Error ${pgaPendingError.length}` : "", hasWd ? `WD ${motionWdPga.length}` : ""].filter(Boolean).join(" · "));
-	return { success: true, summary, dp: motionDpPga.length, pending: pgaPendingError.length, wd: motionWdPga.length, hasDepo, hasWd };
+		[hasDepo ? `DP ${motionDpPga.length}` : "", hasDepo ? `Pending/Error ${pgaPendingError.length}` : "", hasWd ? `WD ${motionWdPga.length}` : "", shared ? "gabungan semua website" : ""].filter(Boolean).join(" · "), site);
+	return { success: true, summary, dp: motionDpPga.length, pending: pgaPendingError.length, wd: motionWdPga.length, hasDepo, hasWd, website: site, shared };
 }
 
 // =========================================================================
@@ -697,7 +764,7 @@ const JOB_MENU: Record<string, MenuKey> = { admin: "lap-admin", motion: "lap-mot
 // start / runner mati di tengah jalan) supaya progres tidak berputar selamanya.
 
 /** Import dari skrip console (Motion/Mozart) dicatat sebagai job selesai. */
-async function recordLapImport(env: Env, username: string, kind: "motion" | "mozart", startDate: string, endDate: string, message: string) {
+async function recordLapImport(env: Env, username: string, kind: "motion" | "mozart", startDate: string, endDate: string, message: string, website = "") {
 	try {
 		const now = tsNow();
 		await getTurso(env)
@@ -705,7 +772,7 @@ async function recordLapImport(env: Env, username: string, kind: "motion" | "moz
 				`INSERT INTO lap_job (id, username, kind, status, params, message, created_at, updated_at)
 				 VALUES (?, ?, ?, 'done', ?, ?, ?, ?)`,
 			)
-			.bind(crypto.randomUUID().replace(/-/g, ""), username, kind, JSON.stringify({ kind, startDate, endDate, source: "import" }), message || "Data diterima.", now, now)
+			.bind(crypto.randomUUID().replace(/-/g, ""), username, kind, JSON.stringify({ kind, startDate, endDate, source: "import", ...(website ? { website } : {}) }), message || "Data diterima.", now, now)
 			.run();
 	} catch (e) {
 		// Riwayat hanya pelengkap -- jangan pernah menggagalkan import datanya.

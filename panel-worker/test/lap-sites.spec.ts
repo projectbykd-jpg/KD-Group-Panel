@@ -45,8 +45,8 @@ describe("Lap Admin otomatis untuk setiap website akun", () => {
 		await saveSession(env, "Op", "HUGO", "https://ag.suksesbogil.com/", "PHPSESSID=hugoauto00000000aaaa; lastuser=vldaacs3");
 		const cfg = (await lapGetConfig(env, tok)) as { config: { adminSites: Record<string, string>[] } };
 		expect(cfg.config.adminSites).toEqual([
-			{ website: "HUGO", brand: "HUGOTOGEL", linkAdmin: "https://ag.suksesbogil.com", cookieAdmin: "", source: "auto-prediksi", autoHint: "••••aaaa" },
-			{ website: "FOLA", brand: "FOLATOTO", linkAdmin: "https://agwl12.suksesbogil.com", cookieAdmin: "", source: "", autoHint: "" },
+			{ website: "HUGO", brand: "HUGOTOGEL", linkAdmin: "https://ag.suksesbogil.com", cookieAdmin: "", source: "auto-prediksi", autoHint: "••••aaaa", vendorIdMotion: "" },
+			{ website: "FOLA", brand: "FOLATOTO", linkAdmin: "https://agwl12.suksesbogil.com", cookieAdmin: "", source: "", autoHint: "", vendorIdMotion: "" },
 		]);
 		expect(JSON.stringify(cfg)).not.toContain("hugoauto00000000aaaa");
 		// Setting per website: hanya website milik akun yang disimpan
@@ -105,8 +105,8 @@ describe("Lap Admin otomatis untuk setiap website akun", () => {
 		raw().prepare(`INSERT INTO lap_credentials (username, link_admin, cookie_admin) VALUES ('Op', 'https://agwl12.suksesbogil.com', 'PHPSESSID=lama000000000000cccc; vldaacs9=FOLATOTO.COM')`).run();
 		raw().prepare(`INSERT INTO lap_result (username, module, data, updated_at) VALUES ('Op', 'register', '[{"username":"lama"}]', 'x'), ('Op', '_motionMeta', '[{"m":1}]', 'x')`).run();
 		const res = async (w: string) => JSON.parse(await ((await lapGetResults(env, tok, ["register", "_motionMeta"], w)) as Response).text()).results;
-		expect(await res("FOLA")).toEqual({ register: [{ username: "lama" }], _motionMeta: [{ m: 1 }] });
-		expect(await res("HUGO")).toEqual({ _motionMeta: [{ m: 1 }] }); // Motion tetap satu untuk semua website
+		expect(await res("FOLA")).toEqual({ register: [{ username: "lama" }], _motionMeta: [{ m: 1 }], _motionShared: ["_motionMeta"] });
+		expect(await res("HUGO")).toEqual({ _motionMeta: [{ m: 1 }], _motionShared: ["_motionMeta"] }); // Motion lama = gabungan, ditandai
 		const cfg = (await lapGetConfig(env, tok)) as { config: { adminSites: { website: string; source: string; cookieAdmin: string }[] } };
 		expect(cfg.config.adminSites.find((x) => x.website === "FOLA")).toMatchObject({ source: "setting", cookieAdmin: "PHPSESSID=lama000000000000cccc; vldaacs9=FOLATOTO.COM" });
 		expect(raw().prepare(`SELECT module FROM lap_result WHERE username = 'Op' ORDER BY module`).all().map((x) => (x as { module: string }).module)).toEqual(["_motionMeta", "register@FOLA"]);
@@ -121,5 +121,59 @@ describe("Lap Admin otomatis untuk setiap website akun", () => {
 		expect(params(r.jobId).website).toBeUndefined();
 		const st = (await lapJobStart(env, r.jobId, params(r.jobId).key)) as { creds: { cookieAdmin: string } };
 		expect(st.creds.cookieAdmin).toBe("PHPSESSID=tunggal0000000000dddd");
+	});
+});
+
+import { lapMotionImport } from "../src/api/lap";
+
+describe("Lap Motion per website", () => {
+	const paidRow = (ref: string, game: string) => ({ reference_no: ref, paid_at: "2026-10-24 10:00:00", created_at: "2026-10-24 09:59:00", amount: 50000, paid_status: 1, game_name: game, username: "u" + ref });
+	const wdRow = (ref: string, amount: number, extra: Record<string, unknown>) => ({ reference_no: ref, amount, created_at: "2026-10-24 10:00:00", ...extra });
+	const res = async (tok: string, w: string) => JSON.parse(await ((await lapGetResults(env, tok, ["_motionMeta", "motionDpPga", "motionPendingError", "motionWd"], w)) as Response).text()).results;
+
+	it("SATU skrip Deposit untuk semua website: baris dipilah otomatis ke website pemiliknya (nama website di data Motion), dihitung per website", async () => {
+		const tok = await login(["HUGO", "FOLA"]);
+		const paid = [paidRow("A", "HUGOTOGEL"), paidRow("B", "FOLATOTO"), paidRow("C", "folatoto.com")];
+		const r = (await lapMotionImport(env, tok, "2026-10-24", "2026-10-24", paid, paid, undefined)) as { dp: number; perSite: Record<string, { dp: number }>; shared: boolean };
+		expect(r.perSite).toEqual({ HUGOTOGEL: { dp: 1, pending: 0, wd: 0 }, FOLATOTO: { dp: 2, pending: 0, wd: 0 } });
+		expect([r.dp, r.shared]).toEqual([3, false]);
+		const hugo = await res(tok, "HUGO"), fola = await res(tok, "FOLA");
+		expect(hugo.motionDpPga.map((x: { refNo: string }) => x.refNo)).toEqual(["A"]);
+		expect(fola.motionDpPga.map((x: { refNo: string }) => x.refNo).sort()).toEqual(["B", "C"]);
+		expect(fola._motionMeta[0].summary).toMatchObject({ totalTransaksiPaid: 2, totalNominalPaidAt: 100000 });
+		expect(fola._motionShared).toBeUndefined();
+		const jobs = (await lapJobs(env, tok)) as { jobs: { kind: string; brand: string }[] };
+		expect(jobs.jobs.filter((j) => j.kind === "motion").map((j) => j.brand).sort()).toEqual(["FOLATOTO", "HUGOTOGEL"]);
+	});
+
+	it("Withdraw: nama website tidak ada -> pakai Vendor ID Motion per website di Setting; baris yang tetap tidak pasti -> GABUNGAN (tidak menebak)", async () => {
+		const tok = await login(["HUGO", "FOLA"]);
+		await lapSaveConfig(env, tok, { adminSites: [{ website: "HUGO", vendorIdMotion: "12" }, { website: "FOLA", vendorIdMotion: "15, 16" }] });
+		const cfg = (await lapGetConfig(env, tok)) as { config: { adminSites: { website: string; vendorIdMotion: string }[] } };
+		expect(cfg.config.adminSites.map((x) => [x.website, x.vendorIdMotion])).toEqual([["HUGO", "12"], ["FOLA", "15,16"]]);
+		const ok = (await lapMotionImport(env, tok, "2026-10-24", "2026-10-24", undefined, undefined, [wdRow("W1", 100, { vendor_id: 12 }), wdRow("W2", 200, { vendor_id: 16 }), wdRow("W3", 300, { game_name: "FOLATOTO" })])) as { perSite: Record<string, { wd: number }> };
+		expect(ok.perSite).toEqual({ HUGOTOGEL: { dp: 0, pending: 0, wd: 1 }, FOLATOTO: { dp: 0, pending: 0, wd: 2 } });
+		const fola = await res(tok, "FOLA");
+		expect(fola.motionWd.map((x: { refNo: string }) => x.refNo)).toEqual(["W2", "W3"]);
+		expect(fola._motionMeta[0].summary).toMatchObject({ totalWdRecords: 2, totalWdAmount: 500 });
+
+		const mixed = (await lapMotionImport(env, tok, "2026-10-25", "2026-10-25", undefined, undefined, [wdRow("X1", 100, { vendor_id: 12 }), wdRow("X2", 200, { game_name: "XOTOGEL" })])) as { shared: boolean; perSite?: unknown };
+		expect([mixed.shared, mixed.perSite]).toEqual([true, undefined]);
+		expect((await res(tok, "HUGO")).motionWd.map((x: { refNo: string }) => x.refNo)).toEqual(["W1"]); // data khusus HUGO tetap dipakai
+	});
+
+	it("website tanpa data Motion sendiri (data lama) memakai data gabungan dengan tanda _motionShared", async () => {
+		const tok = await login(["HUGO", "FOLA"]);
+		raw().prepare(`INSERT INTO lap_result (username, module, data, updated_at) VALUES ('Op', 'motionDpPga', '[{"refNo":"lama"}]', 'x')`).run();
+		const r = await res(tok, "HUGO");
+		expect(r.motionDpPga).toEqual([{ refNo: "lama" }]);
+		expect(r._motionShared).toEqual(["motionDpPga"]);
+	});
+
+	it("akun tanpa daftar website: Motion tetap seperti dulu (satu set, tanpa tanda)", async () => {
+		const tok = await login([]);
+		const r = (await lapMotionImport(env, tok, "2026-10-24", "2026-10-24", [paidRow("A", "HUGOTOGEL")], [paidRow("A", "HUGOTOGEL")], undefined)) as { dp: number; shared: boolean };
+		expect([r.dp, r.shared]).toEqual([1, false]);
+		expect((await res(tok, "")).motionDpPga).toHaveLength(1);
 	});
 });

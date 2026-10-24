@@ -1468,11 +1468,26 @@
     let lapAdminSite = (() => { try { return localStorage.getItem('lap_admin_site') || ''; } catch (e) { return ''; } })();
     function lapSites() { return (lapConfig && Array.isArray(lapConfig.adminSites)) ? lapConfig.adminSites : []; }
     function lapCurSite() { const s = lapSites(); if (!s.length) return ''; return s.some(x => x.website === lapAdminSite) ? lapAdminSite : s[0].website; }
-    function lapCacheKey(page) { return page === 'lap-admin' ? page + '|' + lapCurSite() : page; }
+    // Lap Admin & Lap Motion per website (pilihan website sama untuk keduanya).
+    const LAP_SITE_PAGES = ['lap-admin', 'lap-motion'];
+    function lapCacheKey(page) { return LAP_SITE_PAGES.includes(page) ? page + '|' + lapCurSite() : page; }
     function lapSelectSite(w) {
       lapAdminSite = String(w || '');
       try { localStorage.setItem('lap_admin_site', lapAdminSite); } catch (e) {}
-      renderLapPage('lap-admin');
+      renderLapPage(LAP_SITE_PAGES.includes(currentPage) ? currentPage : 'lap-admin');
+    }
+    // Tombol nama website (hanya bila akun punya lebih dari satu website). warnFn: tanda segitiga per website.
+    function lapSiteBarHtml(warnFn) {
+      const sites = lapSites(), cur = lapCurSite();
+      if (sites.length < 2) return '';
+      return `<div class="lap-site-bar" role="tablist" aria-label="Website">${sites.map(x =>
+        `<button type="button" role="tab" class="lap-site-chip${x.website === cur ? ' is-on' : ''}" aria-selected="${x.website === cur}" onclick="lapSelectSite(${jsArg(x.website)})">${escapeHtml(x.brand)}${warnFn && warnFn(x) ? ' <i class="fa-solid fa-triangle-exclamation" title="' + escapeHtml(warnFn(x)) + '"></i>' : ''}</button>`).join('')}</div>`;
+    }
+    // Vendor ID Motion untuk skrip Deposit: isian umum, atau gabungan Vendor ID per website bila yang umum kosong.
+    function lapMotionVendors() {
+      const general = ((lapConfig && lapConfig.vendorIdMotion) || '').trim();
+      if (general) return general;
+      return [...new Set(lapSites().flatMap(x => String(x.vendorIdMotion || '').split(/[\s,]+/).filter(Boolean)))].join(',');
     }
     function lapRegisterText(rmeta) {
       const rsum = (rmeta && rmeta.summary) || {};
@@ -1527,7 +1542,7 @@
       const modules = LAP_PAGE_MODULES[page] || [];
       if (!modules.length) { cb && cb(true, {}, false); return; }
       const key = lapCacheKey(page);
-      const site = page === 'lap-admin' ? lapCurSite() : '';
+      const site = LAP_SITE_PAGES.includes(page) ? lapCurSite() : '';
       if (lapInflight[key]) { lapInflight[key].push(cb); return; }
       lapInflight[key] = [cb];
       const finish = (ok, results, changed) => { const cbs = lapInflight[key] || []; delete lapInflight[key]; cbs.forEach(f => f && f(ok, results, changed)); };
@@ -1596,7 +1611,7 @@
         FX.countUp(host);
       };
       // Lap Admin: website yang ditampilkan baru diketahui setelah config (daftar website akun) termuat.
-      if (page === 'lap-admin' && !lapConfig) {
+      if (LAP_SITE_PAGES.includes(page) && !lapConfig) {
         if (!force || !host.querySelector('.glass-card')) host.innerHTML = lapSkeletonHtml(page);
         lapEnsureConfig(() => { if (seq === lapRenderSeq && lapConfig) renderLapPage(page, force); else if (seq === lapRenderSeq) paint({}); });
         return;
@@ -1856,7 +1871,7 @@
           <div class="grid sm:grid-cols-2 gap-3">
             ${field('lapLinkMotion', 'Link Motion', c.linkMotion, 'https://motionv2.com')}
             ${field('lapTokenMotion', 'Token Motion (x-access-token)', c.tokenMotion, 'isi manual dari tab Network', 'Dipakai skrip Console.')}
-            ${field('lapVendorIdMotion', 'Vendor ID Motion', c.vendorIdMotion, 'mis. 12 atau 12,15', 'Dipakai langsung oleh skrip Deposit. Satu login menangani beberapa website? Isi beberapa Vendor ID dipisah koma.', true)}
+            ${field('lapVendorIdMotion', 'Vendor ID Motion', c.vendorIdMotion, 'mis. 12 atau 12,15', 'Dipakai skrip Deposit untuk SEMUA website (satu login menangani beberapa website: isi beberapa Vendor ID dipisah koma). Kosong = memakai Vendor ID per website di atas. Hasilnya dipilah per website otomatis.', true)}
           </div>
         </div>
         <div class="lap-setting-section">
@@ -1889,13 +1904,14 @@
         : '<span class="lap-site-src is-bad">Belum ada cookie — Lap Admin website ini dilewati</span>';
       return `
         <div class="lap-setting-section">
-          <div class="lap-setting-title"><i class="fa-solid fa-table-list"></i>Panel Admin per website <span>dipakai Lap Admin · otomatis untuk ${sites.length} website akun ini</span></div>
+          <div class="lap-setting-title"><i class="fa-solid fa-table-list"></i>Per website <span>Lap Admin &amp; Lap Motion · otomatis untuk ${sites.length} website akun ini</span></div>
           ${sites.map((x, i) => `
           <div class="lap-site-row">
             <div class="lap-site-row-head"><b>${escapeHtml(x.brand)}</b>${status(x)}</div>
             <div class="grid sm:grid-cols-2 gap-3">
               ${field('lapSiteLink' + i, 'Link Admin', x.linkAdmin, 'https://ag.suksesbogil.com', 'Terisi otomatis sesuai server admin website ini.')}
               ${field('lapSiteCookie' + i, 'Cookie Admin (opsional)', x.cookieAdmin, x.autoHint ? 'Kosong = pakai cookie Auto Prediksi ' + x.autoHint : 'PHPSESSID=...', 'Kosongkan untuk memakai cookie website ini di menu Auto Prediksi.')}
+              ${field('lapSiteVendor' + i, 'Vendor ID Motion (opsional)', x.vendorIdMotion, 'mis. 12', 'Lap Motion memilah data per website otomatis dari nama website di data Motion; isi ini hanya bila Lap Motion website ini tertulis "gabungan".', true)}
             </div>
           </div>`).join('')}
         </div>`;
@@ -1909,7 +1925,7 @@
       const payload = {
         linkAdmin: val('lapLinkAdmin'),
         cookiesAdmin: val('lapCookieAdmin'),
-        adminSites: sites.map((x, i) => ({ website: x.website, linkAdmin: val('lapSiteLink' + i), cookieAdmin: val('lapSiteCookie' + i) })),
+        adminSites: sites.map((x, i) => ({ website: x.website, linkAdmin: val('lapSiteLink' + i), cookieAdmin: val('lapSiteCookie' + i), vendorIdMotion: val('lapSiteVendor' + i) })),
         linkMotion: document.getElementById('lapLinkMotion').value.trim(),
         tokenMotion: document.getElementById('lapTokenMotion').value.trim(),
         vendorIdMotion: document.getElementById('lapVendorIdMotion').value.trim(),
@@ -1921,7 +1937,7 @@
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-floppy-disk mr-2"></i>SIMPAN KONFIGURASI'; }
         if (res && res.success) {
           lapConfig = res.config;
-          Object.keys(lapPageCache).forEach(k => { if (k.indexOf('lap-admin|') === 0) delete lapPageCache[k]; });
+          Object.keys(lapPageCache).forEach(k => { if (/^lap-(admin|motion)\|/.test(k)) delete lapPageCache[k]; });
           if (st) st.textContent = 'Tersimpan ✓';
           toast('Konfigurasi tersimpan');
           if (currentPage === 'lap-setting') renderLapPage('lap-setting');
@@ -1961,7 +1977,7 @@
       const panel = location.origin;
       const token = currentSessionToken || '';
       const mtoken = ((lapConfig && lapConfig.tokenMotion) || '').replace(/^Bearer\s+/i, '').trim();
-      const vendorId = ((lapConfig && lapConfig.vendorIdMotion) || '').trim();
+      const vendorId = lapMotionVendors();
       const isDepo = mode === 'deposit';
       // AKAR MASALAH yang akhirnya ketemu (dari riwayat commit, bukan tebakan):
       // body deposit TANPA date1/date2 (commit a4a66b0) TERBUKTI SUKSES tarik 837
@@ -2155,7 +2171,7 @@
       google.script.run.withSuccessHandler(res => {
         if (!res || !res.success) { toast('Gagal memuat konfigurasi Setting.'); return; }
         lapConfig = res.config || {};
-        if (mode === 'deposit' && !String(lapConfig.vendorIdMotion || '').trim()) {
+        if (mode === 'deposit' && !lapMotionVendors()) {
           toast('Vendor ID Motion belum tersimpan. Isi di Setting lalu klik SIMPAN KONFIGURASI.');
           return;
         }
@@ -2524,7 +2540,15 @@
       const codeDepo = lapMotionConsoleScript('deposit');
       const codeWd = lapMotionConsoleScript('withdraw');
       const escCode = c => c.replace(/[&<>]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]));
-      host.innerHTML = lapHeaderCard('fa-bolt-lightning', 'Lap Motion', 'Motion DP PGA · PGA Pending/Error · PGA Withdraw', `
+      // Per website: skrip tetap SATU untuk semua website; panel memilah tiap baris ke websitenya (nama website di data
+      // Motion, cadangan Vendor ID per website). Yang belum terpilah tampil dengan label "gabungan" (tidak ditebak).
+      const sites = lapSites(), curSite = sites.find(x => x.website === lapCurSite());
+      const sharedMods = Array.isArray(lapResults._motionShared) ? lapResults._motionShared : [];
+      const sharedLabel = { _motionMeta: 'ringkasan', motionDpPga: 'Deposit', motionPendingError: 'Pending/Error', motionWd: 'Withdraw' };
+      const sharedNote = curSite && sharedMods.length ? `<div class="callout callout-warn mt-2"><i class="fa-solid fa-layer-group"></i><span>${escapeHtml(sharedMods.map(m => sharedLabel[m] || m).join(', '))} di bawah masih <b>gabungan semua website</b> (data lama, atau ada baris Motion yang websitenya tidak terbaca). Jalankan skrip lagi untuk tanggal itu; bila tetap gabungan, isi <b>Vendor ID Motion per website</b> di Setting.</span></div>` : '';
+      host.innerHTML = lapHeaderCard('fa-bolt-lightning', 'Lap Motion' + (curSite && sites.length > 1 ? ' · ' + escapeHtml(curSite.brand) : ''), 'Motion DP PGA · PGA Pending/Error · PGA Withdraw', `
+        ${lapSiteBarHtml()}
+        ${sharedNote}
         ${lapJobsCardHtml('motion')}
         <div class="glass-inner rounded-2xl p-4 border border-amber-500/20 text-[11px] text-slate-300 leading-relaxed">
           <div class="font-bold text-amber-300 mb-1"><i class="fa-solid fa-shield-halved mr-1"></i>Motion kadang menolak trafik server</div>
@@ -2802,8 +2826,7 @@
       const sites = lapSites(), cur = lapCurSite();
       const curSite = sites.find(x => x.website === cur);
       // Pilihan website: hanya bila akun punya lebih dari satu website. Tabel & kartu di bawahnya tetap sama.
-      const siteBar = sites.length > 1 ? `<div class="lap-site-bar" role="tablist" aria-label="Website">${sites.map(x =>
-        `<button type="button" role="tab" class="lap-site-chip${x.website === cur ? ' is-on' : ''}" aria-selected="${x.website === cur}" onclick="lapSelectSite(${jsArg(x.website)})">${escapeHtml(x.brand)}${x.source ? '' : ' <i class="fa-solid fa-triangle-exclamation" title="Cookie Admin belum ada untuk website ini"></i>'}</button>`).join('')}</div>` : '';
+      const siteBar = lapSiteBarHtml(x => x.source ? '' : 'Cookie Admin belum ada untuk website ini');
       const noCookie = curSite && !curSite.source ? `<div class="callout callout-warn mt-2"><i class="fa-solid fa-triangle-exclamation"></i><span>Cookie Admin <b>${escapeHtml(curSite.brand)}</b> belum ada: simpan cookie website ini di menu Auto Prediksi, atau isi di Setting Laporan Harian.</span></div>` : '';
       window.__lapCopyLaporan = () => { if (!laporan) { toast('Belum ada'); return; } navigator.clipboard.writeText(laporan).then(() => toast('Laporan disalin')); };
       // Hasil sama persis dengan tombol COPY pada tabel ID Selisih.
