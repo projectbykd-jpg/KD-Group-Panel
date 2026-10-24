@@ -101,7 +101,30 @@ async function autoInputSummary(env: Env): Promise<Record<string, unknown>> {
 	} catch {
 		/* tabel belum ada di database aktif */
 	}
-	return { switchOn: Number(cfg?.n_on ?? 0), accounts: Number(cfg?.n ?? 0), sessions: Number(ses?.n ?? 0), lastSessionSaved: String(ses?.last ?? ""), lastJobs: jobs };
+	// Rekap 7 hari per tanggal WIB: kapan mulai gagal? (bandingkan dengan waktu rilis perubahan)
+	let byDay: { day: string; done: number; failed: number; other: number; reasons: Record<string, number> }[] = [];
+	try {
+		const r = await db
+			.prepare(`SELECT substr(created_at, 1, 10) AS day, status, detail, market FROM auto_input_job WHERE result_key NOT LIKE 'manual:%' ORDER BY id DESC LIMIT 400`)
+			.all<Record<string, unknown>>();
+		const m = new Map<string, { day: string; done: number; failed: number; other: number; reasons: Record<string, number> }>();
+		for (const x of r.results ?? []) {
+			const day = String(x.day ?? "");
+			const st = String(x.status ?? "");
+			const e = m.get(day) ?? { day, done: 0, failed: 0, other: 0, reasons: {} };
+			if (st === "DONE") e.done++;
+			else if (st === "FAILED") {
+				e.failed++;
+				const why = autoInputWhy(String(x.detail ?? ""), st) + " " + String(x.market ?? "");
+				e.reasons[why] = (e.reasons[why] ?? 0) + 1;
+			} else e.other++;
+			m.set(day, e);
+		}
+		byDay = [...m.values()].sort((p, q) => (p.day < q.day ? 1 : -1)).slice(0, 8);
+	} catch {
+		/* tabel belum ada */
+	}
+	return { switchOn: Number(cfg?.n_on ?? 0), accounts: Number(cfg?.n ?? 0), sessions: Number(ses?.n ?? 0), lastSessionSaved: String(ses?.last ?? ""), lastJobs: jobs, byDay };
 }
 
 export interface DeepHealth {

@@ -39,6 +39,8 @@ fi
 # Ringkasan Auto Prediksi (hanya hitungan & kategori alasan; tidak memengaruhi hasil) -> terbaca di log run ini.
 jq -r 'if .autoInput then "Auto Prediksi: saklar ON \(.autoInput.switchOn // 0)/\(.autoInput.accounts // 0) akun · PHPSESSID tersimpan \(.autoInput.sessions // 0) (terakhir \(.autoInput.lastSessionSaved // "-")) · job terakhir: \([(.autoInput.lastJobs // [])[] | "\(.at) \(.market // "") \(.status)/\(.stage) (\(.why))\(if .page then " [\(.page)]" else "" end)"] | join(" | "))\(if .autoInput.error then " · galat: \(.autoInput.error)" else "" end)" else empty end' "$TMP/h.json" 2>/dev/null || true
 
+jq -r '(.autoInput.byDay // [])[] | "Auto Prediksi \(.day): berhasil \(.done) · gagal \(.failed) · lain \(.other)\(if (.reasons|length) > 0 then " · alasan: " + ([.reasons | to_entries[] | "\(.key) x\(.value)"] | join("; ")) else "" end)"' "$TMP/h.json" 2>/dev/null || true
+
 # ---- 2) jalur /api (dipakai semua menu): aksi palsu HARUS dijawab JSON "Aksi tidak dikenal"
 body=$(curl -sS -m 20 -X POST -H 'content-type: application/json' -d '{"action":"__watchdog__"}' "$BASE/api" 2>/dev/null || true)
 if ! printf '%s' "$body" | grep -q 'Aksi tidak dikenal'; then
