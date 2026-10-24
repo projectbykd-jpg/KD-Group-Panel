@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: import("node:sqlite").DatabaseSync } }));
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1, tursoGeneration: () => 0 }));
 
-import { lapGetResults, lapJobResult, lapJobStart, lapJobs } from "../src/api/lap";
+import { lapAdminWebsite, lapGetResults, lapJobResult, lapJobStart, lapJobs } from "../src/api/lap";
+import { resetAutoInputTablesFlag, saveSession } from "../src/lib/auto-input";
 import { checkLogin } from "../src/api/auth";
 import { hashPassword } from "../src/lib/crypto";
 import { lapResultsJsonRaw } from "../src/lib/lap";
@@ -29,6 +30,7 @@ function job(id: string, kind: string, status: string, createdAt: string, update
 
 beforeEach(() => {
 	turso.current = fakeD1(["turso_001_schema.sql"]);
+	resetAutoInputTablesFlag(); // database baru tiap test
 	const f = fakeEnv();
 	env = f.env;
 	db = f.db;
@@ -148,5 +150,35 @@ describe("callback scraper (key job dari log publik GitHub Actions)", () => {
 		const row = turso.current!.raw.prepare(`SELECT data FROM lap_result WHERE username='Op' AND module='register'`).get() as { data: string };
 		expect(row.data).toContain("asli");
 		expect(row.data).not.toContain("PALSU");
+	});
+});
+
+describe("Laporan Register: nama website otomatis dari cookie Auto Prediksi", () => {
+	const KEY = "RAHASIA-JOB-KEY";
+	const meta = () => {
+		const r = turso.current!.raw.prepare(`SELECT data FROM lap_result WHERE username = 'Op' AND module = 'registerMeta'`).get() as { data: string };
+		return JSON.parse(r.data);
+	};
+	const creds = (cookie: string) =>
+		turso.current!.raw.prepare(`INSERT OR REPLACE INTO lap_credentials (username, link_admin, cookie_admin) VALUES ('Op', 'https://ag.suksesbogil.com', ?)`).run(cookie);
+
+	it("PHPSESSID sama dengan cookie website di Auto Prediksi -> judul ◉➣ nama website itu (disimpan bersama hasil)", async () => {
+		await saveSession(env, "Op", "FOLA", "https://agwl12.suksesbogil.com/", "PHPSESSID=fola0000000000aaaa; lastuser=x");
+		await saveSession(env, "Op", "HUGO", "https://ag.suksesbogil.com/", "PHPSESSID=hugo1111111111bbbb; lastuser=vldaacs3; vldaacs3=HUGOTOGEL.COM");
+		creds("PHPSESSID=hugo1111111111bbbb; lastuser=vldaacs3");
+		job("w1", "admin", "pending", tsNow());
+		await lapJobResult(env, "w1", KEY, true, { register: [{ username: "a" }], registerMeta: [{ dateLabel: "24 October 2026", summary: { daftarNonRef: 28 } }] }, {});
+		expect(meta()).toEqual([{ dateLabel: "24 October 2026", summary: { daftarNonRef: 28 }, website: "HUGOTOGEL" }]);
+	});
+
+	it("tidak cocok dengan Auto Prediksi -> nama dari isi cookie (<agen>=FOLATOTO.COM); tidak bisa dipastikan -> tanpa judul", async () => {
+		await saveSession(env, "Op", "HUGO", "https://ag.suksesbogil.com/", "PHPSESSID=hugo1111111111bbbb");
+		expect(await lapAdminWebsite(env, "Op", "PHPSESSID=lain2222222222cccc; lastuser=vldaacs9; vldaacs9=FOLATOTO.COM")).toBe("FOLATOTO");
+		expect(await lapAdminWebsite(env, "Op", "PHPSESSID=lain2222222222cccc")).toBe("");
+		expect(await lapAdminWebsite(env, "Op", "")).toBe("");
+		creds("PHPSESSID=lain2222222222cccc");
+		job("w2", "admin", "pending", tsNow());
+		await lapJobResult(env, "w2", KEY, true, { register: [], registerMeta: [{ dateLabel: "x" }] }, {});
+		expect(meta()).toEqual([{ dateLabel: "x" }]);
 	});
 });

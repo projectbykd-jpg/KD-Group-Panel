@@ -2724,8 +2724,10 @@
       const rmeta = (lapResults.registerMeta && lapResults.registerMeta[0]) || {};
       const rsum = rmeta.summary || {};
       const ccmeta = (lapResults.checkCoinMeta && lapResults.checkCoinMeta[0]) || {};
+      // Nama website (◉➣ HUGOTOGEL) diisi server dari Cookie Admin yang cocok dengan cookie website di Auto Prediksi.
+      const regSite = /^[A-Z0-9]{2,30}$/.test(String(rmeta.website || '')) ? `◉➣ ${rmeta.website}\n` : '';
       const laporan = rmeta.dateLabel
-        ? `Tanggal ${rmeta.dateLabel}\n~ DAFTAR Non Reff = ${rsum.daftarNonRef||0}\n~ DAFTAR Menggunakan Reff = ${rsum.daftarWithRef||0}\n~ NDP Non Reff = ${rsum.ndpNonRef||0}\n~ NDP Menggunakan Reff = ${rsum.ndpWithRef||0}` : '';
+        ? `${regSite}Tanggal ${rmeta.dateLabel}\n~ DAFTAR Non Reff = ${rsum.daftarNonRef||0}\n~ DAFTAR Menggunakan Reff = ${rsum.daftarWithRef||0}\n~ NDP Non Reff = ${rsum.ndpNonRef||0}\n~ NDP Menggunakan Reff = ${rsum.ndpWithRef||0}` : '';
       window.__lapCopyLaporan = () => { if (!laporan) { toast('Belum ada'); return; } navigator.clipboard.writeText(laporan).then(() => toast('Laporan disalin')); };
       // Hasil sama persis dengan tombol COPY pada tabel ID Selisih.
       window.__lapCopyIdSelisih = () => {
