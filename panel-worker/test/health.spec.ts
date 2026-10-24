@@ -14,7 +14,7 @@ vi.mock("../src/lib/turso", () => ({
 	tursoGeneration: () => 0,
 }));
 
-import { deepHealth } from "../src/lib/health";
+import { autoInputWhy, deepHealth } from "../src/lib/health";
 import { resetSysCache } from "../src/lib/settings";
 import { fakeEnv, fakeTurso } from "./helpers/fake-env";
 
@@ -103,5 +103,43 @@ describe("deepHealth ?session=1 (uji tulis-baca sesi login)", () => {
 		expect(h.checks.session.error).toMatch(/TIDAK terbaca/);
 		expect(h.checks.session.error).toMatch(/tulis D1/);
 		expect(h.checks.session.error).toMatch(/tulis KV: KV put\(\) limit exceeded/);
+	});
+});
+
+describe("deepHealth: ringkasan Auto Prediksi untuk watchdog (tanpa data rahasia)", () => {
+	it("saklar, PHPSESSID tersimpan & kategori alasan job terakhir; TIDAK memuat PHPSESSID, username, angka, atau isi Keterangan", async () => {
+		const raw = turso.current!.raw;
+		raw.exec(`CREATE TABLE auto_input_config (username TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT '')`);
+		raw.exec(`CREATE TABLE auto_input_session (username TEXT, website TEXT, base_url TEXT, phpsessid TEXT, updated_at TEXT)`);
+		raw.exec(`CREATE TABLE auto_input_job (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, website TEXT, market TEXT, prizes TEXT, result_date TEXT, result_key TEXT, status TEXT, stage TEXT, detail TEXT, period TEXT, created_at TEXT, updated_at TEXT)`);
+		raw.exec(`INSERT INTO auto_input_config VALUES ('RahasiaOp', 1, ''), ('Lain', 0, '')`);
+		raw.exec(`INSERT INTO auto_input_session VALUES ('RahasiaOp', 'HUGOTOGEL', 'https://x', 'PHPSESSID=sangatrahasia123', '2026-10-20 10:00:00')`);
+		raw.exec(`INSERT INTO auto_input_job (username, website, market, prizes, result_key, status, stage, detail, created_at) VALUES
+			('RahasiaOp','HUGOTOGEL','OREGON03','["1022"]','K1','DONE','selesai','Periode 120 OREGON03: angka 1022 masuk [Omset 21,700 · Referal 0 · Menang 0]','2026-10-24 20:00:00'),
+			('RahasiaOp','HUGOTOGEL','OREGON03','["1022"]','manual:x','DONE','prediksi','Total dibaca 9999','2026-10-24 20:30:00'),
+			('RahasiaOp','FOLATOTO','OREGON03','["1022"]','K2','FAILED','cek','Belum login (halaman login.php) — PHPSESSID kedaluwarsa','2026-10-24 21:00:00')`);
+		const h = await deepHealth(ctx.env, now);
+		expect(h.ok).toBe(true);
+		expect(h.autoInput).toMatchObject({ switchOn: 1, accounts: 2, sessions: 1, lastSessionSaved: "2026-10-20 10:00:00" });
+		expect(h.autoInput!.lastJobs).toEqual([
+			{ status: "FAILED", stage: "cek", at: "2026-10-24 21:00:00", why: "sesi admin habis" },
+			{ status: "DONE", stage: "selesai", at: "2026-10-24 20:00:00", why: "dihitung + Total tercatat" },
+		]);
+		const out = JSON.stringify(h);
+		for (const leak of ["sangatrahasia", "RahasiaOp", "1022", "21,700", "9999", "login.php"]) expect(out).not.toContain(leak);
+	});
+
+	it("tabel belum ada / Turso mati -> ringkasan kosong, kesehatan panel TIDAK ikut gagal karenanya", async () => {
+		const h = await deepHealth(ctx.env, now);
+		expect(h.ok).toBe(true);
+		expect(h.autoInput).toMatchObject({ switchOn: 0, sessions: 0, lastJobs: [] });
+	});
+
+	it("kategori alasan", () => {
+		expect(autoInputWhy("PHPSESSID belum disimpan.", "FAILED")).toBe("PHPSESSID belum disimpan");
+		expect(autoInputWhy("Pasaran X tidak di-auto — input manual.", "SKIPPED")).toBe("pasaran tidak di-auto");
+		expect(autoInputWhy("x [Omset belum terbaca: HTTP 404]", "DONE")).toBe("dihitung, Total belum terbaca");
+		expect(autoInputWhy("", "QUEUED")).toBe("antre (belum dijalankan browser)");
+		expect(autoInputWhy("Admin tidak menjawab 25 dtk (timeout)", "FAILED")).toBe("admin tidak menjawab (timeout)");
 	});
 });

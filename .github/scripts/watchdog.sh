@@ -36,6 +36,9 @@ else
   problems+=("/health?deep=1 tidak menjawab normal (HTTP $code): $(head -c 200 "$TMP/h.json" 2>/dev/null | tr -d '\n')")
 fi
 
+# Ringkasan Auto Prediksi (hanya hitungan & kategori alasan; tidak memengaruhi hasil) -> terbaca di log run ini.
+jq -r 'if .autoInput then "Auto Prediksi: saklar ON \(.autoInput.switchOn // 0)/\(.autoInput.accounts // 0) akun · PHPSESSID tersimpan \(.autoInput.sessions // 0) (terakhir \(.autoInput.lastSessionSaved // "-")) · job terakhir: \([(.autoInput.lastJobs // [])[] | "\(.at) \(.status)/\(.stage) (\(.why))"] | join(" | "))\(if .autoInput.error then " · galat: \(.autoInput.error)" else "" end)" else empty end' "$TMP/h.json" 2>/dev/null || true
+
 # ---- 2) jalur /api (dipakai semua menu): aksi palsu HARUS dijawab JSON "Aksi tidak dikenal"
 body=$(curl -sS -m 20 -X POST -H 'content-type: application/json' -d '{"action":"__watchdog__"}' "$BASE/api" 2>/dev/null || true)
 if ! printf '%s' "$body" | grep -q 'Aksi tidak dikenal'; then
