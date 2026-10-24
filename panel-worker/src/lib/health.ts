@@ -64,7 +64,7 @@ export function autoInputWhy(detail: string, status: string): string {
 	return "lain";
 }
 
-/** Bagian TEKNIS halaman admin yang diterima (HTTP, redirect, kode pasaran, judul) -- tanpa isi halaman (bisa memuat nama agen). */
+/** Bagian TEKNIS halaman admin yang diterima (HTTP, redirect, kode pasaran, judul, cuplikan isi dengan nama agen disensor). */
 export function autoInputPageMeta(detail: string): string {
 	const d = String(detail || "");
 	const http = d.match(/HTTP (\d{3}) \[([^\]]*)\]/);
@@ -72,7 +72,9 @@ export function autoInputPageMeta(detail: string): string {
 	const psr = d.match(/psr=(p\d+)/)?.[1];
 	const pool = d.match(/pool=(\S+)/)?.[1];
 	const title = d.match(/judul "([^"]{0,80})"/)?.[1];
-	return [`HTTP ${http[1]}`, http[2] ? `redirect ${http[2].slice(0, 80)}` : "", psr ? `psr=${psr}` : "", pool ? `pool=${pool.slice(0, 40)}` : "", title !== undefined ? `judul "${title}"` : ""].filter(Boolean).join(", ");
+	// Cuplikan isi halaman: perlu untuk tahu KENAPA form tidak ada (pesan admin). Nama agen ("Agent (xxx)") & email disensor.
+	const body = d.match(/isi "([^"]*)"?/)?.[1]?.replace(/Agent\s*\([^)]*\)/gi, "Agent (…)").replace(/\S+@\S+/g, "…").replace(/\s+/g, " ").trim().slice(0, 160);
+	return [`HTTP ${http[1]}`, http[2] ? `redirect ${http[2].slice(0, 80)}` : "", psr ? `psr=${psr}` : "", pool ? `pool=${pool.slice(0, 40)}` : "", title !== undefined ? `judul "${title}"` : "", body !== undefined ? `isi "${body}"` : ""].filter(Boolean).join(", ");
 }
 
 /** Ringkasan Auto Prediksi untuk watchdog: hanya hitungan & kategori (tanpa username, angka, PHPSESSID, atau isi halaman). */

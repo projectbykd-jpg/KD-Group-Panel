@@ -135,10 +135,10 @@ describe("deepHealth: ringkasan Auto Prediksi untuk watchdog (tanpa data rahasia
 		expect(h.autoInput).toMatchObject({ switchOn: 0, sessions: 0, lastJobs: [] });
 	});
 
-	it("meta halaman admin: HTTP/redirect/psr/pool/judul saja, TANPA isi halaman (nama agen dsb.)", () => {
+	it("meta halaman admin: HTTP/redirect/psr/pool/judul + cuplikan isi dengan nama agen DISENSOR", () => {
 		const d = 'Halaman Nomor Keluar OREGON03 tidak berisi form input (sesi login OK) — kemungkinan ... Diterima: HTTP 200 [302 admin_home.php] psr=p21545 pool=pool-14-0-1- judul "Administration" isi "Agent (rahasiaagen) Selamat datang"';
 		const m = autoInputPageMeta(d);
-		expect(m).toBe('HTTP 200, redirect 302 admin_home.php, psr=p21545, pool=pool-14-0-1-, judul "Administration"');
+		expect(m).toBe('HTTP 200, redirect 302 admin_home.php, psr=p21545, pool=pool-14-0-1-, judul "Administration", isi "Agent (…) Selamat datang"');
 		expect(m).not.toContain("rahasiaagen");
 		expect(autoInputPageMeta("Sesi habis")).toBe("");
 	});
