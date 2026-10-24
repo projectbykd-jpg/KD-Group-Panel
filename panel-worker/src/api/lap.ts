@@ -10,6 +10,7 @@ import { logActivity } from "../lib/activity";
 import { tsNow, tsPlusMinutes } from "../lib/time";
 import { getTurso } from "../lib/turso"; // tabel lap_* ada di Turso, bukan D1
 import { rawJson } from "../lib/respond";
+import { cookieHeader, getSessions, parsePhpSessId, siteBrand } from "../lib/auto-input";
 import {
 	LapCreds,
 	extractPureUsername,
@@ -802,6 +803,27 @@ export async function lapJobStart(env: Env, jobId: string, key: string) {
 	};
 }
 
+/**
+ * Nama website untuk judul "Laporan Register" (◉➣ HUGOTOGEL), ditentukan dari Cookie Admin di Setting:
+ *  1. PHPSESSID-nya sama dengan cookie salah satu website di menu Auto Prediksi -> nama website itu;
+ *  2. kalau tidak cocok (cookie baru diperbarui di satu tempat), dari isi cookie itu sendiri ("<agen>=HUGOTOGEL.COM").
+ * Kosong bila tidak bisa dipastikan -- laporan tampil tanpa judul seperti dulu (tidak pernah menebak).
+ */
+export async function lapAdminWebsite(env: Env, username: string, cookieAdmin: string): Promise<string> {
+	const sid = parsePhpSessId(cookieHeader(String(cookieAdmin ?? "").trim()));
+	if (sid) {
+		try {
+			for (const s of await getSessions(env, username)) {
+				if (parsePhpSessId(cookieHeader(s.phpsessid)) === sid) return siteBrand(s.website) ?? s.website.toUpperCase();
+			}
+		} catch {
+			/* tabel Auto Prediksi belum ada / gagal dibaca -> pakai isi cookie */
+		}
+	}
+	const fromCookie = String(cookieAdmin ?? "").toUpperCase().match(/=\s*([A-Z0-9]{2,20}(?:TOGEL|TOTO))\.COM\b/)?.[1];
+	return fromCookie ?? "";
+}
+
 /** Dipanggil oleh GitHub Actions setelah scrape selesai. */
 export async function lapJobResult(
 	env: Env,
@@ -832,6 +854,11 @@ export async function lapJobResult(
 	if (ok && data && typeof data === "object") {
 		const save: Record<string, unknown[]> = {};
 		for (const k of Object.keys(data)) if (Array.isArray(data[k])) save[k] = data[k];
+		const meta = save.registerMeta?.[0];
+		if (meta && typeof meta === "object") {
+			const website = await lapAdminWebsite(env, row.username, (await lapLoadCreds(env, row.username)).cookieAdmin);
+			if (website) save.registerMeta = [{ ...(meta as Record<string, unknown>), website }, ...save.registerMeta!.slice(1)];
+		}
 		if (Object.keys(save).length) await lapSaveResults(env, row.username, save);
 	}
 	const errMsg = errors && Object.keys(errors).length ? " | error: " + Object.values(errors).join("; ") : "";
