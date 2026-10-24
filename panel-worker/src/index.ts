@@ -124,6 +124,7 @@ import {
 	botNewsToggleSource,
 } from "./api/bot";
 import { tgChannelRun } from "./lib/tg-channel";
+import { db1Gate, db1Settle } from "./lib/db1-gate";
 import { botNewsRun, disableGnewsSources, newsPruneQueueDaily, newsPullSources, publicNewsBanner, publicNewsDetail, publicNewsExport, publicNewsList, publicNewsPopular, publicNewsRandom, publicNewsRssXml, publicNewsSitemapXml, seedCategorySources } from "./lib/bot-news";
 import {
 	livechatBotPull,
@@ -660,6 +661,12 @@ export default {
 			// panggilan supaya selesai jauh di bawah 30 detik, bukan menyembunyikan
 			// waktu prosesnya dari cron.
 			const out: Record<string, unknown> = { ok: true, job, ts: Date.now() };
+			// DB 1 (BOT News) kena kuota -> job BOT News otomatis dilewati tanpa menyentuh DB 1 / memicu GitHub Actions; DB 1 diuji
+			// sekali per sys_db1_probe_hours (lib/db1-gate.ts). Job lain di "all" tetap jalan.
+			const newsJob = job === "all" || job === "news" || job === "pullnews" || job === "githubnews";
+			const db1 = newsJob ? await db1Gate(env) : null;
+			const newsOn = !db1 || db1.open;
+			if (db1 && !db1.open) out.db1 = db1.message;
 			try {
 				if (job === "autopost" || job === "all") {
 					out.autopost = await runAutoPostRouter(env);
@@ -701,7 +708,7 @@ export default {
 					await dispatchTotoMacau(env);
 					out.githubtoto = "dispatched";
 				}
-				if (job === "news" || job === "all") {
+				if ((job === "news" || job === "all") && newsOn) {
 					// mode/count OPSIONAL (dari query string) -- dipakai kalau cron
 					// EKSTERNAL manggil job=news khusus mode=blogger atau mode=site
 					// SENDIRI-SENDIRI (2 invocation terpisah, masing² dapat jatah 50
@@ -719,7 +726,7 @@ export default {
 				// komentar di botNewsRun): gabung pull+proses dalam 1 invocation kena
 				// "Too many subrequests" berulang kali. Dipanggil cron eksternal
 				// TERPISAH (mis. tiap 10-15 menit), aman sendiri (~10 subrequest).
-				if (job === "pullnews") {
+				if (job === "pullnews" && newsOn) {
 					out.pull = await newsPullSources(env);
 				}
 				// Manual/diagnosa: paksa jalankan pembersihan antrean sekarang juga
@@ -737,7 +744,7 @@ export default {
 				// tapi PEMICUNYA dari cron eksternal (cron-job.org) yang jauh lebih
 				// presisi drpd jadwal internal GitHub. count/target opsional dari query
 				// string, sama seperti job=news dulu.
-				if (job === "githubnews") {
+				if (job === "githubnews" && newsOn) {
 					const qCount = url.searchParams.get("count");
 					const qTarget = url.searchParams.get("target") || undefined;
 					out.githubnews = await dispatchNewsTurbo(env, qCount ? Number(qCount) : undefined, qTarget);
@@ -790,6 +797,7 @@ export default {
 				out.ok = false;
 				out.error = e instanceof Error ? e.message : String(e);
 			}
+			if (newsJob && (await db1Settle(env))) out.db1 = "DB 1 kena kuota Turso -> BOT News otomatis dijeda, diuji ulang berkala (Admin > Pengaturan Sistem > Bot News).";
 			return json(out);
 		}
 
@@ -823,9 +831,13 @@ export default {
 			// Sekali/hari (guard sendiri di dalam fungsinya) -- buang antrean berita
 			// yang belum diproses & lebih lama dari kemarin jam 22:00 WIB. TIDAK
 			// PERNAH menyentuh artikel yang sudah tayang (lihat komentar di fungsinya).
-			await newsPruneQueueDaily(env).catch(cronFail(env, "prune antrean berita"));
-			// Auto Posting channel Telegram (nonaktif = 1 query konfigurasi saja; jeda/batas harian diatur di Admin > Pengaturan Sistem).
-			await tgChannelRun(env).catch(cronFail(env, "posting channel telegram"));
+			// Keduanya memakai DB 1 (BOT News): saat DB 1 kena kuota dilewati tanpa menyentuh DB 1, diuji sekali per periode (lib/db1-gate.ts).
+			if ((await db1Gate(env)).open) {
+				await newsPruneQueueDaily(env).catch(cronFail(env, "prune antrean berita"));
+				// Auto Posting channel Telegram (nonaktif = 1 query konfigurasi saja; jeda/batas harian diatur di Admin > Pengaturan Sistem).
+				await tgChannelRun(env).catch(cronFail(env, "posting channel telegram"));
+				await db1Settle(env);
+			}
 			// Notifikasi admin ke Telegram: pindai kegagalan final (Auto Prediksi, Toto Macau), laporan harian, lalu kirim antrean.
 			await adminNotifyTick(env).catch(cronFail(env, "notifikasi admin"));
 		} else {

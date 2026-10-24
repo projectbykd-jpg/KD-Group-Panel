@@ -59,6 +59,7 @@ export function tursoGeneration(): number {
 }
 /** Hanya untuk test. */
 export function resetTursoForTest(): void {
+	primaryQuotaError = null;
 	for (const k of Object.keys(clients) as TursoTarget[]) delete clients[k];
 }
 
@@ -85,7 +86,20 @@ async function onTarget<T>(env: Env, sqls: string[], fn: (c: Client) => Promise<
 		throw new Error("Satu batch Turso mencampur tabel BOT News (DB 1) dan tabel panel (DB 2) — pisahkan menjadi dua batch.");
 	}
 	const t: TursoTarget = targets.values().next().value ?? "primary";
-	return withTransientRetry(() => fn(client(env, t)));
+	return withTransientRetry(() => fn(client(env, t))).catch((e: unknown) => {
+		const msg = e instanceof Error ? e.message : String(e);
+		if (t === "primary" && TURSO_QUOTA_RE.test(msg)) primaryQuotaError = msg;
+		throw e;
+	});
+}
+
+// Galat kuota terakhir yang BENAR-BENAR datang dari DB 1 (bukan DB 2), dicatat di sini karena pemanggil sering membungkus
+// ulang galatnya. db1-gate.ts mengambilnya (db1Settle) untuk menjeda BOT News -- lihat komentar di sana.
+let primaryQuotaError: string | null = null;
+export function takePrimaryQuotaError(): string | null {
+	const e = primaryQuotaError;
+	primaryQuotaError = null;
+	return e;
 }
 
 const clean = (args: unknown[]): InArgs => args.map((a) => (a === undefined ? null : a)) as InArgs;

@@ -5,6 +5,8 @@ const turso = vi.hoisted(() => ({
 	broken: false,
 	newsBlocked: false,
 	spare: true,
+	lastQuota: null as string | null,
+	newsReads: 0,
 }));
 vi.mock("../src/lib/turso", () => ({
 	getTurso: () => {
@@ -15,9 +17,21 @@ vi.mock("../src/lib/turso", () => ({
 		const real = turso.current!.d1 as { prepare: (q: string) => unknown };
 		// DB 1 (BOT News) diblokir kuota, DB 2 (panel) tetap sehat
 		const blocked = async () => {
-			throw new Error("BLOCKED: reads are blocked, do you need to upgrade your plan?");
+			turso.lastQuota = "BLOCKED: reads are blocked, do you need to upgrade your plan?";
+			throw new Error(turso.lastQuota);
 		};
-		return { prepare: (q: string) => (turso.newsBlocked && /bot_kv/.test(q) ? { all: blocked, first: blocked } : real.prepare(q)) };
+		return {
+			prepare: (q: string) => {
+				if (/bot_kv/.test(q)) turso.newsReads++;
+				return turso.newsBlocked && /bot_kv/.test(q) ? { all: blocked, first: blocked } : real.prepare(q);
+			},
+		};
+	},
+	spareConfigured: () => turso.spare,
+	takePrimaryQuotaError: () => {
+		const e = turso.lastQuota;
+		turso.lastQuota = null;
+		return e;
 	},
 	tursoLayout: () => ({ news: "primary", panel: turso.spare ? "spare" : "primary", spareConfigured: turso.spare }),
 	TURSO_QUOTA_RE: /\bBLOCKED\b|reads are blocked|writes are blocked|upgrade your plan/,
@@ -26,6 +40,7 @@ vi.mock("../src/lib/turso", () => ({
 
 import { autoInputPageMeta, autoInputWhy, deepHealth } from "../src/lib/health";
 import { resetSysCache } from "../src/lib/settings";
+import { resetDb1GateForTest } from "../src/lib/db1-gate";
 import { fakeEnv, fakeTurso } from "./helpers/fake-env";
 
 const now = Date.parse("2026-10-11T00:30:00Z");
@@ -37,6 +52,9 @@ beforeEach(() => {
 	turso.broken = false;
 	turso.newsBlocked = false;
 	turso.spare = true;
+	turso.lastQuota = null;
+	turso.newsReads = 0;
+	resetDb1GateForTest();
 	ctx = fakeEnv();
 	resetSysCache();
 	Object.assign(ctx.env, { TURSO_URL: "libsql://fake", TURSO_TOKEN: "x" });
@@ -81,6 +99,38 @@ describe("deepHealth + Turso", () => {
 		expect(h.checks.turso.note).toContain("DB 1 News: BERMASALAH");
 		expect(h.warnings.join(" ")).toContain("DB 1 (BOT News) kena kuota Turso");
 		expect(h.warnings.join(" ")).toContain("panel tetap jalan di DB 2");
+		expect(h.warnings.join(" ")).toContain("diuji ulang tiap 24 jam");
+	});
+
+	const at = (t: number) => {
+		ctx.db.prepare(`UPDATE settings SET value = ? WHERE key = 'cron_heartbeat'`).run(new Date(t + 7 * 3600_000).toISOString().slice(0, 19).replace("T", " ") + " | cron=* * * * *");
+		return deepHealth(ctx.env, t);
+	};
+
+	it("DB 1 kuota: peringatan SEKALI, lalu DB 1 tidak disentuh lagi (watchdog tidak merah tiap 5 menit) sampai uji harian", async () => {
+		turso.newsBlocked = true;
+		expect((await deepHealth(ctx.env, now)).warnings).toHaveLength(1);
+		turso.newsReads = 0;
+		for (const min of [5, 10, 60, 23 * 60]) {
+			const h = await at(now + min * 60_000);
+			expect(h.ok).toBe(true);
+			expect(h.warnings).toEqual([]);
+			expect(h.newsDb1?.paused).toBe(true);
+			expect(h.newsDb1?.message).toContain("BOT News dijeda");
+			expect(h.checks.turso.note).toContain("DB 1 News: DIJEDA (kuota)");
+		}
+		expect(turso.newsReads).toBe(0);
+		// 24 jam kemudian: diuji sekali; masih kuota -> tetap dijeda tanpa peringatan baru
+		let h = await at(now + 24 * 3600_000 + 60_000);
+		expect(turso.newsReads).toBe(1);
+		expect(h.warnings).toEqual([]);
+		expect(h.newsDb1?.paused).toBe(true);
+		// hari berikutnya DB 1 sudah pulih -> uji berhasil, BOT News Online lagi
+		turso.newsBlocked = false;
+		h = await at(now + 48 * 3600_000 + 120_000);
+		expect(h.newsDb1).toEqual({ paused: false, message: "DB 1 pulih — BOT News jalan lagi." });
+		expect(h.checks.turso.note).toContain("DB 1 News: ok");
+		expect((await at(now + 48 * 3600_000 + 180_000)).newsDb1).toBeUndefined();
 	});
 
 	it("tidak lagi memperingatkan 'memakai database CADANGAN' (itu kini pembagian yang disengaja)", async () => {

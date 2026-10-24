@@ -37,7 +37,8 @@ Perintah pemilik: semua pengaturan yang masuk akal diubah admin harus ada di men
   Asisten tidak membaca `bot_kv`), Invest, Toto, WD, notifikasi). Rute ada di
   `src/lib/turso.ts` (`tursoTargetFor`); tabel BOT News baru WAJIB ditambahkan ke `NEWS_TABLES_RE`. Jangan menambah
   failover/sinkron/failback antar database, dan jangan mencampur tabel News + panel dalam satu batch (ditolak).
-  Dijaga `test/turso-split.spec.ts`. Penanda skema lazy tetap memakai `tursoGeneration()`/`sharedOnce(..., tursoGeneration)`
+  Dijaga `test/turso-split.spec.ts`. DB 1 kena kuota -> `src/lib/db1-gate.ts` MENJEDA semua proses otomatis BOT News (tanpa
+  spam run merah/galat) dan menguji DB 1 sekali per `sys_db1_probe_hours` (bawaan 24 jam); ini jeda, BUKAN failover -- jangan dihapus. Penanda skema lazy tetap memakai `tursoGeneration()`/`sharedOnce(..., tursoGeneration)`
   (`test/turso-schema-parity.spec.ts`).
 - Aset UI (ikon, font, skrip) sebisa mungkin disajikan dari server panel sendiri, bukan CDN (ikon Font Awesome:
   `vendor/fa-<versi>` dari devDependency, disalin `scripts/build-ui.mjs`).

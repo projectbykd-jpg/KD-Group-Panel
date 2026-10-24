@@ -3,6 +3,7 @@ import { ghToken, newsTurboRepo } from "../lib/integrations";
 import { requireSession } from "./auth";
 import { logActivity } from "../lib/activity";
 import { getTurso } from "../lib/turso";
+import { db1Gate } from "../lib/db1-gate";
 import {
 	AI_DEFAULT_VALID_DAYS,
 	assertKeyNotReused,
@@ -138,9 +139,17 @@ export async function botNewsDeleteSource(env: Env, token: string, data: Record<
 	return botNewsSnapshot(env);
 }
 
+/** Tombol manual pemilik: DB 1 yang sedang dijeda karena kuota langsung DIUJI sekarang (tanpa menunggu jadwal harian);
+ *  pulih -> BOT News otomatis jalan lagi, masih kuota -> pesan jelas, bukan galat Turso mentah. */
+async function db1ManualGate(env: Env): Promise<void> {
+	const g = await db1Gate(env, { force: true });
+	if (!g.open) throw new Error(g.message + " Baru saja diuji ulang: DB 1 masih ditolak Turso (kuota/paket).");
+}
+
 /** Tombol "PROSES KE BLOGGER" -- HANYA loop Blogger, tidak menyentuh situs sendiri sama sekali. */
 export async function botNewsRunNow(env: Env, token: string, count?: number) {
 	const s = await gate(env, token);
+	await db1ManualGate(env);
 	// Abaikan flag enabled untuk run manual, tapi tetap hormati batas harian.
 	// count dibatasi di botNewsRun (maks 5x sekali klik) -> jaga anggaran
 	// subrequest Cloudflare (Gemini+Blogger+Turso per artikel).
@@ -159,6 +168,7 @@ export async function botNewsRunNow(env: Env, token: string, count?: number) {
 /** Tombol "PROSES KE SITUS SENDIRI" -- HANYA loop situs sendiri, tidak pernah menyentuh/posting ke Blogger. */
 export async function botNewsRunSiteNow(env: Env, token: string, count?: number) {
 	const s = await gate(env, token);
+	await db1ManualGate(env);
 	const r = await botNewsRun(env, { force: true, count: count ? Number(count) : 1, mode: "site" });
 	await logActivity(env, s.username, "BOT NEWS RUN SITUS", `Manual (Situs Sendiri): feed +${r.pulled}, +${r.siteOnly} artikel`, "BERHASIL", "");
 	return { success: true, ...r, snapshot: await botNewsSnapshot(env) };
@@ -235,6 +245,7 @@ export async function dispatchNewsTurbo(env: Env, count?: number, target?: strin
 
 export async function botNewsRunViaGithub(env: Env, token: string, count?: number, target?: string) {
 	const s = await gate(env, token);
+	await db1ManualGate(env);
 	// Kolom "Jumlah artikel" dikosongkan di panel = SENGAJA minta "proses
 	// semua" (full drain) -- beda dari tick otomatis yg tidak pernah minta ini.
 	const { targetLabel, n } = await dispatchNewsTurbo(env, count, target, !count);
