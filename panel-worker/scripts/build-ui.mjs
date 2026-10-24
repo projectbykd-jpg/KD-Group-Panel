@@ -114,7 +114,7 @@ const ARG_MAP = {
 	lapGetSpecialOps: ["token"],
 	lapSaveSpecialOps: ["token", "operators"],
 	lapRunAdmin: ["token", "startDate", "endDate", "website"],
-	lapMotionImport: ["token", "startDate", "endDate", "depoPaidRows", "depoCreateRows", "wdRows"],
+	lapMotionImport: ["token", "startDate", "endDate", "depoPaidRows", "depoCreateRows", "wdRows", "website"],
 	lapMozartImport: ["token", "startDate", "endDate", "depositRows", "withdrawRows", "accountsRaw", "panelsRaw"],
 	lapAdminStatus: ["token", "jobId"],
 	lapJobs: ["token"],

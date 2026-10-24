@@ -194,8 +194,23 @@ async function loadModuleRows(env: Env, username: string, modules: string[], sit
 }
 
 export async function lapLoadResultsModulesRaw(env: Env, username: string, modules: string[], site = ""): Promise<string> {
-	const rows = await loadModuleRows(env, username, modules, site);
+	const rows = await withSharedMotion(env, username, modules, site, await loadModuleRows(env, username, modules, site));
 	return rows.length ? lapResultsJsonRaw(rows) : "{}";
+}
+
+/**
+ * Lap Motion per website: modul yang BELUM punya data khusus website ini (data lama sebelum per website, atau Withdraw
+ * yang tidak bisa dipisah karena barisnya tidak membawa vendor) memakai data gabungan semua website. Daftarnya dikirim
+ * sebagai "_motionShared" supaya browser memberi label "gabungan" -- tidak pernah diam-diam dianggap milik satu website.
+ */
+async function withSharedMotion(env: Env, username: string, modules: string[], site: string, rows: { module: string; data: string }[]) {
+	if (!site) return rows;
+	const have = new Set(rows.map((r) => r.module));
+	const missing = LAP_MOTION_MODULES.filter((m) => modules.includes(m) && !have.has(m));
+	if (!missing.length) return rows;
+	const shared = await loadModuleRows(env, username, missing, "");
+	if (!shared.length) return rows;
+	return [...rows, ...shared, { module: "_motionShared", data: JSON.stringify(shared.map((r) => r.module)) }];
 }
 
 export async function lapLoadResultsModules(env: Env, username: string, modules: string[], site = ""): Promise<Record<string, unknown>> {
@@ -212,11 +227,13 @@ export async function lapLoadResultsModules(env: Env, username: string, modules:
 // "panel:4 = HUGOTOGEL"). User tanpa daftar website (mis. ADMIN) tetap memakai satu set Setting seperti dulu (site "").
 // -------------------------------------------------------------------------
 export const LAP_ADMIN_MODULES = ["register", "registerMeta", "reportAgent", "reportAgentMeta", "checkCoin", "checkCoinMeta", "idSelisih", "withdrawPgaIdf"];
-const ADMIN_MODULE_SET = new Set(LAP_ADMIN_MODULES);
+/** Modul Lap Motion juga per website (Deposit ditarik per Vendor ID website; Withdraw dipisah bila barisnya membawa vendor). */
+export const LAP_MOTION_MODULES = ["_motionMeta", "motionDpPga", "motionPendingError", "motionWd"];
+const SITE_MODULE_SET = new Set([...LAP_ADMIN_MODULES, ...LAP_MOTION_MODULES]);
 
-/** Kunci baris lap_result: modul Lap Admin milik satu website -> "modul@WEBSITE"; lainnya (Motion/Mozart, mode lama) apa adanya. */
+/** Kunci baris lap_result: modul Lap Admin/Motion milik satu website -> "modul@WEBSITE"; lainnya (Mozart, mode lama) apa adanya. */
 export function lapSiteKey(module: string, site: string): string {
-	return site && ADMIN_MODULE_SET.has(module) ? `${module}@${site}` : module;
+	return site && SITE_MODULE_SET.has(module) ? `${module}@${site}` : module;
 }
 
 /** Generasi database Turso (tursoGeneration) tempat tabel ini sudah disiapkan; -1 = belum. */
@@ -231,11 +248,18 @@ async function ensureLapAdminSiteTable(env: Env): Promise<void> {
 				website      TEXT NOT NULL,
 				link_admin   TEXT NOT NULL DEFAULT '',
 				cookie_admin TEXT NOT NULL DEFAULT '',
+				vendor_id_motion TEXT NOT NULL DEFAULT '',
 				updated_at   TEXT NOT NULL DEFAULT '',
 				PRIMARY KEY (username, website)
 			)`,
 		)
 		.run();
+	try {
+		// tabel yang sudah dibuat sebelum kolom Vendor ID per website ada
+		await getTurso(env).prepare(`ALTER TABLE lap_admin_site ADD COLUMN vendor_id_motion TEXT NOT NULL DEFAULT ''`).run();
+	} catch {
+		/* kolom sudah ada */
+	}
 	lapAdminSiteGen = gen;
 }
 /** Hanya untuk test (tiap test memakai database baru). */
@@ -257,6 +281,8 @@ export interface LapAdminSite {
 	source: "setting" | "auto-prediksi" | "";
 	/** 4 karakter terakhir PHPSESSID Auto Prediksi (tidak pernah nilai penuh). */
 	autoHint: string;
+	/** Vendor ID Motion website ini (Motion: tiap website punya vendor_id sendiri; boleh beberapa, dipisah koma). */
+	vendorIdMotion: string;
 }
 
 /** Kredensial Lap Admin untuk tiap website (satu query tabel + satu baca sesi Auto Prediksi). */
@@ -264,7 +290,7 @@ export async function lapAdminSites(env: Env, username: string, websites: string
 	if (!websites.length) return [];
 	await ensureLapAdminSiteTable(env);
 	const rows =
-		(await getTurso(env).prepare(`SELECT website, link_admin, cookie_admin FROM lap_admin_site WHERE username = ?`).bind(username).all<Record<string, string>>())
+		(await getTurso(env).prepare(`SELECT website, link_admin, cookie_admin, vendor_id_motion FROM lap_admin_site WHERE username = ?`).bind(username).all<Record<string, string>>())
 			.results ?? [];
 	const saved = new Map(rows.map((r) => [String(r.website), r]));
 	let sessions: Awaited<ReturnType<typeof getSessions>> = [];
@@ -287,27 +313,38 @@ export async function lapAdminSites(env: Env, username: string, websites: string
 			settingCookie,
 			source: settingCookie ? "setting" : autoCookie ? "auto-prediksi" : "",
 			autoHint: auto?.phpsessid ? sessionHint(auto.phpsessid) : "",
+			vendorIdMotion: String(row?.vendor_id_motion ?? ""),
 		};
 	});
 }
 
 /** Simpan isian Setting satu website. undefined = pertahankan; cookie "" = kosongkan (kembali memakai cookie Auto Prediksi). */
-export async function lapSaveAdminSite(env: Env, username: string, website: string, data: { linkAdmin?: string; cookieAdmin?: string }): Promise<void> {
+export async function lapSaveAdminSite(
+	env: Env,
+	username: string,
+	website: string,
+	data: { linkAdmin?: string; cookieAdmin?: string; vendorIdMotion?: string },
+): Promise<void> {
 	await ensureLapAdminSiteTable(env);
 	const cur = await getTurso(env)
-		.prepare(`SELECT link_admin, cookie_admin FROM lap_admin_site WHERE username = ? AND website = ?`)
+		.prepare(`SELECT link_admin, cookie_admin, vendor_id_motion FROM lap_admin_site WHERE username = ? AND website = ?`)
 		.bind(username, website)
-		.first<{ link_admin: string; cookie_admin: string }>();
+		.first<{ link_admin: string; cookie_admin: string; vendor_id_motion: string }>();
 	// Link sama dengan server admin bawaan disimpan kosong: tetap ikut otomatis bila server website diganti di Data Master.
 	const typed = data.linkAdmin === undefined ? undefined : data.linkAdmin.trim() ? hostOnly(data.linkAdmin) : "";
 	const link = typed === undefined ? String(cur?.link_admin ?? "") : typed === hostOnly(defaultAdminBase(website)) ? "" : typed;
 	const cookie = data.cookieAdmin === undefined ? String(cur?.cookie_admin ?? "") : data.cookieAdmin.trim();
+	const vendor =
+		data.vendorIdMotion === undefined
+			? String(cur?.vendor_id_motion ?? "")
+			: data.vendorIdMotion.split(/[\s,]+/).map((v) => v.trim()).filter((v) => /^[A-Za-z0-9_-]{1,40}$/.test(v)).join(",");
 	await getTurso(env)
 		.prepare(
-			`INSERT INTO lap_admin_site (username, website, link_admin, cookie_admin, updated_at) VALUES (?, ?, ?, ?, ?)
-			 ON CONFLICT(username, website) DO UPDATE SET link_admin = excluded.link_admin, cookie_admin = excluded.cookie_admin, updated_at = excluded.updated_at`,
+			`INSERT INTO lap_admin_site (username, website, link_admin, cookie_admin, vendor_id_motion, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(username, website) DO UPDATE SET link_admin = excluded.link_admin, cookie_admin = excluded.cookie_admin,
+			   vendor_id_motion = excluded.vendor_id_motion, updated_at = excluded.updated_at`,
 		)
-		.bind(username, website, link, cookie, tsNow())
+		.bind(username, website, link, cookie, vendor, tsNow())
 		.run();
 }
 
