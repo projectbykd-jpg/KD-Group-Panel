@@ -64,6 +64,17 @@ export function autoInputWhy(detail: string, status: string): string {
 	return "lain";
 }
 
+/** Bagian TEKNIS halaman admin yang diterima (HTTP, redirect, kode pasaran, judul) -- tanpa isi halaman (bisa memuat nama agen). */
+export function autoInputPageMeta(detail: string): string {
+	const d = String(detail || "");
+	const http = d.match(/HTTP (\d{3}) \[([^\]]*)\]/);
+	if (!http) return "";
+	const psr = d.match(/psr=(p\d+)/)?.[1];
+	const pool = d.match(/pool=(\S+)/)?.[1];
+	const title = d.match(/judul "([^"]{0,80})"/)?.[1];
+	return [`HTTP ${http[1]}`, http[2] ? `redirect ${http[2].slice(0, 80)}` : "", psr ? `psr=${psr}` : "", pool ? `pool=${pool.slice(0, 40)}` : "", title !== undefined ? `judul "${title}"` : ""].filter(Boolean).join(", ");
+}
+
 /** Ringkasan Auto Prediksi untuk watchdog: hanya hitungan & kategori (tanpa username, angka, PHPSESSID, atau isi halaman). */
 async function autoInputSummary(env: Env): Promise<Record<string, unknown>> {
 	const db = getTurso(env);
@@ -76,10 +87,14 @@ async function autoInputSummary(env: Env): Promise<Record<string, unknown>> {
 	};
 	const cfg = await one<{ n_on: number; n: number }>(`SELECT SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END) AS n_on, COUNT(*) AS n FROM auto_input_config`);
 	const ses = await one<{ n: number; last: string }>(`SELECT COUNT(*) AS n, MAX(updated_at) AS last FROM auto_input_session WHERE phpsessid <> ''`);
-	let jobs: { status: string; stage: string; at: string; why: string }[] = [];
+	let jobs: { status: string; stage: string; at: string; why: string; market: string; page?: string }[] = [];
 	try {
-		const r = await db.prepare(`SELECT status, stage, created_at, detail FROM auto_input_job WHERE result_key NOT LIKE 'manual:%' ORDER BY id DESC LIMIT 6`).all<Record<string, unknown>>();
-		jobs = (r.results ?? []).map((x) => ({ status: String(x.status), stage: String(x.stage ?? ""), at: String(x.created_at ?? ""), why: autoInputWhy(String(x.detail ?? ""), String(x.status)) }));
+		const r = await db.prepare(`SELECT status, stage, created_at, market, detail FROM auto_input_job WHERE result_key NOT LIKE 'manual:%' ORDER BY id DESC LIMIT 6`).all<Record<string, unknown>>();
+		jobs = (r.results ?? []).map((x) => {
+			const detail = String(x.detail ?? "");
+			const page = autoInputPageMeta(detail);
+			return { status: String(x.status), stage: String(x.stage ?? ""), at: String(x.created_at ?? ""), market: String(x.market ?? ""), why: autoInputWhy(detail, String(x.status)), ...(page ? { page } : {}) };
+		});
 	} catch {
 		/* tabel belum ada di database aktif */
 	}

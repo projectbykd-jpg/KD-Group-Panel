@@ -14,7 +14,7 @@ vi.mock("../src/lib/turso", () => ({
 	tursoGeneration: () => 0,
 }));
 
-import { autoInputWhy, deepHealth } from "../src/lib/health";
+import { autoInputPageMeta, autoInputWhy, deepHealth } from "../src/lib/health";
 import { resetSysCache } from "../src/lib/settings";
 import { fakeEnv, fakeTurso } from "./helpers/fake-env";
 
@@ -122,8 +122,8 @@ describe("deepHealth: ringkasan Auto Prediksi untuk watchdog (tanpa data rahasia
 		expect(h.ok).toBe(true);
 		expect(h.autoInput).toMatchObject({ switchOn: 1, accounts: 2, sessions: 1, lastSessionSaved: "2026-10-20 10:00:00" });
 		expect(h.autoInput!.lastJobs).toEqual([
-			{ status: "FAILED", stage: "cek", at: "2026-10-24 21:00:00", why: "sesi admin habis (PHPSESSID)" },
-			{ status: "DONE", stage: "selesai", at: "2026-10-24 20:00:00", why: "dihitung + Total tercatat" },
+			{ status: "FAILED", stage: "cek", at: "2026-10-24 21:00:00", market: "OREGON03", why: "sesi admin habis (PHPSESSID)" },
+			{ status: "DONE", stage: "selesai", at: "2026-10-24 20:00:00", market: "OREGON03", why: "dihitung + Total tercatat" },
 		]);
 		const out = JSON.stringify(h);
 		for (const leak of ["sangatrahasia", "RahasiaOp", "1022", "21,700", "9999", "login.php"]) expect(out).not.toContain(leak);
@@ -133,6 +133,14 @@ describe("deepHealth: ringkasan Auto Prediksi untuk watchdog (tanpa data rahasia
 		const h = await deepHealth(ctx.env, now);
 		expect(h.ok).toBe(true);
 		expect(h.autoInput).toMatchObject({ switchOn: 0, sessions: 0, lastJobs: [] });
+	});
+
+	it("meta halaman admin: HTTP/redirect/psr/pool/judul saja, TANPA isi halaman (nama agen dsb.)", () => {
+		const d = 'Halaman Nomor Keluar OREGON03 tidak berisi form input (sesi login OK) — kemungkinan ... Diterima: HTTP 200 [302 admin_home.php] psr=p21545 pool=pool-14-0-1- judul "Administration" isi "Agent (rahasiaagen) Selamat datang"';
+		const m = autoInputPageMeta(d);
+		expect(m).toBe('HTTP 200, redirect 302 admin_home.php, psr=p21545, pool=pool-14-0-1-, judul "Administration"');
+		expect(m).not.toContain("rahasiaagen");
+		expect(autoInputPageMeta("Sesi habis")).toBe("");
 	});
 
 	it("kategori alasan", () => {
