@@ -315,7 +315,7 @@ const ROUTES: Record<string, Handler> = {
 	// dikirim sama sekali) harus tetap `undefined` sampai ke lapMotionImport
 	// supaya bisa dibedakan dari "dikirim tapi memang kosong" (`[]`).
 	lapMotionImport: (env, b) => lapMotionImport(env, s(b.token), s(b.startDate), s(b.endDate), b.depoPaidRows, b.depoCreateRows, b.wdRows),
-	lapRunAdmin: (env, b) => lapRunAdmin(env, s(b.token), s(b.startDate), s(b.endDate)),
+	lapRunAdmin: (env, b) => lapRunAdmin(env, s(b.token), s(b.startDate), s(b.endDate), b.website),
 	lapMozartImport: (env, b) =>
 		lapMozartImport(
 			env,
@@ -329,7 +329,7 @@ const ROUTES: Record<string, Handler> = {
 		),
 	lapAdminStatus: (env, b) => lapAdminStatus(env, s(b.token), s(b.jobId)),
 	lapJobs: (env, b) => lapJobs(env, s(b.token)),
-	lapGetResults: (env, b) => lapGetResults(env, s(b.token), b.modules ?? []),
+	lapGetResults: (env, b) => lapGetResults(env, s(b.token), b.modules ?? [], b.website),
 
 	// role BOT — modul NEWS
 	botNewsStatus: (env, b) => botNewsStatus(env, s(b.token)),

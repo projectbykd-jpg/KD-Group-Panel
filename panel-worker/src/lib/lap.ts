@@ -3,6 +3,7 @@
 // Tabel lap_* ada di Turso (bukan D1) -> pakai getTurso(env).
 import { tsNow } from "./time";
 import { getTurso, tursoGeneration } from "./turso";
+import { cookieHeader, defaultAdminBase, getSessions, parsePhpSessId, sessionHint, siteBrand } from "./auto-input";
 
 export interface LapCreds {
 	linkAdmin: string;
@@ -119,13 +120,13 @@ function pick(v: string | undefined, fallback: string): string {
 // -------------------------------------------------------------------------
 // Snapshot hasil per modul
 // -------------------------------------------------------------------------
-export async function lapSaveResults(env: Env, username: string, map: Record<string, unknown[]>): Promise<void> {
+export async function lapSaveResults(env: Env, username: string, map: Record<string, unknown[]>, site = ""): Promise<void> {
 	const now = tsNow();
 	const stmts = Object.keys(map).map((mod) =>
 		getTurso(env).prepare(
 			`INSERT INTO lap_result (username, module, data, updated_at) VALUES (?, ?, ?, ?)
 			 ON CONFLICT(username, module) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`,
-		).bind(username, mod, JSON.stringify(map[mod] ?? []), now),
+		).bind(username, lapSiteKey(mod, site), JSON.stringify(map[mod] ?? []), now),
 	);
 	for (let i = 0; i < stmts.length; i += 40) await getTurso(env).batch(stmts.slice(i, i + 40));
 }
@@ -180,24 +181,189 @@ export function lapResultsJsonRaw(rows: { module: string; data: string }[]): str
 	return "{" + parts.join(",") + "}";
 }
 
-export async function lapLoadResultsModulesRaw(env: Env, username: string, modules: string[]): Promise<string> {
+/** Baris hasil modul yang diminta (modul Lap Admin milik `site`), nama modul dikembalikan tanpa akhiran "@SITE". */
+async function loadModuleRows(env: Env, username: string, modules: string[], site: string): Promise<{ module: string; data: string }[]> {
 	const wanted = [...new Set(modules.map((m) => String(m || "").trim()).filter((m) => LAP_MODULES.has(m)))];
-	if (!wanted.length) return "{}";
+	if (!wanted.length) return [];
+	const keys = wanted.map((m) => lapSiteKey(m, site));
 	const res = await getTurso(env)
-		.prepare(`SELECT module, data FROM lap_result WHERE username = ? AND module IN (${wanted.map(() => "?").join(",")})`)
-		.bind(username, ...wanted)
+		.prepare(`SELECT module, data FROM lap_result WHERE username = ? AND module IN (${keys.map(() => "?").join(",")})`)
+		.bind(username, ...keys)
 		.all<{ module: string; data: string }>();
-	return lapResultsJsonRaw(res.results ?? []);
+	return (res.results ?? []).map((r) => ({ module: String(r.module).split("@")[0], data: r.data }));
 }
 
-export async function lapLoadResultsModules(env: Env, username: string, modules: string[]): Promise<Record<string, unknown>> {
-	const wanted = [...new Set(modules.map((m) => String(m || "").trim()).filter((m) => LAP_MODULES.has(m)))];
-	if (!wanted.length) return {};
-	const res = await getTurso(env)
-		.prepare(`SELECT module, data FROM lap_result WHERE username = ? AND module IN (${wanted.map(() => "?").join(",")})`)
-		.bind(username, ...wanted)
-		.all<{ module: string; data: string }>();
-	return parseLapResults(res.results ?? []);
+export async function lapLoadResultsModulesRaw(env: Env, username: string, modules: string[], site = ""): Promise<string> {
+	const rows = await loadModuleRows(env, username, modules, site);
+	return rows.length ? lapResultsJsonRaw(rows) : "{}";
+}
+
+export async function lapLoadResultsModules(env: Env, username: string, modules: string[], site = ""): Promise<Record<string, unknown>> {
+	return parseLapResults(await loadModuleRows(env, username, modules, site));
+}
+
+// -------------------------------------------------------------------------
+// LAP ADMIN PER WEBSITE (perintah pemilik 25 Okt 2026): user dengan akses 1, 2, 3+ website (profile.websites) otomatis
+// punya Lap Admin untuk SETIAP website-nya -- tanpa pengaturan tambahan:
+//  - Link Admin bawaan = server admin website itu (Data Master, sama dengan Auto Prediksi);
+//  - Cookie Admin = isian Setting untuk website itu, kosong -> cookie website itu di menu Auto Prediksi (login agen sama);
+//  - hasil disimpan terpisah per website (modul "register@HUGO"), jadi website satu tidak menimpa website lain.
+// Motion, Mozart & PGA Pending TIDAK dipecah: satu login gateway memang menangani banyak website (Vendor ID dipisah koma,
+// "panel:4 = HUGOTOGEL"). User tanpa daftar website (mis. ADMIN) tetap memakai satu set Setting seperti dulu (site "").
+// -------------------------------------------------------------------------
+export const LAP_ADMIN_MODULES = ["register", "registerMeta", "reportAgent", "reportAgentMeta", "checkCoin", "checkCoinMeta", "idSelisih", "withdrawPgaIdf"];
+const ADMIN_MODULE_SET = new Set(LAP_ADMIN_MODULES);
+
+/** Kunci baris lap_result: modul Lap Admin milik satu website -> "modul@WEBSITE"; lainnya (Motion/Mozart, mode lama) apa adanya. */
+export function lapSiteKey(module: string, site: string): string {
+	return site && ADMIN_MODULE_SET.has(module) ? `${module}@${site}` : module;
+}
+
+/** Generasi database Turso (tursoGeneration) tempat tabel ini sudah disiapkan; -1 = belum. */
+let lapAdminSiteGen = -1;
+async function ensureLapAdminSiteTable(env: Env): Promise<void> {
+	if (lapAdminSiteGen === tursoGeneration()) return;
+	const gen = tursoGeneration();
+	await getTurso(env)
+		.prepare(
+			`CREATE TABLE IF NOT EXISTS lap_admin_site (
+				username     TEXT NOT NULL,
+				website      TEXT NOT NULL,
+				link_admin   TEXT NOT NULL DEFAULT '',
+				cookie_admin TEXT NOT NULL DEFAULT '',
+				updated_at   TEXT NOT NULL DEFAULT '',
+				PRIMARY KEY (username, website)
+			)`,
+		)
+		.run();
+	lapAdminSiteGen = gen;
+}
+/** Hanya untuk test (tiap test memakai database baru). */
+export function resetLapAdminSiteForTest(): void {
+	lapAdminSiteGen = -1;
+	lapVendorColumnEnsuredGen = -1;
+	migrated.clear();
+}
+
+export interface LapAdminSite {
+	website: string;
+	/** Nama merek untuk tampilan ("HUGOTOGEL"). */
+	brand: string;
+	linkAdmin: string;
+	/** Cookie yang DIPAKAI (Setting, atau cookie Auto Prediksi bila Setting kosong). */
+	cookieAdmin: string;
+	/** Cookie isian Setting untuk website ini (kosong = memakai Auto Prediksi). */
+	settingCookie: string;
+	source: "setting" | "auto-prediksi" | "";
+	/** 4 karakter terakhir PHPSESSID Auto Prediksi (tidak pernah nilai penuh). */
+	autoHint: string;
+}
+
+/** Kredensial Lap Admin untuk tiap website (satu query tabel + satu baca sesi Auto Prediksi). */
+export async function lapAdminSites(env: Env, username: string, websites: string[]): Promise<LapAdminSite[]> {
+	if (!websites.length) return [];
+	await ensureLapAdminSiteTable(env);
+	const rows =
+		(await getTurso(env).prepare(`SELECT website, link_admin, cookie_admin FROM lap_admin_site WHERE username = ?`).bind(username).all<Record<string, string>>())
+			.results ?? [];
+	const saved = new Map(rows.map((r) => [String(r.website), r]));
+	let sessions: Awaited<ReturnType<typeof getSessions>> = [];
+	try {
+		sessions = await getSessions(env, username);
+	} catch {
+		/* Auto Prediksi belum dipakai / gagal dibaca -> hanya isian Setting */
+	}
+	return websites.map((website) => {
+		const row = saved.get(website);
+		const auto = sessions.find((x) => x.website === website);
+		const settingCookie = String(row?.cookie_admin ?? "");
+		const autoCookie = auto?.phpsessid ? cookieHeader(auto.phpsessid) : "";
+		const linkAdmin = hostOnly(String(row?.link_admin ?? "")) || hostOnly(auto?.baseUrl ?? "") || hostOnly(defaultAdminBase(website));
+		return {
+			website,
+			brand: siteBrand(website) ?? website,
+			linkAdmin,
+			cookieAdmin: settingCookie || autoCookie,
+			settingCookie,
+			source: settingCookie ? "setting" : autoCookie ? "auto-prediksi" : "",
+			autoHint: auto?.phpsessid ? sessionHint(auto.phpsessid) : "",
+		};
+	});
+}
+
+/** Simpan isian Setting satu website. undefined = pertahankan; cookie "" = kosongkan (kembali memakai cookie Auto Prediksi). */
+export async function lapSaveAdminSite(env: Env, username: string, website: string, data: { linkAdmin?: string; cookieAdmin?: string }): Promise<void> {
+	await ensureLapAdminSiteTable(env);
+	const cur = await getTurso(env)
+		.prepare(`SELECT link_admin, cookie_admin FROM lap_admin_site WHERE username = ? AND website = ?`)
+		.bind(username, website)
+		.first<{ link_admin: string; cookie_admin: string }>();
+	// Link sama dengan server admin bawaan disimpan kosong: tetap ikut otomatis bila server website diganti di Data Master.
+	const typed = data.linkAdmin === undefined ? undefined : data.linkAdmin.trim() ? hostOnly(data.linkAdmin) : "";
+	const link = typed === undefined ? String(cur?.link_admin ?? "") : typed === hostOnly(defaultAdminBase(website)) ? "" : typed;
+	const cookie = data.cookieAdmin === undefined ? String(cur?.cookie_admin ?? "") : data.cookieAdmin.trim();
+	await getTurso(env)
+		.prepare(
+			`INSERT INTO lap_admin_site (username, website, link_admin, cookie_admin, updated_at) VALUES (?, ?, ?, ?, ?)
+			 ON CONFLICT(username, website) DO UPDATE SET link_admin = excluded.link_admin, cookie_admin = excluded.cookie_admin, updated_at = excluded.updated_at`,
+		)
+		.bind(username, website, link, cookie, tsNow())
+		.run();
+}
+
+/**
+ * Data lama (sebelum per website): satu Cookie Admin + hasil Lap Admin tanpa akhiran milik user. Dipindah SEKALI ke
+ * website pemiliknya: PHPSESSID sama dengan cookie Auto Prediksi website itu -> isi cookie ("<agen>=HUGOTOGEL.COM")
+ * -> website pertama user. Cookie lama ikut disalin ke Setting website itu (bila Setting-nya masih kosong).
+ */
+const migrated = new Set<string>();
+export async function lapMigrateLegacyAdmin(env: Env, username: string, websites: string[]): Promise<void> {
+	const memo = `${tursoGeneration()}|${username}`;
+	if (!websites.length || migrated.has(memo)) return;
+	const legacy =
+		(
+			await getTurso(env)
+				.prepare(`SELECT module FROM lap_result WHERE username = ? AND module IN (${LAP_ADMIN_MODULES.map(() => "?").join(",")})`)
+				.bind(username, ...LAP_ADMIN_MODULES)
+				.all<{ module: string }>()
+		).results ?? [];
+	const creds = await lapLoadCreds(env, username);
+	if (legacy.length || creds.cookieAdmin) {
+		const target = await legacyOwner(env, username, websites, creds.cookieAdmin);
+		if (legacy.length) {
+			const db = getTurso(env);
+			const stmts = LAP_ADMIN_MODULES.flatMap((m) => [
+				db
+					.prepare(
+						`INSERT OR IGNORE INTO lap_result (username, module, data, updated_at)
+						 SELECT username, ?, data, updated_at FROM lap_result WHERE username = ? AND module = ?`,
+					)
+					.bind(`${m}@${target}`, username, m),
+				db.prepare(`DELETE FROM lap_result WHERE username = ? AND module = ?`).bind(username, m),
+			]);
+			await db.batch(stmts);
+		}
+		const sites = await lapAdminSites(env, username, [target]);
+		if (creds.cookieAdmin && !sites[0]?.settingCookie) {
+			await lapSaveAdminSite(env, username, target, { linkAdmin: creds.linkAdmin || undefined, cookieAdmin: creds.cookieAdmin });
+		}
+	}
+	migrated.add(memo);
+}
+
+async function legacyOwner(env: Env, username: string, websites: string[], cookie: string): Promise<string> {
+	const sid = parsePhpSessId(cookieHeader(String(cookie ?? "").trim()));
+	if (sid) {
+		try {
+			const hit = (await getSessions(env, username)).find((x) => websites.includes(x.website) && parsePhpSessId(cookieHeader(x.phpsessid)) === sid);
+			if (hit) return hit.website;
+		} catch {
+			/* lanjut ke isi cookie */
+		}
+	}
+	const brand = String(cookie ?? "").toUpperCase().match(/=\s*([A-Z0-9]{2,20}(?:TOGEL|TOTO))\.COM\b/)?.[1];
+	const byBrand = brand ? websites.find((w) => w === brand || siteBrand(w) === brand) : undefined;
+	return byBrand ?? websites[0];
 }
 
 // -------------------------------------------------------------------------
