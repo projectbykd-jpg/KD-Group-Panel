@@ -349,6 +349,38 @@ copyFileSync(resolve(root, "node_modules/@fortawesome/fontawesome-free/css/all.m
 for (const f of readdirSync(resolve(root, "node_modules/@fortawesome/fontawesome-free/webfonts"))) {
 	if (f.endsWith(".woff2")) copyFileSync(resolve(root, "node_modules/@fortawesome/fontawesome-free/webfonts", f), resolve(faDir, "webfonts", f));
 }
+// Font, kalender (flatpickr) & animasi (anime.js) juga DARI SERVER PANEL (dulu fonts.googleapis.com, cdn.jsdelivr.net,
+// cdnjs.cloudflare.com). CSS CDN menahan tampilan pertama dan skrip `defer` menahan DOMContentLoaded -- semua awal panel
+// (layar login, pulihkan sesi) menunggu CDN: CDN lambat 8 dtk = panel muncul 8 dtk (laporan pemilik 25 Okt 2026 "refresh
+// loadingnya lama"). Versi terkunci di package.json dan masuk ke nama folder (cache panjang aman).
+const pkgVer = (name) => JSON.parse(readFileSync(resolve(root, "node_modules", name, "package.json"), "utf8")).version;
+const VENDOR = {
+	fp: `vendor/flatpickr-${pkgVer("flatpickr")}`,
+	anime: `vendor/anime-${pkgVer("animejs")}`,
+	font: `vendor/jakarta-${pkgVer("@fontsource/plus-jakarta-sans")}`,
+};
+const wantRefs = [`${VENDOR.fp}/flatpickr.min.css`, `${VENDOR.fp}/dark.css`, `${VENDOR.fp}/flatpickr.min.js`, `${VENDOR.anime}/anime.min.js`, `${VENDOR.font}/font.css`];
+const cdnRef = out.match(/<(?:link|script)\b[^>]*(?:href|src)="https?:\/\/(?:cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com|unpkg\.com|fonts\.googleapis\.com|fonts\.gstatic\.com)[^"]*"/);
+const missing = wantRefs.filter((r) => !out.includes(`"${r}"`));
+if (cdnRef || missing.length) {
+	console.error(`ERROR: Index.html harus memuat aset dari server panel (${missing.join(", ") || "-"}), bukan CDN: ${cdnRef ? cdnRef[0] : "-"}`);
+	process.exit(1);
+}
+mkdirSync(resolve(outDir, VENDOR.fp), { recursive: true });
+copyFileSync(resolve(root, "node_modules/flatpickr/dist/flatpickr.min.css"), resolve(outDir, VENDOR.fp, "flatpickr.min.css"));
+copyFileSync(resolve(root, "node_modules/flatpickr/dist/themes/dark.css"), resolve(outDir, VENDOR.fp, "dark.css"));
+copyFileSync(resolve(root, "node_modules/flatpickr/dist/flatpickr.min.js"), resolve(outDir, VENDOR.fp, "flatpickr.min.js"));
+mkdirSync(resolve(outDir, VENDOR.anime), { recursive: true });
+copyFileSync(resolve(root, "node_modules/animejs/lib/anime.min.js"), resolve(outDir, VENDOR.anime, "anime.min.js"));
+{
+	// Bobot 300-800 seperti tautan Google Fonts lama; hanya woff2 (fallback woff dibuang), file per subset dimuat browser bila perlu.
+	const fsDir = resolve(root, "node_modules/@fontsource/plus-jakarta-sans");
+	mkdirSync(resolve(outDir, VENDOR.font, "files"), { recursive: true });
+	let css = "";
+	for (const w of [300, 400, 500, 600, 700, 800]) css += readFileSync(resolve(fsDir, `${w}.css`), "utf8").replace(/,\s*url\([^)]*\.woff\) format\('woff'\)/g, "") + "\n";
+	for (const f of css.match(/[\w-]+\.woff2/g) ?? []) copyFileSync(resolve(fsDir, "files", f), resolve(outDir, VENDOR.font, "files", f));
+	writeFileSync(resolve(outDir, VENDOR.font, "font.css"), css, "utf8");
+}
 // Cache aset statis (dulu: validasi ulang tiap kunjungan). Logo/ikon jarang berubah -> 1 hari; skrip bot Live Chat selalu segar.
 writeFileSync(
 	resolve(outDir, "_headers"),
