@@ -527,7 +527,7 @@ const UA =
  * (Set-Cookie PHPSESSID kosong/deleted/expires lampau) dari "diblokir Cloudflare" (cf-mitigated / 403)
  * dan "halaman kosong dari aplikasi".
  */
-export function describeAdminResponse(res: Response, bodyChars?: number): string {
+export function describeAdminResponse(res: Response, bodyChars?: number, bodyText?: string): string {
 	const h = res.headers;
 	const pick = (name: string): string => {
 		const v = h.get(name);
@@ -555,9 +555,15 @@ export function describeAdminResponse(res: Response, bodyChars?: number): string
 		pick("cf-ray") ? "cf-ray=ada" : "",
 		`cf-mitigated=${h.get("cf-mitigated") || "tidak ada"}`,
 		bodyChars === undefined ? "" : `isi=${bodyChars} huruf`,
+		bodyText !== undefined && bodyText.length > 0 && bodyText.length <= 200 ? `teks-isi="${maskBodySnippet(bodyText)}"` : "",
 		`set-cookie=[${cookies.join("; ") || "tidak ada"}]`,
 	];
 	return parts.filter(Boolean).join(" ");
+}
+
+/** Isi balasan sangat pendek (<=200 huruf) untuk diagnosa: deretan huruf/angka >=16 (mirip token) disamarkan. */
+export function maskBodySnippet(t: string): string {
+	return t.replace(/\s+/g, " ").replace(/[A-Za-z0-9+/=_%-]{16,}/g, "***").replace(/"/g, "'").trim();
 }
 
 /** Nama cookie yang DIKIRIM panel ke admin (nama saja, tanpa nilai). */
@@ -602,7 +608,7 @@ export async function adminReq(
 		const text = await res.text();
 		if (meta) {
 			meta.status = res.status;
-			meta.diag = (meta.diag ? meta.diag + " ⇒ " : "") + describeAdminResponse(res, text.length);
+			meta.diag = (meta.diag ? meta.diag + " ⇒ " : "") + describeAdminResponse(res, text.length, text);
 		}
 		if (res.status >= 400) throw new Error(`HTTP ${res.status} dari ${new URL(url).pathname}`);
 		if (investIsLoginPage("", text)) throw new Stop("Sesi (PHPSESSID) sudah habis — ambil yang baru dari Chrome lalu simpan di menu Auto Prediksi.", "cek");

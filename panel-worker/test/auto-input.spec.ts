@@ -567,6 +567,12 @@ describe("URL admin hanya tiga host yang diizinkan", () => {
 		expect(r.detail.split("Rincian balasan")[1]).not.toContain("SECRETQ");
 		expect(r.detail).toMatch(/ ⇒ /); // rantai: redirect lalu halaman akhir
 	});
+	it("balasan pendek (<=200 huruf) ikut ditampilkan sebagai teks-isi, deretan mirip token disamarkan", async () => {
+		const f = async () => new Response("<script>alert('Sesi habis'); location='login.php?k=ABCDEF1234567890ZZZZ'</script>", { status: 200, headers: [["content-type", "text/html"]] });
+		const r = await runAutoInput({ session: sess, plan: plan(), fetchFn: f });
+		expect(r.detail).toMatch(/teks-isi="[^"]*Sesi habis/);
+		expect(r.detail).not.toContain("ABCDEF1234567890ZZZZ");
+	});
 	it("login terdeteksi walau teks nama website (HUGOTOGEL.COM) tidak ada -- cookie hanya PHPSESSID", async () => {
 		const r = await runAutoInput({ session: sess, plan: plan(), dryRun: true, fetchFn: mockSite().fetchFn });
 		expect(r.ok).toBe(true);
