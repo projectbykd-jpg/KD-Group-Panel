@@ -33,8 +33,12 @@
   </script>
   <link rel="stylesheet" href="vendor/fa-6.4.0/css/all.min.css">
   <link rel="stylesheet" href="vendor/jakarta-5.3.0/font.css">
-  <link rel="stylesheet" href="vendor/flatpickr-4.6.13/flatpickr.min.css">
-  <link rel="stylesheet" href="vendor/flatpickr-4.6.13/dark.css">
+  <!-- Kalender hanya dipakai di halaman Laporan: CSS-nya tidak menahan tampilan awal (media=print lalu 'all' begitu terunduh). -->
+  <link rel="stylesheet" href="vendor/flatpickr-4.6.13/flatpickr.min.css" media="print" onload="this.media='all'">
+  <link rel="stylesheet" href="vendor/flatpickr-4.6.13/dark.css" media="print" onload="this.media='all'">
+  <!-- Muat awal dua font yang pasti dipakai agar tidak menunggu CSS selesai diurai dulu. -->
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="vendor/fa-6.4.0/webfonts/fa-solid-900.woff2">
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="vendor/jakarta-5.3.0/files/plus-jakarta-sans-latin-500-normal.woff2">
   <!-- defer: flatpickr baru dipakai saat halaman Laporan dibuka (dicek window.flatpickr), jadi tidak perlu menahan render awal. -->
   <script src="vendor/flatpickr-4.6.13/flatpickr.min.js" defer></script>
   <script src="vendor/anime-3.2.2/anime.min.js" defer></script>
