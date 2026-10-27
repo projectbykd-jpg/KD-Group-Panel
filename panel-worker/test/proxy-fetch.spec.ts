@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanProxyInput, proxyFetcher, type Connector, type Duplex } from "../src/lib/proxy-fetch";
+import { cleanProxyInput, probeTunnel, proxyFetcher, tlsClientHello, type Connector, type Duplex } from "../src/lib/proxy-fetch";
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -147,5 +147,47 @@ describe("cleanProxyInput", () => {
 		expect(cleanProxyInput({ host: "127.0.0.1", port: 80 }).ok).toBe(false);
 		expect(cleanProxyInput({ host: "192.168.1.5", port: 80 }).ok).toBe(false);
 		expect(cleanProxyInput({ host: "p.example.com", port: 80, user: "a\r\nX: y" }).ok).toBe(false);
+	});
+});
+
+describe("diagnostik terowongan (byte mentah)", () => {
+	it("tlsClientHello: header rekaman TLS & panjang konsisten, memuat SNI", () => {
+		const b = tlsClientHello("www.google.com");
+		expect(b[0]).toBe(0x16);
+		expect((b[3] << 8) | b[4]).toBe(b.length - 5);
+		expect(b[5]).toBe(1); // ClientHello
+		expect(dec.decode(b)).toContain("www.google.com");
+	});
+	const rawNet = (reply: Uint8Array | null): { c: Connector; got: Uint8Array[] } => {
+		const got: Uint8Array[] = [];
+		const c: Connector = () => {
+			let ctrl!: ReadableStreamDefaultController<Uint8Array>;
+			let connected = false;
+			const sock: Duplex = {
+				readable: new ReadableStream<Uint8Array>({ start: (x) => void (ctrl = x) }),
+				writable: new WritableStream<Uint8Array>({
+					write(chunk) {
+						if (!connected) {
+							connected = true;
+							ctrl.enqueue(enc.encode("HTTP/1.1 200 OK\r\n\r\n"));
+						} else {
+							got.push(chunk);
+							if (reply) ctrl.enqueue(reply);
+							else ctrl.close();
+						}
+					},
+				}),
+				close: () => undefined,
+			};
+			return sock;
+		};
+		return { c, got };
+	};
+	it("ada balasan -> dilaporkan byte + 5 byte awal; ditutup -> 'tanpa balasan'", async () => {
+		const ok = rawNet(Uint8Array.from([0x16, 3, 3, 0, 2, 9, 9]));
+		expect(await probeTunnel(cfg, "x.test", 443, tlsClientHello("x.test"), { connector: ok.c })).toBe("balasan 7 byte (awal: 16 03 03 00 02)");
+		expect(ok.got[0][0]).toBe(0x16);
+		const closed = rawNet(null);
+		expect(await probeTunnel(cfg, "x.test", 443, tlsClientHello("x.test"), { connector: closed.c })).toBe("koneksi ditutup tanpa balasan");
 	});
 });

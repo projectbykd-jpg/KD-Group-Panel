@@ -221,6 +221,8 @@ async function readChunked(r: ByteReader): Promise<Uint8Array> {
 export interface ProxyFetchOpts {
 	connector?: Connector;
 	timeoutMs?: number;
+	/** Diagnostik: panggil startTls() TANPA opsi (SNI mengikuti alamat sambungan) -- hanya untuk membandingkan perilaku. */
+	tlsNoOptions?: boolean;
 }
 
 async function defaultConnector(): Promise<Connector> {
@@ -243,7 +245,7 @@ export function proxyFetcher(cfg: ProxyConfig, opts: ProxyFetchOpts = {}): Fetch
 			if (cfg.scheme === "socks5") await tunnelSocks5(base, cfg, u.hostname, port);
 			else await tunnelHttp(base, cfg, u.hostname, port);
 			socks.stage = isTls ? "TLS/HTTP ke tujuan (terowongan proxy sudah berhasil)" : "HTTP ke tujuan";
-			const conn = (socks.conn = isTls ? (base.startTls ? base.startTls({ expectedServerHostname: u.hostname }) : base) : base);
+			const conn = (socks.conn = isTls ? (base.startTls ? (opts.tlsNoOptions ? (base.startTls as unknown as () => Duplex)() : base.startTls({ expectedServerHostname: u.hostname })) : base) : base);
 			const method = (init.method ?? "GET").toUpperCase();
 			const body = init.body == null ? "" : String(init.body);
 			const lines = [`${method} ${u.pathname}${u.search} HTTP/1.1`, `Host: ${u.host}`];
@@ -301,4 +303,56 @@ export function proxyFetcher(cfg: ProxyConfig, opts: ProxyFetchOpts = {}): Fetch
 			}
 		}
 	};
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostik terowongan: kirim byte mentah lewat proxy dan lihat apa yang kembali (tanpa TLS dari Worker).
+// ---------------------------------------------------------------------------
+/** ClientHello TLS 1.2 minimal (dengan SNI) -- server sungguhan membalas ServerHello (0x16) atau alert (0x15). */
+export function tlsClientHello(host: string): Uint8Array {
+	const h = enc.encode(host);
+	const u16 = (n: number) => [n >> 8, n & 255];
+	const sni = [...u16(h.length + 3), 0, ...u16(h.length), ...h];
+	const ext = (type: number, body: number[]) => [...u16(type), ...u16(body.length), ...body];
+	const exts = [
+		...ext(0, sni),
+		...ext(10, [0, 4, 0, 23, 0, 24]), // supported_groups: secp256r1, secp384r1
+		...ext(11, [1, 0]), // ec_point_formats
+		...ext(13, [0, 8, 4, 1, 4, 3, 5, 1, 5, 3]), // signature_algorithms
+	];
+	const random = Array.from({ length: 32 }, (_, i) => (i * 37 + 11) & 255);
+	const body = [3, 3, ...random, 0, ...u16(4), 0xc0, 0x2f, 0xc0, 0x2b, 1, 0, ...u16(exts.length), ...exts];
+	const hs = [1, 0, ...u16(body.length), ...body];
+	return Uint8Array.from([0x16, 3, 1, ...u16(hs.length), ...hs]);
+}
+
+/** Buka terowongan ke host:port, kirim `payload` apa adanya, kembalikan ringkasan balasan pertama (jumlah byte + 5 byte awal heksa). */
+export async function probeTunnel(cfg: ProxyConfig, host: string, port: number, payload: Uint8Array, opts: ProxyFetchOpts = {}): Promise<string> {
+	const connector = opts.connector ?? (await defaultConnector());
+	const sock = connector(cfg.host, cfg.port, false);
+	const timeoutMs = opts.timeoutMs ?? 15_000;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		const run = async (): Promise<string> => {
+			if (cfg.scheme === "socks5") await tunnelSocks5(sock, cfg, host, port);
+			else await tunnelHttp(sock, cfg, host, port);
+			const w = sock.writable.getWriter();
+			await w.write(payload);
+			w.releaseLock();
+			const rd = sock.readable.getReader();
+			const { value, done } = await rd.read();
+			rd.releaseLock();
+			if (done || !value || !value.length) return "koneksi ditutup tanpa balasan";
+			const first = [...value.slice(0, 5)].map((b) => b.toString(16).padStart(2, "0")).join(" ");
+			return `balasan ${value.length} byte (awal: ${first})`;
+		};
+		return await Promise.race([run(), new Promise<string>((_, rej) => (timer = setTimeout(() => rej(new Error("tidak ada balasan dalam batas waktu")), timeoutMs)))]);
+	} finally {
+		if (timer) clearTimeout(timer);
+		try {
+			await sock.close();
+		} catch {
+			/* sudah tertutup */
+		}
+	}
 }

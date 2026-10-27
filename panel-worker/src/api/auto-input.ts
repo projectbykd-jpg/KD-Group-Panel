@@ -49,7 +49,7 @@ import {
 	startJob,
 } from "../lib/auto-input";
 import { adminFetcherFor, deleteProxy, getProxy, saveProxy } from "../lib/auto-input";
-import { cleanProxyInput, proxyFetcher } from "../lib/proxy-fetch";
+import { cleanProxyInput, probeTunnel, proxyFetcher, tlsClientHello } from "../lib/proxy-fetch";
 import { findMarketCode, readPrediksiLastTotals, readPrediksiTotals, runAutoInput, type Fetcher } from "../lib/auto-input-run";
 
 /** Jam awal setelah tengah malam WIB (sys_auto_input_midnight_grace_h): tanggal form admin boleh = tanggal result + 1. */
@@ -214,6 +214,25 @@ export async function autoInputTestProxy(env: Env, token: string, fetchFn?: Fetc
 			}
 		} catch (e) {
 			lines.push(`${st.label}: GAGAL — ${(e instanceof Error ? e.message : String(e)).slice(0, 200)}`);
+		}
+	}
+	// Bila HTTPS gagal padahal HTTP polos jalan: kirim ClientHello TLS MENTAH lewat terowongan. Ada balasan (0x16 ServerHello / 0x15 alert) =
+	// proxy meneruskan lalu lintas TLS (masalah ada di sisi TLS Worker); ditutup tanpa balasan = proxy/jalur menolak lalu lintas TLS dari Cloudflare.
+	if (!fetchFn && lines.some((l) => l.startsWith("HTTPS") && l.includes("GAGAL"))) {
+		for (const [label, host] of [["TLS mentah ke Google", "www.google.com"], ["TLS mentah ke AWS", "httpbin.org"]] as const) {
+			try {
+				lines.push(`${label}: ${await probeTunnel(p, host, 443, tlsClientHello(host), { timeoutMs: 12_000 })}`);
+			} catch (e) {
+				lines.push(`${label}: GAGAL — ${(e instanceof Error ? e.message : String(e)).slice(0, 160)}`);
+			}
+		}
+	}
+	if (!fetchFn && lines.some((l) => l.startsWith("HTTPS cek-IP") && l.includes("GAGAL"))) {
+		try {
+			const r2 = await proxyFetcher(p, { tlsNoOptions: true, timeoutMs: 12_000 })("https://api.ipify.org/?format=json");
+			lines.push(`HTTPS varian startTls tanpa opsi: OK (HTTP ${r2.status})`);
+		} catch (e) {
+			lines.push(`HTTPS varian startTls tanpa opsi: GAGAL — ${(e instanceof Error ? e.message : String(e)).slice(0, 120)}`);
 		}
 	}
 	const head = ip
