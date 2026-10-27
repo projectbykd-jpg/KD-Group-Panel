@@ -18,6 +18,9 @@ export interface Duplex {
 	readable: ReadableStream<Uint8Array>;
 	writable: WritableStream<Uint8Array>;
 	startTls?: (opts: { expectedServerHostname: string }) => Duplex;
+	/** Soket Cloudflare: janji yang ditolak dengan alasan penutupan (mis. kegagalan TLS). */
+	closed?: Promise<void>;
+	opened?: Promise<unknown>;
 	close: () => Promise<void> | void;
 }
 export type Connector = (host: string, port: number, starttls: boolean) => Duplex;
@@ -260,7 +263,19 @@ export function proxyFetcher(cfg: ProxyConfig, opts: ProxyFetchOpts = {}): Fetch
 			w.releaseLock();
 			const r = new ByteReader(conn.readable.getReader());
 			const head = await r.readUntil("\r\n\r\n", 64 << 10);
-			if (!head) throw new Error("Tujuan/proxy menutup koneksi tanpa menjawab (proxy mungkin hanya mengizinkan domain tertentu, atau memblokir permintaan dari Cloudflare).");
+			if (!head) {
+				// Soket Cloudflare menolak janji `closed`/`opened` dengan alasan sebenarnya (mis. TLS gagal) -- tampilkan supaya tidak menebak.
+				const why = async (pr?: Promise<unknown>): Promise<string> => {
+					if (!pr) return "";
+					try {
+						return await Promise.race([pr.then(() => "", (e) => (e instanceof Error ? e.message : String(e)).slice(0, 160)), new Promise<string>((r) => setTimeout(() => r(""), 1500))]);
+					} catch {
+						return "";
+					}
+				};
+				const reason = (await why(conn.closed)) || (await why(conn.opened)) || (await why(base.closed));
+				throw new Error(`Tujuan/proxy menutup koneksi tanpa menjawab${reason ? ` — alasan soket: ${reason}` : " (soket tidak memberi alasan)"}.`);
+			}
 			const hl = dec.decode(head).split("\r\n");
 			const status = Number(hl[0].split(" ")[1]);
 			if (!Number.isInteger(status) || status < 100) throw new Error("Balasan admin website tidak valid.");
