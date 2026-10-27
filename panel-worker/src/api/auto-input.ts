@@ -185,30 +185,42 @@ export async function autoInputTestProxy(env: Env, token: string, fetchFn?: Fetc
 	const p = await getProxy(env, s.username);
 	if (!p?.host || !p.port) return { success: false, message: "Proxy belum disimpan." };
 	const f = fetchFn ?? proxyFetcher(p, { timeoutMs: getSysCached("sys_fetch_timeout_sec") * 1000 });
-	// 1) alamat IP yang terlihat dari luar; 2) bila layanan itu tidak terjangkau lewat proxy, coba website admin milik user sendiri
-	//    (sebagian proxy hanya mengizinkan domain tertentu) supaya jelas apakah proxy bisa dipakai untuk tujuan sebenarnya.
-	let ipErr = "";
-	try {
-		const res = await f("https://api.ipify.org/?format=json", { headers: { Accept: "application/json" } });
-		const ip = String(((await res.json()) as { ip?: unknown }).ip ?? "").slice(0, 64);
-		if (!/^[0-9a-f:.]{3,45}$/i.test(ip)) throw new Error(`Balasan tidak dikenali (HTTP ${res.status}).`);
-		return { success: true, ip, message: `Proxy bekerja. IP yang terlihat dari luar: ${ip}. Pastikan sama dengan IP yang didaftarkan di admin website.` };
-	} catch (e) {
-		ipErr = (e instanceof Error ? e.message : String(e)).slice(0, 240);
-	}
+	// Uji bertahap supaya jelas di mana macetnya: (a) HTTP biasa lewat terowongan, (b) HTTPS cek-IP, (c) HTTPS website admin milik user.
 	const sess = (await getSessions(env, s.username)).find((x) => x.baseUrl && !adminBaseProblem(x.website, x.baseUrl));
-	if (sess) {
+	const steps: { label: string; url: string; json?: boolean }[] = [
+		{ label: "HTTP polos via terowongan", url: "http://api.ipify.org/?format=json", json: true },
+		{ label: "HTTPS cek-IP", url: "https://api.ipify.org/?format=json", json: true },
+	];
+	if (sess) steps.push({ label: `HTTPS admin ${sess.website}`, url: sess.baseUrl });
+	const lines: string[] = [];
+	let ip = "";
+	let adminOk = false;
+	let anyOk = false;
+	for (const st of steps) {
 		try {
-			const res = await f(sess.baseUrl, { headers: { "User-Agent": sess.ua || "Mozilla/5.0" }, redirect: "manual" });
-			return {
-				success: true,
-				message: `Proxy bisa menjangkau admin ${sess.website} (HTTP ${res.status}). Layanan cek-IP tidak terjangkau lewat proxy ini (${ipErr}), jadi IP keluar tidak bisa ditampilkan — itu tidak menghalangi pemakaian.`,
-			};
+			const res = await f(st.url, { headers: { Accept: "application/json", "User-Agent": sess?.ua || "Mozilla/5.0" }, redirect: "manual" });
+			const text = (await res.text()).slice(0, 400);
+			anyOk = true;
+			if (st.json) {
+				const m = text.match(/"ip"\s*:\s*"([0-9a-f:.]{3,45})"/i);
+				if (m && !ip) ip = m[1];
+				lines.push(`${st.label}: OK (HTTP ${res.status}${m ? ", IP " + m[1] : ""})`);
+			} else {
+				adminOk = true;
+				lines.push(`${st.label}: OK (HTTP ${res.status})`);
+			}
 		} catch (e) {
-			return { success: false, message: `Proxy gagal ke admin ${sess.website}: ${(e instanceof Error ? e.message : String(e)).slice(0, 240)}` };
+			lines.push(`${st.label}: GAGAL — ${(e instanceof Error ? e.message : String(e)).slice(0, 200)}`);
 		}
 	}
-	return { success: false, message: "Proxy gagal: " + ipErr };
+	const head = ip
+		? `Proxy bekerja. IP yang terlihat dari luar: ${ip}. Pastikan sama dengan IP yang didaftarkan di admin website.`
+		: adminOk
+			? "Proxy bisa menjangkau website admin."
+			: anyOk
+				? "Proxy tersambung tetapi belum bisa memakai HTTPS ke tujuan."
+				: "Proxy gagal.";
+	return { success: !!ip || adminOk, ip: ip || undefined, message: `${head} ${lines.join(" | ")}` };
 }
 
 const idList = (v: unknown): number[] => (Array.isArray(v) ? v : []).map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 300);
