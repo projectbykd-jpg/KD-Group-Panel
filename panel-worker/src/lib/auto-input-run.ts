@@ -521,13 +521,57 @@ async function submitPrediksi(
 const UA =
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36";
 
+/**
+ * Ringkasan balasan admin UNTUK DIAGNOSTIK saja: nama + keadaan header/cookie, TIDAK PERNAH nilainya
+ * (token sesi tidak boleh bocor ke pesan galat). Dipakai untuk membedakan "admin menghapus sesi"
+ * (Set-Cookie PHPSESSID kosong/deleted/expires lampau) dari "diblokir Cloudflare" (cf-mitigated / 403)
+ * dan "halaman kosong dari aplikasi".
+ */
+export function describeAdminResponse(res: Response, bodyChars?: number): string {
+	const h = res.headers;
+	const pick = (name: string): string => {
+		const v = h.get(name);
+		if (!v) return "";
+		// alamat Location bisa membawa token di query -> buang query-nya
+		return `${name}=${name === "location" ? v.split("?")[0].slice(0, 80) : v.slice(0, 60)}`;
+	};
+	const raw: string[] = typeof h.getSetCookie === "function" ? h.getSetCookie() : h.get("set-cookie") ? [h.get("set-cookie")!] : [];
+	const cookies = raw.map((c) => {
+		const [pair, ...attrs] = c.split(";").map((x) => x.trim());
+		const eq = pair.indexOf("=");
+		const name = (eq < 0 ? pair : pair.slice(0, eq)).slice(0, 40);
+		const val = eq < 0 ? "" : pair.slice(eq + 1);
+		const state = val === "" ? "kosong" : /^deleted$/i.test(val) ? "deleted" : `diisi(${val.length} huruf)`;
+		const keep = attrs.filter((a) => /^(expires|max-age|samesite|domain|path|secure|httponly)\b/i.test(a)).map((a) => a.slice(0, 48));
+		return `${name}:${state}${keep.length ? "{" + keep.join(",") + "}" : ""}`;
+	});
+	const parts = [
+		`HTTP ${res.status}`,
+		pick("server"),
+		pick("content-type"),
+		pick("content-encoding"),
+		pick("content-length"),
+		pick("location"),
+		pick("cf-ray") ? "cf-ray=ada" : "",
+		`cf-mitigated=${h.get("cf-mitigated") || "tidak ada"}`,
+		bodyChars === undefined ? "" : `isi=${bodyChars} huruf`,
+		`set-cookie=[${cookies.join("; ") || "tidak ada"}]`,
+	];
+	return parts.filter(Boolean).join(" ");
+}
+
+/** Nama cookie yang DIKIRIM panel ke admin (nama saja, tanpa nilai). */
+export function cookieNamesSent(stored: string): string {
+	return cookieHeader(stored).split(";").map((p) => p.trim().split("=")[0]).filter(Boolean).join(", ");
+}
+
 export async function adminReq(
 	f: Fetcher,
 	sess: AdminSession,
 	path: string,
 	init: { method?: "GET" | "POST"; body?: URLSearchParams; referer?: string } = {},
-	/** Diisi apa adanya (status akhir + rantai redirect) untuk diagnostik kalau halaman yang diterima aneh. */
-	meta?: { status: number; trail: string[] },
+	/** Diisi apa adanya (status akhir + rantai redirect + ringkasan header balasan) untuk diagnostik kalau halaman yang diterima aneh. */
+	meta?: { status: number; trail: string[]; diag?: string },
 ): Promise<string> {
 	let url = new URL(path, sess.baseUrl).toString();
 	if (meta) meta.trail = [new URL(url).pathname + new URL(url).search];
@@ -550,12 +594,16 @@ export async function adminReq(
 		if (res.status >= 300 && res.status < 400 && loc) {
 			url = new URL(loc, url).toString();
 			meta?.trail.push(res.status + " -> " + new URL(url).pathname + new URL(url).search);
+			if (meta) meta.diag = (meta.diag ? meta.diag + " ⇒ " : "") + describeAdminResponse(res);
 			method = "GET"; // 301/302/303 sesudah POST -> GET (perilaku browser)
 			body = undefined;
 			continue;
 		}
 		const text = await res.text();
-		if (meta) meta.status = res.status;
+		if (meta) {
+			meta.status = res.status;
+			meta.diag = (meta.diag ? meta.diag + " ⇒ " : "") + describeAdminResponse(res, text.length);
+		}
 		if (res.status >= 400) throw new Error(`HTTP ${res.status} dari ${new URL(url).pathname}`);
 		if (investIsLoginPage("", text)) throw new Stop("Sesi (PHPSESSID) sudah habis — ambil yang baru dari Chrome lalu simpan di menu Auto Prediksi.", "cek");
 		return text;
@@ -610,7 +658,7 @@ export async function runAutoInput(opts: {
 		if (badBase) throw new Stop(`URL admin ${sess.website} ditolak: ${badBase}.`, "cek");
 
 		// 1. kode pasaran
-		const homeMeta = { status: 0, trail: [] as string[] };
+		const homeMeta = { status: 0, trail: [] as string[], diag: "" };
 		const index = await adminReq(f, sess, "index.php", {}, homeMeta);
 		// Frame (sidebar, dropdown pasaran) dibaca juga; gagal-baca satu frame tidak menghentikan (sesi habis tetap berhenti).
 		const frames = frameSources(index, new URL("index.php", sess.baseUrl).toString());
@@ -632,7 +680,8 @@ export async function runAutoInput(opts: {
 			const body = htmlText(home).slice(0, 220);
 			throw new Stop(
 				`Server tidak dianggap sedang login di ${sess.website} (sidebar "Agent (...)" tidak ada) — PHPSESSID salah/habis, atau kurang cookie lain. ` +
-					`Yang diterima server: HTTP ${homeMeta.status} [${homeMeta.trail.join(" ")}] frame [${frames.join(", ") || "tidak ada"}] judul "${title}" isi "${body}"`,
+					`Yang diterima server: HTTP ${homeMeta.status} [${homeMeta.trail.join(" ")}] frame [${frames.join(", ") || "tidak ada"}] judul "${title}" isi "${body}". ` +
+					`Rincian balasan (nama saja, tanpa nilai): ${homeMeta.diag || "-"}. Cookie yang dikirim panel: ${cookieNamesSent(sess.phpsessid)}.`,
 				"cek",
 			);
 		}

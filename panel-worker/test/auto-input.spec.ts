@@ -528,6 +528,45 @@ describe("URL admin hanya tiga host yang diizinkan", () => {
 		expect(r.detail).toMatch(/tidak dianggap sedang login/);
 		expect(m.st.posts).toHaveLength(0);
 	});
+	it("belum login: pesan memuat rincian balasan admin (header + Set-Cookie) dan nama cookie yang dikirim -- TANPA nilai apa pun", async () => {
+		const SECRET = "rahasiaSESI1234567890abcd";
+		const f = async () =>
+			new Response("", {
+				status: 200,
+				headers: [
+					["content-type", "text/html; charset=UTF-8"],
+					["server", "cloudflare"],
+					["set-cookie", "PHPSESSID=deleted; expires=Thu, 01-Jan-1970 00:00:01 GMT; Max-Age=0; path=/"],
+					["set-cookie", "pihaacs3koderedis=TOKENrahasia999; path=/; HttpOnly"],
+					["location-bukan", "https://x/?token=BOCOR"],
+				],
+			});
+		const r = await runAutoInput({ session: { ...sess, phpsessid: `PHPSESSID=${SECRET}; lastuser=pihaacs3; pihaacs3koderedis=KODEkoderedis777` }, plan: plan(), fetchFn: f });
+		expect(r).toMatchObject({ ok: false, stage: "cek" });
+		expect(r.detail).toMatch(/Rincian balasan \(nama saja, tanpa nilai\):/);
+		expect(r.detail).toMatch(/HTTP 200/);
+		expect(r.detail).toMatch(/server=cloudflare/);
+		expect(r.detail).toMatch(/cf-mitigated=tidak ada/);
+		expect(r.detail).toMatch(/isi=0 huruf/);
+		expect(r.detail).toMatch(/PHPSESSID:deleted\{expires=Thu, 01-Jan-1970 00:00:01 GMT,Max-Age=0,path=\/\}/); // sesi dihapus admin
+		expect(r.detail).toMatch(/pihaacs3koderedis:diisi\(\d+ huruf\)/);
+		expect(r.detail).toMatch(/Cookie yang dikirim panel: PHPSESSID, lastuser, pihaacs3koderedis\./);
+		// tidak ada nilai rahasia yang bocor ke pesan
+		for (const leak of [SECRET, "TOKENrahasia999", "KODEkoderedis777", "BOCOR"]) expect(r.detail).not.toContain(leak);
+	});
+	it("diagnostik balasan: Cloudflare challenge dibedakan dari 'sesi dihapus admin' (cf-mitigated + redirect, query Location dibuang)", async () => {
+		let n = 0;
+		const f = async () =>
+			n++ === 0
+				? new Response("", { status: 302, headers: [["location", "/login.php?next=SECRETQ"], ["cf-mitigated", "challenge"]] })
+				: new Response("", { status: 200, headers: [["content-type", "text/html"]] });
+		const r = await runAutoInput({ session: sess, plan: plan(), fetchFn: f });
+		expect(r.detail).toMatch(/cf-mitigated=challenge/);
+		expect(r.detail).toMatch(/location=\/login\.php/);
+		// rantai lama "[... 302 -> /login.php?next=..]" memang menampilkan query (dipakai tes lain); rincian BARU membuangnya
+		expect(r.detail.split("Rincian balasan")[1]).not.toContain("SECRETQ");
+		expect(r.detail).toMatch(/ ⇒ /); // rantai: redirect lalu halaman akhir
+	});
 	it("login terdeteksi walau teks nama website (HUGOTOGEL.COM) tidak ada -- cookie hanya PHPSESSID", async () => {
 		const r = await runAutoInput({ session: sess, plan: plan(), dryRun: true, fetchFn: mockSite().fetchFn });
 		expect(r.ok).toBe(true);
