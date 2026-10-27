@@ -209,7 +209,7 @@ export interface AutoInputNotice {
 	skippedReason?: string;
 	/** ANTRI = job sudah dibuat, browser harus memanggil autoInputRun(jobId) -- satu panggilan per website. */
 	results: (Omit<AutoInputOutcome, "status"> & { status: AutoInputOutcome["status"] | "ANTRI"; jobId?: number })[];
-	/** Pasaran yang dihitung MANUAL (tidak di-auto / Auto Prediksi OFF): browser memanggil autoInputTotalsCheck per website -- hanya membaca menu Prediksi. */
+	/** Pasaran yang dihitung MANUAL (dimatikan per pasaran, Auto Prediksi ON): browser memanggil autoInputTotalsCheck per website -- hanya membaca menu Prediksi. Saklar OFF = tidak ada daftar ini sama sekali. */
 	totalsCheck?: ManualCheck[];
 	/** Result yang dikirim: browser memakainya untuk membaca Total dari menu Prediksi bila job Auto Prediksi website itu TIDAK berhasil. */
 	plan?: Omit<ManualCheck, "website">;
@@ -220,6 +220,9 @@ export interface ManualCheck {
 	prizes: string[];
 	date: string;
 }
+
+/** Pesan bila Total diminta saat saklar Auto Prediksi OFF: tidak ada permintaan apa pun ke admin website. */
+const AUTO_OFF_TOTALS_MSG = "Auto Prediksi sedang OFF, jadi Total Omset/Referal/Menang tidak dibaca. Nyalakan 'Aktifkan' di menu Auto Prediksi bila ingin dibaca lagi.";
 
 /**
  * Hanya MEMBUAT job (murah). Eksekusi sebenarnya (belasan request ke admin) dijalankan browser lewat
@@ -237,12 +240,9 @@ export async function autoInputAfterSend(
 	if (!hasMenu(profile, "auto-input")) return undefined;
 	const enabled = await getEnabled(env, profile.username);
 	const plan = planAutoInput(rawText, processed);
-	// Auto Prediksi OFF: tidak ada input/Hitung, tapi Total Omset/Referal/Menang tetap dibaca dari menu Prediksi (browser yang memanggil).
-	if (!enabled) {
-		if (!plan.ok) return undefined;
-		const totalsCheck = await manualChecks(env, profile, plan, websites);
-		return totalsCheck.length ? { results: [], totalsCheck } : undefined;
-	}
+	// Auto Prediksi OFF = SEMUA yang menyentuh admin website ikut OFF, termasuk pembacaan Total Omset/Referal/Menang
+	// (perintah pemilik 28 Okt 2026). Dulu Total tetap dibaca dari menu Prediksi walau saklar OFF.
+	if (!enabled) return undefined;
 	if (!plan.ok) return { skippedReason: plan.reason, results: [] };
 	if ((await getDisabledMarkets(env, profile.username)).includes(normMarket(plan.market))) {
 		return {
@@ -292,6 +292,8 @@ async function manualChecks(env: Env, profile: UserProfile, plan: Extract<AutoIn
  */
 export async function autoInputTotalsCheck(env: Env, token: string, data: Record<string, unknown>, fetchFn?: Fetcher) {
 	const s = await gate(env, token);
+	// Penjaga sisi server: browser lama (halaman belum di-refresh) bisa saja masih memanggil ini sesudah saklar dimatikan.
+	if (!(await getEnabled(env, s.username))) return { success: false, website: String(data?.website ?? ""), message: AUTO_OFF_TOTALS_MSG };
 	const w = mustOwnWebsite(s.profile, String(data?.website ?? ""));
 	const market = String(data?.market ?? "").trim().slice(0, 60);
 	const prizes = (Array.isArray(data?.prizes) ? data.prizes : []).map((x) => String(x).trim()).filter((x) => /^\d{1,8}$/.test(x)).slice(0, 3);
@@ -412,6 +414,7 @@ export async function autoInputTotals(env: Env, token: string) {
 /** Tombol "Ambil ulang" di tabel Result: baca lagi menu Prediksi untuk satu baris yang gagal terbaca. Tidak menyentuh Kirim/Hitung. */
 export async function autoInputTotalsRefresh(env: Env, token: string, id: number, fetchFn?: Fetcher) {
 	const s = await gate(env, token);
+	if (!(await getEnabled(env, s.username))) return { success: false, message: AUTO_OFF_TOTALS_MSG };
 	const row = await getTotalsRow(env, s.username, Number(id));
 	if (!row) throw new Error("Baris tidak ditemukan.");
 	const w = mustOwnWebsite(s.profile, row.website);

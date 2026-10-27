@@ -559,11 +559,10 @@ describe("autoInputAfterSend (DB)", () => {
 	};
 	const withSession = () => saveSession(env, "Op", "HUGOTOGEL", "https://ag.suksesbogil.com", "PHPSESSID=" + SID1);
 
-	it("saklar OFF (default) -> tidak ada input/Hitung/job; hanya daftar baca Total (menu Prediksi) untuk website yang punya PHPSESSID", async () => {
+	it("saklar OFF (default) -> TIDAK ADA input/Hitung/job dan Total TIDAK dibaca (tidak ada daftar baca untuk browser, perintah pemilik 28 Okt 2026)", async () => {
 		const m = mockSite();
 		await withSession();
-		const n = await go(m, RAW, ["HUGOTOGEL", "FOLATOTO"]);
-		expect(n).toEqual({ results: [], totalsCheck: [{ website: "HUGOTOGEL", market: "FLORIDAEVE", prizes: ["9808"], date: plan().date }] });
+		expect(await go(m, RAW, ["HUGOTOGEL", "FOLATOTO"])).toBeUndefined();
 		expect(m.st.posts).toHaveLength(0);
 		expect(await listJobs(env, "Op")).toHaveLength(0);
 	});
@@ -1124,7 +1123,7 @@ describe("Total Omset/Referal/Menang tersimpan & tampil di menu Result (DB + API
 	});
 });
 
-describe("pasaran dihitung MANUAL (tidak di-auto / Auto Prediksi OFF): KIRIM SEMUA langsung membaca Total dari menu Prediksi", () => {
+describe("pasaran dihitung MANUAL (Auto Prediksi ON, pasaran dimatikan): KIRIM SEMUA langsung membaca Total dari menu Prediksi", () => {
 	let env: Env;
 	let op: string;
 	const profile = { username: "Op", role: "OPERATOR", websites: ["HUGOTOGEL", "FOLATOTO"], menus: null } as unknown as UserProfile;
@@ -1138,6 +1137,10 @@ describe("pasaran dihitung MANUAL (tidak di-auto / Auto Prediksi OFF): KIRIM SEM
 		ctx.db.prepare(`INSERT INTO users (username, username_lc, password_hash, role, status, websites) VALUES ('Op', 'op', ?, 'OPERATOR', 'AKTIF', ?)`).run(hash, JSON.stringify(["HUGOTOGEL", "FOLATOTO"]));
 		op = ((await checkLogin(env, "Op", "pw", "")) as { sessionToken: string }).sessionToken;
 		await saveSession(env, "Op", "HUGOTOGEL", "https://ag.suksesbogil.com", "PHPSESSID=" + SID1);
+		// Baca Total tanpa Auto Prediksi hanya berlaku untuk pasaran yang dimatikan PER PASARAN: saklar utama ON.
+		// (Saklar utama OFF = tidak membaca apa pun; diuji di blok "saklar OFF" di bawah.)
+		await setEnabled(env, "Op", true);
+		setGlobalOffMarkets(["FLORIDAEVE"]);
 	});
 	/** Seperti browser: KIRIM SEMUA -> tiap totalsCheck dipanggil terpisah. */
 	const send = async (m: ReturnType<typeof mockSite>) => {
@@ -1154,7 +1157,6 @@ describe("pasaran dihitung MANUAL (tidak di-auto / Auto Prediksi OFF): KIRIM SEM
 	};
 
 	for (const [label, setup] of [
-		["Auto Prediksi OFF", async () => {}],
 		["Auto Prediksi ON + pasaran dimatikan", async () => { await setEnabled(env, "Op", true); setGlobalOffMarkets(["FLORIDAEVE"]); }],
 	] as const) {
 		it(`${label}: Last Result -> Submit -> Total terbaca seketika; Result & Riwayat Job terisi; tidak ada Kirim/Hitung`, async () => {
@@ -1221,7 +1223,7 @@ describe("pasaran dihitung MANUAL (tidak di-auto / Auto Prediksi OFF): KIRIM SEM
 	it("catatan manual tidak memblokir Auto Prediksi untuk result yang sama bila pasaran dinyalakan lagi", async () => {
 		const m = mockSite({ prediksi: {} });
 		await send(m);
-		await setEnabled(env, "Op", true);
+		setGlobalOffMarkets([]); // pasaran dinyalakan lagi
 		const n = await autoInputAfterSend(env, profile, RAW, processText(RAW), ["HUGOTOGEL"]);
 		expect(n?.results[0].status).toBe("ANTRI");
 		expect(n?.totalsCheck).toBeUndefined();
@@ -1229,6 +1231,7 @@ describe("pasaran dihitung MANUAL (tidak di-auto / Auto Prediksi OFF): KIRIM SEM
 
 	it("Auto Prediksi ON: result 'SUDAH' yang job-nya GAGAL TIDAK membaca Total (periode lama menyesatkan, pemilik 25 Okt) dan ditandai perlu dicek; notice membawa plan", async () => {
 		await setEnabled(env, "Op", true);
+		setGlobalOffMarkets([]); // pasaran di-auto lagi (beforeEach mematikannya untuk skenario manual)
 		const first = await autoInputAfterSend(env, profile, RAW, processText(RAW), ["HUGOTOGEL"]);
 		expect(first?.plan).toEqual({ market: "FLORIDAEVE", prizes: ["9808"], date: plan().date });
 		expect(first?.totalsCheck).toBeUndefined();
@@ -1242,6 +1245,49 @@ describe("pasaran dihitung MANUAL (tidak di-auto / Auto Prediksi OFF): KIRIM SEM
 
 	it("website di luar akses akun ditolak", async () => {
 		await expect(autoInputTotalsCheck(env, op, { website: "LAINTOTO", market: "FLORIDAEVE", prizes: ["9808"], date: "" })).rejects.toThrow(/tidak ada di akses/);
+	});
+
+	describe("saklar utama Auto Prediksi OFF -> Total Omset/Referal/Menang ikut OFF (perintah pemilik 28 Okt 2026)", () => {
+		/** fetch yang menghitung: OFF berarti NOL permintaan ke admin website. */
+		const counting = (m: ReturnType<typeof mockSite>) => {
+			const c = { hits: 0, fetchFn: async (u: string, i?: RequestInit) => (c.hits++, m.fetchFn(u, i)) };
+			return c;
+		};
+		it("KIRIM SEMUA: tidak ada daftar baca Total untuk browser, walau PHPSESSID tersimpan dan pasaran dimatikan", async () => {
+			await setEnabled(env, "Op", false);
+			expect(await autoInputAfterSend(env, profile, RAW, processText(RAW), ["HUGOTOGEL"])).toBeUndefined();
+		});
+		it("browser lama yang masih memanggil autoInputTotalsCheck ditolak tanpa satu pun permintaan ke admin", async () => {
+			await setEnabled(env, "Op", false);
+			const c = counting(mockSite({ prediksi: { totals: ["21,700", "0", "0"] } }));
+			const r = await autoInputTotalsCheck(env, op, { website: "HUGOTOGEL", market: "FLORIDAEVE", prizes: ["9808"], date: "" }, c.fetchFn);
+			expect(r).toMatchObject({ success: false, website: "HUGOTOGEL" });
+			expect(String((r as { message: string }).message)).toMatch(/OFF/);
+			expect(c.hits).toBe(0);
+			expect(await listJobs(env, "Op")).toHaveLength(0);
+			expect(await rows()).toHaveLength(0);
+		});
+		it("tombol Ambil ulang di tabel Result ditolak tanpa permintaan ke admin; angka yang sudah ada tidak berubah", async () => {
+			const ok = mockSite({ prediksi: { totals: ["21,700", "0", "0"] } });
+			ok.rows[0].nums = ["9808"];
+			await send(ok); // saklar ON: terbaca normal
+			const id = Number((await rows())[0].id);
+			await setEnabled(env, "Op", false);
+			const c = counting(mockSite({ prediksi: { totals: ["9,999", "99", "9"] } }));
+			const r = await autoInputTotalsRefresh(env, op, id, c.fetchFn);
+			expect(r).toMatchObject({ success: false });
+			expect(c.hits).toBe(0);
+			expect((await rows())[0]).toMatchObject({ omset: "21,700" });
+		});
+		it("saklar dinyalakan lagi -> pembacaan Total jalan seperti biasa", async () => {
+			await setEnabled(env, "Op", false);
+			await setEnabled(env, "Op", true);
+			const m = mockSite({ prediksi: { totals: ["21,700", "0", "0"] } });
+			m.rows[0].nums = ["9808"];
+			const { n, out } = await send(m);
+			expect(n?.totalsCheck).toHaveLength(1);
+			expect(out[0]).toMatchObject({ success: true });
+		});
 	});
 });
 
