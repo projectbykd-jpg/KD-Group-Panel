@@ -255,6 +255,13 @@ export interface AdminSession {
 	website: string;
 	baseUrl: string;
 	phpsessid: string;
+	/** User-Agent permintaan ke admin (dari Admin > Pengaturan Sistem "Versi Chrome"); kosong = bawaan lama. */
+	ua?: string;
+}
+
+export function adminUserAgent(chromeVer: number): string {
+	const v = Math.trunc(chromeVer) || 128;
+	return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${v}.0 Safari/537.36`;
 }
 
 /** "PHPSESSID=abc; foo=1" / "abc" -> "abc". Kosong kalau bentuknya tidak masuk akal. */
@@ -374,10 +381,12 @@ export async function getSessions(env: Env, username: string): Promise<AdminSess
 		.prepare(`SELECT website, base_url, phpsessid FROM auto_input_session WHERE username = ? ORDER BY website`)
 		.bind(username)
 		.all<Record<string, unknown>>();
+	const ua = adminUserAgent(await getSys(env, "sys_admin_chrome_ver"));
 	return (res.results ?? []).map((r) => ({
 		website: String(r.website),
 		baseUrl: String(r.base_url || ""),
 		phpsessid: String(r.phpsessid || ""),
+		ua,
 	}));
 }
 

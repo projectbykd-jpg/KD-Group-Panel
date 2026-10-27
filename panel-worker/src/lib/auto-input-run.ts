@@ -586,7 +586,7 @@ export async function adminReq(
 	for (let hop = 0; hop < 4; hop++) {
 		const headers: Record<string, string> = {
 			Cookie: cookieHeader(sess.phpsessid),
-			"User-Agent": UA,
+			"User-Agent": sess.ua || UA,
 			Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 			"Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8",
 			Referer: init.referer || sess.baseUrl,

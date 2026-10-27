@@ -7,7 +7,7 @@ import { autoInputAfterSend, autoInputRetryTick, autoInputTotals, autoInputTotal
 import { autoInputGetState, autoInputSetMarkets } from "../src/api/auto-input";
 import { checkLogin } from "../src/api/auth";
 import { hashPassword } from "../src/lib/crypto";
-import { getDisabledMarkets, setGlobalOffMarkets, cleanMarketList, hideJobs, pruneAutoInputJobs, pendingFailureAlerts, ackFailureAlerts, claimJob, parseCookieInput, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
+import { getDisabledMarkets, setGlobalOffMarkets, cleanMarketList, hideJobs, pruneAutoInputJobs, pendingFailureAlerts, ackFailureAlerts, claimJob, parseCookieInput, adminUserAgent, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
 import { frameSources, parseAngkaPage, readTopRow, parseHitungPage, runAutoInput, buildPayload, parseForms, parseLastResult, parsePrediksiTotals, prediksiEchoProblem } from "../src/lib/auto-input-run";
 import { processText } from "../src/lib/parser";
 import { autoInputBeforeSend, smartAutoSendFast } from "../src/api/send";
@@ -572,6 +572,16 @@ describe("URL admin hanya tiga host yang diizinkan", () => {
 		const r = await runAutoInput({ session: sess, plan: plan(), fetchFn: f });
 		expect(r.detail).toMatch(/teks-isi="[^"]*Sesi habis/);
 		expect(r.detail).not.toContain("ABCDEF1234567890ZZZZ");
+	});
+	it("User-Agent ke admin mengikuti sess.ua (versi Chrome dari Pengaturan Sistem); tanpa itu bawaan 128", async () => {
+		expect(adminUserAgent(152)).toContain("Chrome/152.0 ");
+		expect(adminUserAgent(0)).toContain("Chrome/128.0 ");
+		const seen: string[] = [];
+		const f = async (_u: string, i?: RequestInit) => (seen.push(String((i?.headers as Record<string, string>)["User-Agent"])), new Response("", { status: 200 }));
+		await runAutoInput({ session: { ...sess, ua: adminUserAgent(152) }, plan: plan(), fetchFn: f });
+		await runAutoInput({ session: sess, plan: plan(), fetchFn: f });
+		expect(seen[0]).toContain("Chrome/152.0");
+		expect(seen[seen.length - 1]).toContain("Chrome/128.0");
 	});
 	it("login terdeteksi walau teks nama website (HUGOTOGEL.COM) tidak ada -- cookie hanya PHPSESSID", async () => {
 		const r = await runAutoInput({ session: sess, plan: plan(), dryRun: true, fetchFn: mockSite().fetchFn });
