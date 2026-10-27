@@ -20,7 +20,7 @@ import { getSys } from "./settings";
 import { getUserProfiles } from "./db";
 import { hasMenu } from "./menus";
 import { getSiteAccounts, type PanelZCfg } from "./site";
-import { getSessions, type AdminSession } from "./auto-input";
+import { adminFetcherFor, getSessions, type AdminSession } from "./auto-input";
 import { adminReq, htmlText, type Fetcher } from "./auto-input-run";
 import { openPanelZ, parsePanelZRows, type PanelZHandle } from "../senders/panelz";
 import { logActivity } from "./activity";
@@ -395,7 +395,8 @@ export async function pruneTotoMacau(env: Env, days?: number): Promise<{ log: nu
 	return { log: a.meta.changes, events: b.meta.changes };
 }
 
-type Cand = { username: string; sess: AdminSession };
+/** f = pengambil lewat proxy user (Jalur Kedua); kosong = pengambil bawaan. */
+type Cand = { username: string; sess: AdminSession; f?: Fetcher };
 const dayOf = (nowMs: number, back = 0): string => new Date(nowMs + 7 * 3600_000 - back * 86400_000).toISOString().slice(0, 10);
 
 async function candidates(env: Env, only?: string[]): Promise<Map<string, Cand[]>> {
@@ -412,9 +413,10 @@ async function candidates(env: Env, only?: string[]): Promise<Map<string, Cand[]
 		if (p.role !== "ADMIN" && p.role !== "OPERATOR") continue;
 		// aturan yang sama dengan KIRIM KE PANEL-Z di menu Result
 		if (!p.permissions.panelz || !hasMenu(p, "result") || !hasMenu(p, "auto-input")) continue;
+		const f = await adminFetcherFor(env, p.username);
 		for (const s of await getSessions(env, p.username)) {
 			if (!s.phpsessid || !p.websites.includes(s.website)) continue;
-			(out.get(s.website) ?? out.set(s.website, []).get(s.website)!).push({ username: p.username, sess: s });
+			(out.get(s.website) ?? out.set(s.website, []).get(s.website)!).push({ username: p.username, sess: s, f });
 		}
 	}
 	return out;
@@ -513,7 +515,7 @@ async function reconcileWebsite(
 			budget.used++;
 			sum.net = true;
 			try {
-				html = await adminReq(deps.f, c.sess, game.path);
+				html = await adminReq(c.f ?? deps.f, c.sess, game.path);
 				reader = c.username;
 				ok = true;
 				break;
@@ -540,7 +542,8 @@ async function reconcileWebsite(
 			continue;
 		}
 		// halaman admin berikutnya ([ >> ]) selama baris paling lama di halaman terakhir masih dalam rentang
-		const sessOk = cands.find((c) => c.username === reader)!.sess;
+		const readerCand = cands.find((c) => c.username === reader)!;
+		const sessOk = readerCand.sess;
 		const all = new Map(rows.map((r) => [r.period, r]));
 		let pageRows = rows;
 		for (let pg = 1; pg < ADMIN_MAX_PAGES; pg++) {
@@ -548,7 +551,7 @@ async function reconcileWebsite(
 			if (!oldest || oldest < since || pageRows.length < ADMIN_PAGE_SIZE) break;
 			budget.used++;
 			try {
-				pageRows = parseTotoRows(await adminReq(deps.f, sessOk, `admin_angka.php?start=${pg * ADMIN_PAGE_SIZE}&end=${(pg + 1) * ADMIN_PAGE_SIZE}&sar=${game.game}&game=${encodeURIComponent(game.name)}`));
+				pageRows = parseTotoRows(await adminReq(readerCand.f ?? deps.f, sessOk, `admin_angka.php?start=${pg * ADMIN_PAGE_SIZE}&end=${(pg + 1) * ADMIN_PAGE_SIZE}&sar=${game.game}&game=${encodeURIComponent(game.name)}`));
 			} catch (e) {
 				buf.push(evStmt(env, website, "info", "WARN", `Admin ${gameLabel(game)}: halaman ${pg + 1} gagal dibaca (${e instanceof Error ? e.message : String(e)}) — memakai halaman yang sudah terbaca`));
 				break;

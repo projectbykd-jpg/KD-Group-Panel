@@ -4,10 +4,11 @@ const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: im
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1, tursoGeneration: () => 0 }));
 
 import { autoInputAfterSend, autoInputRetryTick, autoInputTotals, autoInputTotalsCheck, autoInputTotalsRefresh, runQueuedJob, type AutoInputNotice } from "../src/api/auto-input";
-import { autoInputGetState, autoInputSetMarkets } from "../src/api/auto-input";
+import { autoInputDeleteProxy, autoInputGetState, autoInputSaveProxy, autoInputSetMarkets, autoInputTestProxy } from "../src/api/auto-input";
 import { checkLogin } from "../src/api/auth";
 import { hashPassword } from "../src/lib/crypto";
-import { getDisabledMarkets, setGlobalOffMarkets, cleanMarketList, hideJobs, pruneAutoInputJobs, pendingFailureAlerts, ackFailureAlerts, claimJob, parseCookieInput, adminUserAgent, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
+import { getDisabledMarkets, setGlobalOffMarkets, cleanMarketList, hideJobs, pruneAutoInputJobs, pendingFailureAlerts, ackFailureAlerts, claimJob, parseCookieInput, adminFetcherFor, adminUserAgent, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
+import type { Fetcher } from "../src/lib/auto-input-run";
 import { frameSources, parseAngkaPage, readTopRow, parseHitungPage, runAutoInput, buildPayload, parseForms, parseLastResult, parsePrediksiTotals, prediksiEchoProblem } from "../src/lib/auto-input-run";
 import { processText } from "../src/lib/parser";
 import { autoInputBeforeSend, smartAutoSendFast } from "../src/api/send";
@@ -768,6 +769,55 @@ describe("autoInputAfterSend (DB)", () => {
 			await autoInputSetMarkets(env, adm, []); // admin mengosongkan -> tidak hidup lagi dari data lama
 			await autoInputGetState(env, adm);
 			expect(await getDisabledMarkets(env)).toEqual([]);
+		});
+	});
+
+	describe("Jalur Kedua (proxy per user)", () => {
+		let op: string;
+		beforeEach(async () => {
+			const ctx = fakeEnv();
+			env = ctx.env;
+			const hash = await hashPassword("pw");
+			ctx.db.prepare(`INSERT INTO users (username, username_lc, password_hash, role, status, websites) VALUES ('Op', 'op', ?, 'OPERATOR', 'AKTIF', 'HUGOTOGEL')`).run(hash);
+			ctx.db.prepare(`INSERT INTO users (username, username_lc, password_hash, role, status, websites) VALUES ('Dua', 'dua', ?, 'OPERATOR', 'AKTIF', 'FOLATOTO')`).run(hash);
+			op = ((await checkLogin(env, "Op", "pw", "")) as { sessionToken: string }).sessionToken;
+		});
+		type St = { proxy: { enabled: boolean; scheme: string; host: string; port: number | string; user: string; hasPass: boolean } };
+		it("simpan lewat API: kata sandi TIDAK pernah dikirim balik (hanya penanda terisi); kolom kosong mempertahankan sandi lama", async () => {
+			const r = await autoInputSaveProxy(env, op, { enabled: true, scheme: "http", host: "gate.example.net", port: 8000, user: "kuda", pass: "RAHASIA-pw-123" });
+			expect(r).toMatchObject({ success: true, enabled: true });
+			const st = (await autoInputGetState(env, op)) as unknown as St;
+			expect(st.proxy).toEqual({ enabled: true, scheme: "http", host: "gate.example.net", port: 8000, user: "kuda", hasPass: true });
+			expect(JSON.stringify(st)).not.toContain("RAHASIA-pw-123");
+			await autoInputSaveProxy(env, op, { enabled: false, scheme: "http", host: "gate.example.net", port: 8000, user: "kuda", pass: "" });
+			const row = turso.current!.raw.prepare(`SELECT enabled, proxy_pass FROM auto_input_proxy WHERE username='Op'`).get() as { enabled: number; proxy_pass: string };
+			expect(row).toEqual({ enabled: 0, proxy_pass: "RAHASIA-pw-123" });
+		});
+		it("input buruk ditolak; menyalakan tanpa host/port ditolak; user tanpa sandi ditolak", async () => {
+			expect(await autoInputSaveProxy(env, op, { enabled: true, host: "127.0.0.1", port: 80 })).toMatchObject({ success: false });
+			expect(await autoInputSaveProxy(env, op, { enabled: true, host: "", port: "" })).toMatchObject({ success: false });
+			expect(await autoInputSaveProxy(env, op, { enabled: true, host: "gate.example.net", port: 8000, user: "kuda", pass: "" })).toMatchObject({ success: false, message: expect.stringMatching(/kata sandi/) });
+		});
+		it("per user: proxy Op tidak berlaku untuk user lain; adminFetcherFor hanya aktif bila dinyalakan & lengkap; override (tes) menang", async () => {
+			await autoInputSaveProxy(env, op, { enabled: true, host: "gate.example.net", port: 8000, user: "kuda", pass: "pw" });
+			expect(typeof (await adminFetcherFor(env, "Op"))).toBe("function");
+			expect(await adminFetcherFor(env, "Dua")).toBeUndefined();
+			const own: Fetcher = async () => new Response("x");
+			expect(await adminFetcherFor(env, "Op", own)).toBe(own);
+			await autoInputSaveProxy(env, op, { enabled: false, host: "gate.example.net", port: 8000, user: "kuda", pass: "" });
+			expect(await adminFetcherFor(env, "Op")).toBeUndefined();
+		});
+		it("uji proxy menampilkan IP dari luar; hapus mengembalikan ke fetch biasa", async () => {
+			expect(await autoInputTestProxy(env, op)).toMatchObject({ success: false, message: "Proxy belum disimpan." });
+			await autoInputSaveProxy(env, op, { enabled: false, host: "gate.example.net", port: 8000, user: "", pass: "" });
+			const f: Fetcher = async () => new Response(JSON.stringify({ ip: "203.0.113.7" }));
+			expect(await autoInputTestProxy(env, op, f)).toMatchObject({ success: true, ip: "203.0.113.7" });
+			const bad: Fetcher = async () => {
+				throw new Error("Proxy menolak: user/kata sandi proxy salah (HTTP 407).");
+			};
+			expect(await autoInputTestProxy(env, op, bad)).toMatchObject({ success: false, message: expect.stringMatching(/407/) });
+			await autoInputDeleteProxy(env, op);
+			expect(((await autoInputGetState(env, op)) as unknown as St).proxy).toMatchObject({ enabled: false, host: "", hasPass: false });
 		});
 	});
 

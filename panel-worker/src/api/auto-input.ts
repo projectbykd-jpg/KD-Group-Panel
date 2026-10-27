@@ -1,6 +1,6 @@
 // Endpoint menu "Auto Prediksi" + kaitan ke alur KIRIM SEMUA SISTEM (send.ts).
 // Logika inti: lib/auto-input.ts (rencana, sesi, antrean) & lib/auto-input-run.ts (eksekutor).
-import { getSys } from "../lib/settings";
+import { getSys, getSysCached } from "../lib/settings";
 import { ghToken, investTurboRepo, loadIntegrations } from "../lib/integrations";
 import { ackTotoAlerts, dismissTotoRows, listTotoEvents, totoDispatchAt, totoWindowInfo, pruneTotoMacau, listTotoLog, logTotoEvent, pendingTotoAlerts, TOTO_MAX_ATTEMPTS, totoMacauRun } from "../lib/toto-macau";
 import { requireSession } from "./auth";
@@ -48,6 +48,8 @@ import {
 	setStage,
 	startJob,
 } from "../lib/auto-input";
+import { adminFetcherFor, deleteProxy, getProxy, saveProxy } from "../lib/auto-input";
+import { cleanProxyInput, proxyFetcher } from "../lib/proxy-fetch";
 import { findMarketCode, readPrediksiLastTotals, readPrediksiTotals, runAutoInput, type Fetcher } from "../lib/auto-input-run";
 
 /** Jam awal setelah tengah malam WIB (sys_auto_input_midnight_grace_h): tanggal form admin boleh = tanggal result + 1. */
@@ -76,6 +78,7 @@ export async function autoInputGetState(env: Env, token: string) {
 	const s = await gate(env, token);
 	// 3 query Turso saja (dulu 5+ ditambah ensure 12 perintah): config (saklar + pasaran mati), sesi, riwayat job.
 	const [cfg, sessions, jobs] = await Promise.all([getConfig(env, s.username), getSessions(env, s.username), listJobs(env, s.username)]);
+	const proxy = cfg.proxy;
 	const { enabled } = cfg;
 	const isAdmin = s.profile.role === "ADMIN";
 	await loadMasterData(env);
@@ -107,6 +110,8 @@ export async function autoInputGetState(env: Env, token: string) {
 			};
 		}),
 		jobs,
+		// Jalur kedua (proxy): kata sandi TIDAK pernah dikirim balik -- hanya penanda "terisi".
+		proxy: { enabled: !!proxy?.enabled, scheme: proxy?.scheme ?? "http", host: proxy?.host ?? "", port: proxy?.port || "", user: proxy?.user ?? "", hasPass: !!proxy?.pass },
 		historyDays: await getSys(env, "sys_auto_input_history_days"),
 		retryMax: await getSys(env, "sys_auto_input_retry_max"),
 		retryGapMin: await getSys(env, "sys_auto_input_retry_gap_min"),
@@ -152,6 +157,44 @@ export async function autoInputDeleteSession(env: Env, token: string, website: s
 	return { success: true };
 }
 
+/** Jalur kedua (proxy) per user: simpan pengaturan. pass kosong = pertahankan yang lama. */
+export async function autoInputSaveProxy(env: Env, token: string, data: Record<string, unknown>) {
+	const s = await gate(env, token);
+	const old = await getProxy(env, s.username);
+	const c = cleanProxyInput({ scheme: data.scheme, host: data.host, port: data.port, user: data.user, pass: data.pass });
+	if (!c.ok) return { success: false, message: c.error };
+	const enabled = !!data.enabled;
+	const pass = c.cfg.pass !== "" ? c.cfg.pass : old?.pass ?? "";
+	if (enabled && (!c.cfg.host || !c.cfg.port)) return { success: false, message: "Isi host dan port proxy dulu sebelum menyalakan Jalur Kedua." };
+	if (enabled && c.cfg.user && !pass) return { success: false, message: "User proxy terisi tetapi kata sandi kosong (atau sebaliknya)." };
+	await saveProxy(env, s.username, { enabled, scheme: c.cfg.scheme, host: c.cfg.host, port: c.cfg.port, user: c.cfg.user, pass: c.cfg.pass });
+	await logActivity(env, s.username, "AUTO PREDIKSI JALUR KEDUA", `${enabled ? "AKTIF" : "Nonaktif"} — proxy ${c.cfg.scheme}://${c.cfg.host}:${c.cfg.port}`, "BERHASIL", "");
+	return { success: true, enabled };
+}
+
+export async function autoInputDeleteProxy(env: Env, token: string) {
+	const s = await gate(env, token);
+	await deleteProxy(env, s.username);
+	await logActivity(env, s.username, "AUTO PREDIKSI JALUR KEDUA", "Proxy dihapus", "BERHASIL", "");
+	return { success: true };
+}
+
+/** Uji proxy tersimpan (walau belum diaktifkan): minta alamat IP yang terlihat dari luar LEWAT proxy -- harus sama dengan IP yang didaftarkan di admin website. */
+export async function autoInputTestProxy(env: Env, token: string, fetchFn?: Fetcher) {
+	const s = await gate(env, token);
+	const p = await getProxy(env, s.username);
+	if (!p?.host || !p.port) return { success: false, message: "Proxy belum disimpan." };
+	const f = fetchFn ?? proxyFetcher(p, { timeoutMs: getSysCached("sys_fetch_timeout_sec") * 1000 });
+	try {
+		const res = await f("https://api.ipify.org/?format=json", { headers: { Accept: "application/json" } });
+		const ip = String(((await res.json()) as { ip?: unknown }).ip ?? "").slice(0, 64);
+		if (!/^[0-9a-f:.]{3,45}$/i.test(ip)) throw new Error(`Balasan tidak dikenali (HTTP ${res.status}).`);
+		return { success: true, ip, message: `Proxy bekerja. IP yang terlihat dari luar: ${ip}. Pastikan sama dengan IP yang didaftarkan di admin website.` };
+	} catch (e) {
+		return { success: false, message: "Proxy gagal: " + (e instanceof Error ? e.message : String(e)).slice(0, 240) };
+	}
+}
+
 const idList = (v: unknown): number[] => (Array.isArray(v) ? v : []).map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 300);
 
 /** Checkbox + "Hapus terpilih" di Riwayat Job: sembunyikan job milik sendiri (sudah beres / ditangani manual). */
@@ -189,7 +232,7 @@ export async function autoInputTest(env: Env, token: string, website: string, ma
 		session: sess,
 		plan: { ok: true, market: mk, prizes: ["0000", "0000", "0000"], date: dateKeyNow(), key: "TEST" },
 		dryRun: true,
-		fetchFn,
+		fetchFn: await adminFetcherFor(env, s.username, fetchFn),
 		allowNextDay: await allowNextDay(env),
 	});
 	return { success: r.ok, message: r.detail, preview: r.preview };
@@ -307,7 +350,7 @@ async function manualTotalsCheck(env: Env, username: string, w: string, market: 
 	if (!sess?.phpsessid) return { success: false, website: w, message: `PHPSESSID ${w} belum disimpan — Total tidak bisa dibaca.` };
 	const badBase = adminBaseProblem(sess.website, sess.baseUrl);
 	if (badBase) return { success: false, website: w, message: `URL admin ${w} ditolak: ${badBase}.` };
-	const f: Fetcher = fetchFn ?? ((u, i) => fetch(u, i));
+	const f: Fetcher = (await adminFetcherFor(env, username, fetchFn)) ?? ((u, i) => fetch(u, i));
 	const key = `manual:${normMarket(market)}:${date}:${prizes.join("/")}`;
 	let period = "";
 	let numbers = prizes;
@@ -354,7 +397,7 @@ export async function runQueuedJob(env: Env, username: string, jobId: number, fe
 	const r = await runAutoInput({
 		session: sess,
 		plan,
-		fetchFn,
+		fetchFn: await adminFetcherFor(env, username, fetchFn),
 		allowNextDay: await allowNextDay(env),
 		onStage: (st, period) => setStage(env, job.id, st, period),
 	});
@@ -387,7 +430,7 @@ export async function autoInputRetryTick(env: Env, fetchFn?: Fetcher): Promise<b
 			continue;
 		}
 		const plan = { ok: true as const, market: job.market, prizes: job.prizes, date: job.resultDate, key: "" };
-		const r = await runAutoInput({ session: sess, plan, fetchFn, resumePeriod: job.period || undefined, allowNextDay: await allowNextDay(env), onStage: (st, period) => setStage(env, job.id, st, period) });
+		const r = await runAutoInput({ session: sess, plan, fetchFn: await adminFetcherFor(env, job.username, fetchFn), resumePeriod: job.period || undefined, allowNextDay: await allowNextDay(env), onStage: (st, period) => setStage(env, job.id, st, period) });
 		const left = maxRetries - n;
 		const note = r.ok ? "" : left > 0 ? ` (dicoba lagi otomatis ±${gapMin} menit)` : " (percobaan otomatis habis — CEK MANUAL)";
 		await finishJob(env, job.id, r.ok ? "DONE" : "FAILED", r.ok ? "selesai" : r.stage, r.ok ? withTotalsText(tag + r.detail, r.totals, r.totalsNote ?? "") : tag + r.detail + note, r.period || job.period);
@@ -425,7 +468,7 @@ export async function autoInputTotalsRefresh(env: Env, token: string, id: number
 	if (!sess?.phpsessid) return { success: false, message: `PHPSESSID ${w} belum disimpan.` };
 	const badBase = adminBaseProblem(sess.website, sess.baseUrl);
 	if (badBase) return { success: false, message: `URL admin ${w} ditolak: ${badBase}.` };
-	const f: Fetcher = fetchFn ?? ((u, i) => fetch(u, i));
+	const f: Fetcher = (await adminFetcherFor(env, s.username, fetchFn)) ?? ((u, i) => fetch(u, i));
 	const keep = { id: row.jobId, username: s.username, website: w, market: row.market, prizes: row.prizes, resultDate: "" };
 	try {
 		const code = await findMarketCode(f, sess, row.market);

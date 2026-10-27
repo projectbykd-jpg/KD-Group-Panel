@@ -14,7 +14,9 @@ import { adminDomain } from "./integrations";
 import { getTurso, tursoGeneration } from "./turso";
 import { ensureColumns } from "./turso-schema";
 import { sharedOnce } from "./shared-once";
-import { getSys } from "./settings";
+import { getSys, getSysCached } from "./settings";
+import { proxyFetcher } from "./proxy-fetch";
+import type { Fetcher } from "./auto-input-run";
 import { retentionFrom, tsNow, tsPlusMinutes } from "./time";
 import { MARKET_TO_PANEL, type Processed } from "./parser";
 import { INVEST_PASARAN } from "./invest";
@@ -65,6 +67,17 @@ async function ensureAutoInputTablesOnce(env: Env): Promise<void> {
 			phpsessid  TEXT NOT NULL DEFAULT '',
 			updated_at TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (username, website)
+		)`),
+		// Jalur kedua (proxy) per user: permintaan ke admin website dikirim lewat proxy milik user bila enabled=1 (lib/proxy-fetch.ts).
+		db.prepare(`CREATE TABLE IF NOT EXISTS auto_input_proxy (
+			username   TEXT PRIMARY KEY,
+			enabled    INTEGER NOT NULL DEFAULT 0,
+			scheme     TEXT NOT NULL DEFAULT 'http',
+			host       TEXT NOT NULL DEFAULT '',
+			port       INTEGER NOT NULL DEFAULT 0,
+			proxy_user TEXT NOT NULL DEFAULT '',
+			proxy_pass TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL DEFAULT ''
 		)`),
 		db.prepare(`CREATE TABLE IF NOT EXISTS auto_input_job (
 			id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -176,11 +189,17 @@ export function planAutoInput(rawText: string, p: Processed): AutoInputPlan {
 export async function getEnabled(env: Env, username: string): Promise<boolean> {
 	return (await getConfig(env, username)).enabled;
 }
-/** Saklar + daftar pasaran yang dimatikan dalam SATU query (dulu dua query terpisah di tiap buka menu). */
-export async function getConfig(env: Env, username: string): Promise<{ enabled: boolean; disabledMarkets: string[] }> {
+/** Saklar + daftar pasaran yang dimatikan + proxy Jalur Kedua dalam SATU query (anggaran subrequest buka menu: test/subrequest-budget.spec.ts). */
+export async function getConfig(env: Env, username: string): Promise<{ enabled: boolean; disabledMarkets: string[]; proxy: UserProxy | null }> {
 	await ensureAutoInputTables(env);
 	const row = await getTurso(env)
-		.prepare(`SELECT enabled, disabled_markets FROM auto_input_config WHERE username = ?`)
+		.prepare(
+			`SELECT c.enabled AS enabled, c.disabled_markets AS disabled_markets, p.username AS p_user, p.enabled AS p_enabled, p.scheme AS p_scheme, p.host AS p_host,
+			        p.port AS p_port, p.proxy_user AS p_proxy_user, p.proxy_pass AS p_proxy_pass
+			 FROM (SELECT ? AS u) x
+			 LEFT JOIN auto_input_config c ON c.username = x.u
+			 LEFT JOIN auto_input_proxy p ON p.username = x.u`,
+		)
 		.bind(username)
 		.first<Record<string, unknown>>();
 	let disabledMarkets: string[] = [];
@@ -189,7 +208,17 @@ export async function getConfig(env: Env, username: string): Promise<{ enabled: 
 	} catch {
 		/* kosong */
 	}
-	return { enabled: !!Number(row?.enabled ?? 0), disabledMarkets };
+	const proxy: UserProxy | null = row?.p_user
+		? {
+				enabled: !!Number(row.p_enabled),
+				scheme: String(row.p_scheme) === "socks5" ? "socks5" : "http",
+				host: String(row.p_host || ""),
+				port: Number(row.p_port) || 0,
+				user: String(row.p_proxy_user || ""),
+				pass: String(row.p_proxy_pass || ""),
+			}
+		: null;
+	return { enabled: !!Number(row?.enabled ?? 0), disabledMarkets, proxy };
 }
 
 export async function setEnabled(env: Env, username: string, enabled: boolean): Promise<void> {
@@ -201,6 +230,66 @@ export async function setEnabled(env: Env, username: string, enabled: boolean): 
 		)
 		.bind(username, enabled ? 1 : 0, tsNow())
 		.run();
+}
+
+// ---------------------------------------------------------------------------
+// Jalur kedua (proxy) per user
+// ---------------------------------------------------------------------------
+export interface UserProxy {
+	enabled: boolean;
+	scheme: "http" | "socks5";
+	host: string;
+	port: number;
+	user: string;
+	pass: string;
+}
+
+export async function getProxy(env: Env, username: string): Promise<UserProxy | null> {
+	await ensureAutoInputTables(env);
+	const r = await getTurso(env)
+		.prepare(`SELECT enabled, scheme, host, port, proxy_user, proxy_pass FROM auto_input_proxy WHERE username = ?`)
+		.bind(username)
+		.first<Record<string, unknown>>();
+	if (!r) return null;
+	return {
+		enabled: !!Number(r.enabled),
+		scheme: String(r.scheme) === "socks5" ? "socks5" : "http",
+		host: String(r.host || ""),
+		port: Number(r.port) || 0,
+		user: String(r.proxy_user || ""),
+		pass: String(r.proxy_pass || ""),
+	};
+}
+
+/** Simpan jalur kedua. pass kosong = pertahankan yang lama (form tidak mengirim ulang rahasia). */
+export async function saveProxy(env: Env, username: string, p: { enabled: boolean; scheme: "http" | "socks5"; host: string; port: number; user: string; pass: string }): Promise<void> {
+	await ensureAutoInputTables(env);
+	const old = await getProxy(env, username);
+	const pass = p.pass !== "" ? p.pass : old?.pass ?? "";
+	await getTurso(env)
+		.prepare(
+			`INSERT INTO auto_input_proxy (username, enabled, scheme, host, port, proxy_user, proxy_pass, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(username) DO UPDATE SET enabled = excluded.enabled, scheme = excluded.scheme, host = excluded.host, port = excluded.port,
+			   proxy_user = excluded.proxy_user, proxy_pass = excluded.proxy_pass, updated_at = excluded.updated_at`,
+		)
+		.bind(username, p.enabled ? 1 : 0, p.scheme, p.host, p.port, p.user, pass, tsNow())
+		.run();
+}
+
+export async function deleteProxy(env: Env, username: string): Promise<void> {
+	await ensureAutoInputTables(env);
+	await getTurso(env).prepare(`DELETE FROM auto_input_proxy WHERE username = ?`).bind(username).run();
+}
+
+/**
+ * Pengambil permintaan untuk admin website milik `username`: lewat proxy BILA jalur kedua dinyalakan user itu dan terisi lengkap,
+ * kalau tidak undefined (= fetch biasa seperti dulu). `override` (tes) selalu menang.
+ */
+export async function adminFetcherFor(env: Env, username: string, override?: Fetcher): Promise<Fetcher | undefined> {
+	if (override) return override;
+	const p = await getProxy(env, username).catch(() => null);
+	if (!p?.enabled || !p.host || !p.port) return undefined;
+	return proxyFetcher(p, { timeoutMs: getSysCached("sys_fetch_timeout_sec") * 1000 });
 }
 
 // ---------------------------------------------------------------------------

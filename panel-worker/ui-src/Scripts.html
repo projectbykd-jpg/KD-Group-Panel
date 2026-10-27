@@ -5029,6 +5029,7 @@
               </ol>
             </details>
             <div class="ai-site-grid">${rows}</div>
+            ${aiProxyHtml(st)}
             ${aiMarketsHtml(st)}
           </section>
 
@@ -5055,6 +5056,55 @@
       autoInputSelUpdate('jobs');
       autoInputBadges();
       autoInputTotoLoad();
+    }
+    // Jalur Kedua: permintaan ke admin website dikirim lewat proxy milik user (IP tetap). Berlaku untuk semua website akun ini bila dinyalakan.
+    function aiProxyHtml(st) {
+      const p = (st && st.proxy) || {};
+      const esc = escapeHtml;
+      const cls = 'glass-inner border border-white/10 rounded-lg p-2 text-xs font-mono text-white';
+      return `<div class="ai-box mt-4" id="aiProxyBox">
+        <div class="flex items-center gap-2 flex-wrap">
+          <div class="text-xs font-bold text-white"><i class="fa-solid fa-route mr-1"></i>Jalur Kedua (Proxy)</div>
+          <span class="ai-pill ${p.enabled ? 'ok' : ''}">${p.enabled ? '<i class="fa-solid fa-check"></i> AKTIF' : 'Nonaktif'}</span>
+        </div>
+        <div class="text-[11px] text-slate-400">Admin website tertentu (mis. agwl) mematikan sesi bila dipakai dari IP selain IP tempat Anda login. Bila Jalur Kedua <b>AKTIF</b>, semua permintaan panel ke admin website <b>akun ini</b> (Auto Prediksi, Uji, Total, Toto Macau) dikirim lewat proxy di bawah — pakai IP tetap yang sama dengan IP login Anda. Nonaktif = jalur biasa seperti sebelumnya. Kata sandi proxy tidak pernah ditampilkan ulang.</div>
+        <div class="grid grid-cols-1 sm:grid-cols-4 gap-2 mt-2">
+          <label class="ai-field"><span>Jenis</span><select id="aiPxScheme" class="${cls}"><option value="http" ${p.scheme === 'socks5' ? '' : 'selected'}>HTTP (CONNECT)</option><option value="socks5" ${p.scheme === 'socks5' ? 'selected' : ''}>SOCKS5</option></select></label>
+          <label class="ai-field sm:col-span-2"><span>Host</span><input id="aiPxHost" type="text" autocomplete="off" value="${esc(p.host || '')}" placeholder="mis. gate.penyedia.com" class="${cls}"></label>
+          <label class="ai-field"><span>Port</span><input id="aiPxPort" type="text" inputmode="numeric" autocomplete="off" value="${esc(String(p.port || ''))}" placeholder="8000" class="${cls}"></label>
+          <label class="ai-field sm:col-span-2"><span>User proxy</span><input id="aiPxUser" type="text" autocomplete="off" value="${esc(p.user || '')}" placeholder="(kosong bila tanpa login)" class="${cls}"></label>
+          <label class="ai-field sm:col-span-2"><span>Kata sandi proxy</span><input id="aiPxPass" type="password" autocomplete="new-password" placeholder="${p.hasPass ? 'Kosongkan = pakai yang tersimpan' : 'Kata sandi proxy'}" class="${cls}"></label>
+        </div>
+        <div class="ai-site-actions mt-2">
+          <button onclick="autoInputProxySave(${p.enabled ? 'true' : 'false'})" class="ai-btn primary"><i class="fa-solid fa-floppy-disk"></i>Simpan</button>
+          <button onclick="autoInputProxyTest()" class="ai-btn" ${p.host ? '' : 'disabled'}><i class="fa-solid fa-vial"></i>Uji proxy (cek IP)</button>
+          <button onclick="autoInputProxySave(${p.enabled ? 'false' : 'true'})" class="ai-btn ${p.enabled ? 'danger' : 'primary'}">${p.enabled ? 'NONAKTIFKAN' : 'SIMPAN & AKTIFKAN'}</button>
+          <button onclick="autoInputProxyDelete()" class="ai-btn danger" ${p.host ? '' : 'disabled'}><i class="fa-solid fa-trash"></i>Hapus</button>
+        </div>
+      </div>`;
+    }
+    function autoInputProxySave(enabled) {
+      const v = id => (document.getElementById(id) || {}).value || '';
+      google.script.run
+        .withSuccessHandler(res => { if (apiFailed(res)) { toast(apiMessage(res)); return; } toast(res.enabled ? 'Jalur Kedua AKTIF' : 'Pengaturan proxy disimpan'); loadAutoInputPage(true); })
+        .withFailureHandler(err => toast((err && err.message) || 'Gagal menyimpan'))
+        .autoInputSaveProxy(currentSessionToken, { enabled: !!enabled, scheme: v('aiPxScheme'), host: v('aiPxHost'), port: v('aiPxPort'), user: v('aiPxUser'), pass: v('aiPxPass') });
+    }
+    function autoInputProxyTest() {
+      showActionPopup('LOADING', 'Menguji proxy', 'Menyambung lewat proxy dan menanyakan IP yang terlihat dari luar...', 'fa-vial');
+      google.script.run
+        .withSuccessHandler(res => { const ok = !!(res && res.success); showActionPopup(ok ? 'DONE' : 'ERROR', ok ? 'Proxy bekerja' : 'Proxy gagal', apiMessage(res), ok ? 'fa-check' : 'fa-triangle-exclamation'); })
+        .withFailureHandler(err => showActionPopup('ERROR', 'Proxy gagal', (err && err.message) || 'Gagal', 'fa-triangle-exclamation'))
+        .autoInputTestProxy(currentSessionToken);
+    }
+    function autoInputProxyDelete() {
+      confirmCenter({ type: 'danger', title: 'Hapus pengaturan proxy?', message: 'Host, port, user dan kata sandi proxy dihapus. Panel kembali memakai jalur biasa.', confirmText: 'HAPUS', showCancel: true }).then(ok => {
+        if (!ok) return;
+        google.script.run
+          .withSuccessHandler(res => { if (apiFailed(res)) { toast(apiMessage(res)); return; } toast('Proxy dihapus'); loadAutoInputPage(true); })
+          .withFailureHandler(err => toast((err && err.message) || 'Gagal'))
+          .autoInputDeleteProxy(currentSessionToken);
+      });
     }
     // Saklar per pasaran: hijau = di-auto, abu = tidak di-auto (input manual). Daftar = pasaran di riwayat 30 hari + yang dimatikan.
     function aiMarketsHtml(st) {
