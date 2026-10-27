@@ -236,11 +236,13 @@ export function proxyFetcher(cfg: ProxyConfig, opts: ProxyFetchOpts = {}): Fetch
 		const port = Number(u.port) || (isTls ? 443 : 80);
 		const connector = opts.connector ?? (await defaultConnector());
 		const timeoutMs = opts.timeoutMs ?? 25_000;
-		const socks: { base?: Duplex; conn?: Duplex } = {};
+		const socks: { base?: Duplex; conn?: Duplex; stage: string } = { stage: "menyambung ke proxy" };
 		const run = async (): Promise<Response> => {
 			const base = (socks.base = connector(cfg.host, cfg.port, isTls));
+			socks.stage = "login & terowongan proxy";
 			if (cfg.scheme === "socks5") await tunnelSocks5(base, cfg, u.hostname, port);
 			else await tunnelHttp(base, cfg, u.hostname, port);
+			socks.stage = isTls ? "TLS/HTTP ke tujuan (terowongan proxy sudah berhasil)" : "HTTP ke tujuan";
 			const conn = (socks.conn = isTls ? (base.startTls ? base.startTls({ expectedServerHostname: u.hostname }) : base) : base);
 			const method = (init.method ?? "GET").toUpperCase();
 			const body = init.body == null ? "" : String(init.body);
@@ -256,7 +258,7 @@ export function proxyFetcher(cfg: ProxyConfig, opts: ProxyFetchOpts = {}): Fetch
 			w.releaseLock();
 			const r = new ByteReader(conn.readable.getReader());
 			const head = await r.readUntil("\r\n\r\n", 64 << 10);
-			if (!head) throw new Error("Admin website menutup koneksi tanpa menjawab.");
+			if (!head) throw new Error("Tujuan/proxy menutup koneksi tanpa menjawab (proxy mungkin hanya mengizinkan domain tertentu, atau memblokir permintaan dari Cloudflare).");
 			const hl = dec.decode(head).split("\r\n");
 			const status = Number(hl[0].split(" ")[1]);
 			if (!Number.isInteger(status) || status < 100) throw new Error("Balasan admin website tidak valid.");
@@ -287,6 +289,9 @@ export function proxyFetcher(cfg: ProxyConfig, opts: ProxyFetchOpts = {}): Fetch
 					timer = setTimeout(() => rej(new Error(`Proxy/admin website tidak menjawab dalam ${Math.round(timeoutMs / 1000)} detik.`)), timeoutMs);
 				}),
 			]);
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : String(e);
+			throw new Error(`${msg} [tahap: ${socks.stage}]`);
 		} finally {
 			if (timer) clearTimeout(timer);
 			try {

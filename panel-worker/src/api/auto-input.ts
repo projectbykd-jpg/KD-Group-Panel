@@ -185,14 +185,30 @@ export async function autoInputTestProxy(env: Env, token: string, fetchFn?: Fetc
 	const p = await getProxy(env, s.username);
 	if (!p?.host || !p.port) return { success: false, message: "Proxy belum disimpan." };
 	const f = fetchFn ?? proxyFetcher(p, { timeoutMs: getSysCached("sys_fetch_timeout_sec") * 1000 });
+	// 1) alamat IP yang terlihat dari luar; 2) bila layanan itu tidak terjangkau lewat proxy, coba website admin milik user sendiri
+	//    (sebagian proxy hanya mengizinkan domain tertentu) supaya jelas apakah proxy bisa dipakai untuk tujuan sebenarnya.
+	let ipErr = "";
 	try {
 		const res = await f("https://api.ipify.org/?format=json", { headers: { Accept: "application/json" } });
 		const ip = String(((await res.json()) as { ip?: unknown }).ip ?? "").slice(0, 64);
 		if (!/^[0-9a-f:.]{3,45}$/i.test(ip)) throw new Error(`Balasan tidak dikenali (HTTP ${res.status}).`);
 		return { success: true, ip, message: `Proxy bekerja. IP yang terlihat dari luar: ${ip}. Pastikan sama dengan IP yang didaftarkan di admin website.` };
 	} catch (e) {
-		return { success: false, message: "Proxy gagal: " + (e instanceof Error ? e.message : String(e)).slice(0, 240) };
+		ipErr = (e instanceof Error ? e.message : String(e)).slice(0, 240);
 	}
+	const sess = (await getSessions(env, s.username)).find((x) => x.baseUrl && !adminBaseProblem(x.website, x.baseUrl));
+	if (sess) {
+		try {
+			const res = await f(sess.baseUrl, { headers: { "User-Agent": sess.ua || "Mozilla/5.0" }, redirect: "manual" });
+			return {
+				success: true,
+				message: `Proxy bisa menjangkau admin ${sess.website} (HTTP ${res.status}). Layanan cek-IP tidak terjangkau lewat proxy ini (${ipErr}), jadi IP keluar tidak bisa ditampilkan — itu tidak menghalangi pemakaian.`,
+			};
+		} catch (e) {
+			return { success: false, message: `Proxy gagal ke admin ${sess.website}: ${(e instanceof Error ? e.message : String(e)).slice(0, 240)}` };
+		}
+	}
+	return { success: false, message: "Proxy gagal: " + ipErr };
 }
 
 const idList = (v: unknown): number[] => (Array.isArray(v) ? v : []).map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 300);

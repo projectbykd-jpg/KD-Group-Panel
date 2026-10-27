@@ -807,6 +807,24 @@ describe("autoInputAfterSend (DB)", () => {
 			await autoInputSaveProxy(env, op, { enabled: false, host: "gate.example.net", port: 8000, user: "kuda", pass: "" });
 			expect(await adminFetcherFor(env, "Op")).toBeUndefined();
 		});
+		it("uji proxy: layanan cek-IP tidak terjangkau -> coba website admin user; galat memuat tahap & tanpa sandi", async () => {
+			await autoInputSaveProxy(env, op, { enabled: false, host: "gate.example.net", port: 8000, user: "kuda", pass: "RAHASIA-pw-123" });
+			await saveSession(env, "Op", "HUGOTOGEL", "https://ag.suksesbogil.com/", "PHPSESSID=abcdefghijklmnop");
+			const seen: string[] = [];
+			const f: Fetcher = async (u) => {
+				seen.push(u);
+				if (u.includes("ipify")) throw new Error("Tujuan/proxy menutup koneksi tanpa menjawab. [tahap: TLS/HTTP ke tujuan]");
+				return new Response("", { status: 200 });
+			};
+			const r = await autoInputTestProxy(env, op, f);
+			expect(r).toMatchObject({ success: true, message: expect.stringMatching(/menjangkau admin HUGOTOGEL \(HTTP 200\)/) });
+			expect(seen[1]).toBe("https://ag.suksesbogil.com/");
+			expect(JSON.stringify(r)).not.toContain("RAHASIA-pw-123");
+			const down: Fetcher = async () => {
+				throw new Error("gagal total");
+			};
+			expect(await autoInputTestProxy(env, op, down)).toMatchObject({ success: false, message: expect.stringMatching(/gagal ke admin HUGOTOGEL: gagal total/) });
+		});
 		it("uji proxy menampilkan IP dari luar; hapus mengembalikan ke fetch biasa", async () => {
 			expect(await autoInputTestProxy(env, op)).toMatchObject({ success: false, message: "Proxy belum disimpan." });
 			await autoInputSaveProxy(env, op, { enabled: false, host: "gate.example.net", port: 8000, user: "", pass: "" });
