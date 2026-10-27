@@ -820,7 +820,7 @@ describe("autoInputAfterSend (DB)", () => {
 			expect(r.success).toBe(true);
 			expect(r.message).toMatch(/HTTP polos via terowongan: GAGAL/);
 			expect(r.message).toMatch(/HTTPS admin HUGOTOGEL: OK \(HTTP 200\)/);
-			expect(seen).toEqual(["http://api.ipify.org/?format=json", "https://api.ipify.org/?format=json", "https://ag.suksesbogil.com/"]);
+			expect(seen).toEqual(["http://api.ipify.org/?format=json", "https://api.ipify.org/?format=json", "https://www.google.com/generate_204", "https://httpbin.org/ip", "https://ag.suksesbogil.com/"]);
 			expect(JSON.stringify(r)).not.toContain("RAHASIA-pw-123");
 			const down: Fetcher = async () => {
 				throw new Error("gagal total");

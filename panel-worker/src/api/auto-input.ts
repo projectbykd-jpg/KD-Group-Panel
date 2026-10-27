@@ -190,6 +190,9 @@ export async function autoInputTestProxy(env: Env, token: string, fetchFn?: Fetc
 	const steps: { label: string; url: string; json?: boolean }[] = [
 		{ label: "HTTP polos via terowongan", url: "http://api.ipify.org/?format=json", json: true },
 		{ label: "HTTPS cek-IP", url: "https://api.ipify.org/?format=json", json: true },
+		// pembanding HTTPS ke layanan di luar Cloudflare: bedakan "semua HTTPS gagal" dari "hanya tujuan di Cloudflare yang gagal"
+		{ label: "HTTPS pembanding Google", url: "https://www.google.com/generate_204" },
+		{ label: "HTTPS pembanding AWS", url: "https://httpbin.org/ip" },
 	];
 	if (sess) steps.push({ label: `HTTPS admin ${sess.website}`, url: sess.baseUrl });
 	const lines: string[] = [];
@@ -206,7 +209,7 @@ export async function autoInputTestProxy(env: Env, token: string, fetchFn?: Fetc
 				if (m && !ip) ip = m[1];
 				lines.push(`${st.label}: OK (HTTP ${res.status}${m ? ", IP " + m[1] : ""})`);
 			} else {
-				adminOk = true;
+				if (st.label.startsWith("HTTPS admin")) adminOk = true;
 				lines.push(`${st.label}: OK (HTTP ${res.status})`);
 			}
 		} catch (e) {
