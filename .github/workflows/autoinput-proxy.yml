@@ -34,9 +34,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: Install deps panel-worker
+          cache: npm
+          cache-dependency-path: panel-worker/package-lock.json
+      - name: Install (hanya dependency runtime -- runner cuma butuh @libsql/client)
         working-directory: panel-worker
-        run: npm ci
+        # --omit=dev: lewati wrangler/vitest/playwright/dll (tidak dipakai runner) -> install jauh lebih cepat drpd npm ci penuh.
+        run: npm ci --omit=dev --prefer-offline --no-audit --no-fund
       - name: Jalankan Auto Prediksi lewat proxy user
         working-directory: panel-worker
         env:
@@ -50,6 +53,7 @@ jobs:
             echo "::error::Repository secret CRON_KEY belum diisi (Settings > Secrets and variables > Actions)."
             exit 1
           fi
-          # Bundle runner (hanya src kita; semua paket dibiarkan dimuat dari node_modules -> hindari bug bundling ws/libsql).
-          npx esbuild runner/autoinput-proxy.ts --bundle --platform=node --format=esm --packages=external --external:cloudflare:sockets --outfile=runner/dist.mjs
+          # Bundle runner dgn esbuild standalone (versi dipin, di-cache npx) -- tidak perlu memasang esbuild lewat npm.
+          # --packages=external: src kita dibundel, @libsql/client dimuat dari node_modules (hindari bug bundling ws).
+          npx -y esbuild@0.28.1 runner/autoinput-proxy.ts --bundle --platform=node --format=esm --packages=external --external:cloudflare:sockets --outfile=runner/dist.mjs
           node runner/dist.mjs
