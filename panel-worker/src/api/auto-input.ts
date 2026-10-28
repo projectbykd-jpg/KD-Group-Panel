@@ -48,7 +48,7 @@ import {
 	setStage,
 	startJob,
 } from "../lib/auto-input";
-import { adminFetcherFor, claimNextProxyJob, deleteProxy, getJobById, getProxy, proxyUsesSite, saveProxy } from "../lib/auto-input";
+import { adminFetcherFor, claimNextProxyJob, deleteProxy, getJobById, getLatestJobFor, getProxy, proxyUsesSite, saveProxy } from "../lib/auto-input";
 import { cleanProxyInput, probeTunnel, proxyFetcher, tlsClientHello } from "../lib/proxy-fetch";
 import { findMarketCode, readPrediksiLastTotals, readPrediksiTotals, runAutoInput, type Fetcher } from "../lib/auto-input-run";
 
@@ -409,6 +409,16 @@ export async function autoInputTest(env: Env, token: string, website: string, ma
 		allowNextDay: await allowNextDay(env),
 	});
 	return { success: r.ok, message: r.detail, preview: r.preview };
+}
+
+/** Monitor KIRIM SEMUA (website Jalur Kedua): status job TERBARU website+pasaran hari ini, supaya browser bisa menampilkan hasil async dari runner GitHub. */
+export async function autoInputJobStatus(env: Env, token: string, website: string, market: string) {
+	const s = await gate(env, token);
+	const w = mustOwnWebsite(s.profile, website);
+	const job = await getLatestJobFor(env, s.username, w, String(market ?? ""));
+	if (!job) return { success: true, found: false };
+	const final = job.status === "DONE" || job.status === "FAILED" || job.status === "SKIPPED";
+	return { success: true, found: true, status: job.status, final, done: job.status === "DONE", detail: job.detail };
 }
 
 /** Polling hasil job UJI Jalur Kedua (dibuat autoInputTest saat proxy aktif). pending=true selama runner belum lapor. */

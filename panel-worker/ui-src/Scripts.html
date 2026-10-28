@@ -4829,6 +4829,15 @@
       queued.forEach(q => {
         google.script.run
           .withSuccessHandler(res => {
+            // Website JALUR KEDUA: pekerjaan diserahkan ke runner GitHub (async) -> JANGAN tandai Gagal. Tampilkan "diproses" & pantau hasilnya.
+            const delegated = res && res.status === 'DILEWATI' && /Jalur Kedua/.test(String(res.detail || ''));
+            if (delegated) {
+              spSet(q.website, 'auto', 'run', 'Jalur Kedua (GitHub)…', res.detail);
+              out.push({ website: q.website, status: 'DIPROSES', detail: 'Diproses lewat Jalur Kedua (GitHub) — hasilnya akan muncul di sini & Riwayat Job.', manual: false });
+              aiProxyWatchResult(q.website, a.plan && a.plan.market, 0);
+              finish();
+              return;
+            }
             const ok = !!(res && res.success);
             if (!ok) notDone.push(q.website);
             spSet(q.website, 'auto', ok ? 'ok' : 'fail', ok ? 'Dihitung' : 'Gagal', res && res.detail);
@@ -4848,6 +4857,26 @@
           })
           .autoInputRun(currentSessionToken, q.jobId);
       });
+    }
+
+    // Pantau hasil job Jalur Kedua (dikerjakan runner GitHub, async). Poll tiap 5 dtk s/d ~5 menit; begitu DONE/FAILED, perbarui monitor + Total.
+    function aiProxyWatchResult(website, market, tries) {
+      if (!website) return;
+      if (tries > 60) { spSet(website, 'auto', 'warn', 'Jalur Kedua: cek Riwayat Job', 'Runner GitHub belum melapor; buka Auto Prediksi › Riwayat Job.'); return; }
+      setTimeout(() => {
+        google.script.run
+          .withSuccessHandler(res => {
+            if (res && res.found && res.final) {
+              const ok = !!res.done;
+              spSet(website, 'auto', ok ? 'ok' : 'fail', ok ? 'Dihitung (Jalur 2)' : 'Gagal (Jalur 2)', res.detail);
+              if (ok) { try { omsetState.at = 0; loadOmsetTable(true); } catch (e) {} }
+              return;
+            }
+            aiProxyWatchResult(website, market, tries + 1); // masih QUEUED/RUNNING -> terus pantau
+          })
+          .withFailureHandler(() => aiProxyWatchResult(website, market, tries + 1))
+          .autoInputJobStatus(currentSessionToken, website, market || '');
+      }, 5000);
     }
 
     function autoInputShow(rs) {

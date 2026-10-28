@@ -20,7 +20,7 @@ import { getSys } from "./settings";
 import { getUserProfiles } from "./db";
 import { hasMenu } from "./menus";
 import { getSiteAccounts, type PanelZCfg } from "./site";
-import { adminFetcherFor, getSessions, type AdminSession } from "./auto-input";
+import { getProxy, getSessions, proxyUsesSite, type AdminSession } from "./auto-input";
 import { adminReq, htmlText, type Fetcher } from "./auto-input-run";
 import { openPanelZ, parsePanelZRows, type PanelZHandle } from "../senders/panelz";
 import { logActivity } from "./activity";
@@ -413,10 +413,13 @@ async function candidates(env: Env, only?: string[]): Promise<Map<string, Cand[]
 		if (p.role !== "ADMIN" && p.role !== "OPERATOR") continue;
 		// aturan yang sama dengan KIRIM KE PANEL-Z di menu Result
 		if (!p.permissions.panelz || !hasMenu(p, "result") || !hasMenu(p, "auto-input")) continue;
-		const f = await adminFetcherFor(env, p.username);
+		// Website Jalur Kedua TIDAK bisa dijangkau Worker (proxy/TLS) -> LEWATI dari Toto Macau Worker supaya tidak gagal berisik
+		// ("sesi habis"). Toto Macau untuk website Jalur Kedua akan ditangani terpisah (belum lewat Jalur 2).
+		const px = await getProxy(env, p.username).catch(() => null);
 		for (const s of await getSessions(env, p.username)) {
 			if (!s.phpsessid || !p.websites.includes(s.website)) continue;
-			(out.get(s.website) ?? out.set(s.website, []).get(s.website)!).push({ username: p.username, sess: s, f });
+			if (proxyUsesSite(px, s.website)) continue; // Jalur Kedua: jangan coba lewat Worker
+			(out.get(s.website) ?? out.set(s.website, []).get(s.website)!).push({ username: p.username, sess: s });
 		}
 	}
 	return out;

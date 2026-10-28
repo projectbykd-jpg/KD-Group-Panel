@@ -962,6 +962,16 @@ export async function claimRetry(env: Env, jobId: number, maxRetries: number, ga
  * lalu FAILED yang sudah waktunya dicoba ulang. Mengunci job jadi RUNNING secara atomik (sama seperti claimJob/claimRetry),
  * jadi dua runner paralel tidak pernah menjalankan job yang sama. null = tidak ada job.
  */
+/** Job TERBARU hari ini untuk website+pasaran ini (dipakai monitor Jalur Kedua memantau hasil async dari runner GitHub). */
+export async function getLatestJobFor(env: Env, username: string, website: string, market: string): Promise<JobRow | null> {
+	await ensureAutoInputTables(env);
+	const row = await getTurso(env)
+		.prepare(`SELECT * FROM auto_input_job WHERE username = ? AND website = ? AND upper(market) = ? AND created_at >= ? ORDER BY id DESC LIMIT 1`)
+		.bind(username, String(website).trim().toUpperCase(), String(market).trim().toUpperCase(), retentionFrom(1))
+		.first<Record<string, unknown>>();
+	return row ? rowToJob(row) : null;
+}
+
 export async function getJobById(env: Env, username: string, id: number): Promise<JobRow | null> {
 	await ensureAutoInputTables(env);
 	const row = await getTurso(env).prepare(`SELECT * FROM auto_input_job WHERE id = ? AND username = ?`).bind(id, username).first<Record<string, unknown>>();
