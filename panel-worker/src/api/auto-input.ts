@@ -48,7 +48,7 @@ import {
 	setStage,
 	startJob,
 } from "../lib/auto-input";
-import { adminFetcherFor, claimNextProxyJob, deleteProxy, getJobById, getProxy, saveProxy } from "../lib/auto-input";
+import { adminFetcherFor, claimNextProxyJob, deleteProxy, getJobById, getProxy, proxyUsesSite, saveProxy } from "../lib/auto-input";
 import { cleanProxyInput, probeTunnel, proxyFetcher, tlsClientHello } from "../lib/proxy-fetch";
 import { findMarketCode, readPrediksiLastTotals, readPrediksiTotals, runAutoInput, type Fetcher } from "../lib/auto-input-run";
 
@@ -111,7 +111,7 @@ export async function autoInputGetState(env: Env, token: string) {
 		}),
 		jobs,
 		// Jalur kedua (proxy): kata sandi TIDAK pernah dikirim balik -- hanya penanda "terisi".
-		proxy: { enabled: !!proxy?.enabled, scheme: proxy?.scheme ?? "http", host: proxy?.host ?? "", port: proxy?.port || "", user: proxy?.user ?? "", hasPass: !!proxy?.pass },
+		proxy: { enabled: !!proxy?.enabled, scheme: proxy?.scheme ?? "http", host: proxy?.host ?? "", port: proxy?.port || "", user: proxy?.user ?? "", hasPass: !!proxy?.pass, sites: proxy?.sites ?? [] },
 		historyDays: await getSys(env, "sys_auto_input_history_days"),
 		retryMax: await getSys(env, "sys_auto_input_retry_max"),
 		retryGapMin: await getSys(env, "sys_auto_input_retry_gap_min"),
@@ -162,12 +162,13 @@ export async function autoInputSaveProxy(env: Env, token: string, data: Record<s
 	const s = await gate(env, token);
 	const old = await getProxy(env, s.username);
 	const c = cleanProxyInput({ scheme: data.scheme, host: data.host, port: data.port, user: data.user, pass: data.pass });
+	const sites = Array.isArray(data.sites) ? (data.sites as unknown[]).map((x) => String(x).trim().toUpperCase()).filter((x) => s.profile.websites.includes(x)) : undefined;
 	if (!c.ok) return { success: false, message: c.error };
 	const enabled = !!data.enabled;
 	const pass = c.cfg.pass !== "" ? c.cfg.pass : old?.pass ?? "";
 	if (enabled && (!c.cfg.host || !c.cfg.port)) return { success: false, message: "Isi host dan port proxy dulu sebelum menyalakan Jalur Kedua." };
 	if (enabled && c.cfg.user && !pass) return { success: false, message: "User proxy terisi tetapi kata sandi kosong (atau sebaliknya)." };
-	await saveProxy(env, s.username, { enabled, scheme: c.cfg.scheme, host: c.cfg.host, port: c.cfg.port, user: c.cfg.user, pass: c.cfg.pass });
+	await saveProxy(env, s.username, { enabled, scheme: c.cfg.scheme, host: c.cfg.host, port: c.cfg.port, user: c.cfg.user, pass: c.cfg.pass, sites });
 	await logActivity(env, s.username, "AUTO PREDIKSI JALUR KEDUA", `${enabled ? "AKTIF" : "Nonaktif"} — proxy ${c.cfg.scheme}://${c.cfg.host}:${c.cfg.port}`, "BERHASIL", "");
 	return { success: true, enabled };
 }
@@ -295,7 +296,7 @@ export async function autoInputProxyNext(env: Env, user: string) {
 	const px = await getProxy(env, u);
 	if (!px?.enabled || !px.host || !px.port) return { ok: true, done: true, job: null, message: "Jalur Kedua tidak aktif untuk user ini." };
 	const [maxRetries, gapMin] = await Promise.all([getSys(env, "sys_auto_input_retry_max"), getSys(env, "sys_auto_input_retry_gap_min")]);
-	const claimed = await claimNextProxyJob(env, u, maxRetries, gapMin);
+	const claimed = await claimNextProxyJob(env, u, maxRetries, gapMin, px.sites);
 	if (!claimed) return { ok: true, done: true, job: null };
 	const sess = await getSession(env, u, claimed.job.website);
 	if (!sess?.phpsessid) {
@@ -394,7 +395,7 @@ export async function autoInputTest(env: Env, token: string, website: string, ma
 	const mk = String(market ?? "").trim().toUpperCase();
 	if (!mk) return { success: false, message: "Isi nama pasaran untuk diuji (mis. OREGON06)." };
 	// Jalur Kedua AKTIF: Worker tidak bisa menjangkau admin. Buat JOB UJI (dry-run) & picu runner GitHub — hasilnya dipoll browser.
-	if (!fetchFn && (await proxyActive(env, s.username))) {
+	if (!fetchFn && (await proxyForSite(env, s.username, w))) {
 		const started = await startJob(env, s.username, w, { ok: true, market: mk, prizes: ["0000", "0000", "0000"], date: dateKeyNow(), key: `UJI:${Date.now()}` });
 		if ("existing" in started) return { success: false, message: "Uji sebelumnya masih berjalan — tunggu sebentar lalu coba lagi." };
 		await dispatchAutoInputProxy(env, s.username);
@@ -497,14 +498,17 @@ export async function autoInputAfterSend(
 	}
 	// Jalur Kedua: picu runner GitHub begitu job dibuat (tidak menunggu browser memanggil autoInputRun per website) supaya
 	// job tidak yatim bila tab ditutup. Dikunci KV, jadi aman walau autoInputRun juga memicu. ghToken kosong -> diam (no-op).
-	if (await proxyActive(env, profile.username)) await dispatchAutoInputProxy(env, profile.username);
+	if (await proxyAny(env, profile.username)) await dispatchAutoInputProxy(env, profile.username);
 	return { results, plan: { market: plan.market, prizes: plan.prizes, date: plan.date } };
 }
 
 /** true bila user menyalakan Jalur Kedua & mengisinya lengkap (semua admin-call-nya harus lewat runner GitHub, bukan Worker). */
-async function proxyActive(env: Env, username: string): Promise<boolean> {
+async function proxyAny(env: Env, username: string): Promise<boolean> {
 	const px = await getProxy(env, username).catch(() => null);
 	return !!(px?.enabled && px.host && px.port);
+}
+async function proxyForSite(env: Env, username: string, website: string): Promise<boolean> {
+	return proxyUsesSite(await getProxy(env, username).catch(() => null), website);
 }
 
 /** Website (yang punya PHPSESSID) untuk pembacaan Total pasaran manual. Galat apa pun -> daftar kosong: tidak boleh mengganggu KIRIM SEMUA. */
@@ -529,8 +533,7 @@ export async function autoInputTotalsCheck(env: Env, token: string, data: Record
 	const s = await gate(env, token);
 	// Penjaga sisi server: browser lama (halaman belum di-refresh) bisa saja masih memanggil ini sesudah saklar dimatikan.
 	if (!(await getEnabled(env, s.username))) return { success: false, website: String(data?.website ?? ""), message: AUTO_OFF_TOTALS_MSG };
-	const pxTot = await getProxy(env, s.username);
-	if (pxTot?.enabled && pxTot.host && pxTot.port) return { success: false, website: String(data?.website ?? ""), message: AUTO_PROXY_TOTALS_MSG };
+	if (await proxyForSite(env, s.username, String(data?.website ?? ""))) return { success: false, website: String(data?.website ?? ""), message: AUTO_PROXY_TOTALS_MSG };
 	const w = mustOwnWebsite(s.profile, String(data?.website ?? ""));
 	const market = String(data?.market ?? "").trim().slice(0, 60);
 	const prizes = (Array.isArray(data?.prizes) ? data.prizes : []).map((x) => String(x).trim()).filter((x) => /^\d{1,8}$/.test(x)).slice(0, 3);
@@ -579,11 +582,10 @@ export async function runQueuedJob(env: Env, username: string, jobId: number, fe
 	// Eksekusi dialihkan ke runner GitHub Actions (autoinput-proxy.yml) yang jalan dari IP proxy user. Job dibiarkan QUEUED
 	// supaya diklaim runner. fetchFn (test) menang: biarkan jalur normal saat diuji.
 	if (!fetchFn) {
-		const px = await getProxy(env, username);
-		if (px?.enabled && px.host && px.port) {
+		const j0 = await getJobById(env, username, jobId);
+		if (j0 && (await proxyForSite(env, username, j0.website))) {
 			await dispatchAutoInputProxy(env, username);
-			const j = await getJobById(env, username, jobId);
-			return { website: j?.website ?? "-", status: "DILEWATI", detail: "Diproses lewat Jalur Kedua (GitHub Actions) — hasilnya muncul di Riwayat Job.", manual: false };
+			return { website: j0.website, status: "DILEWATI", detail: "Diproses lewat Jalur Kedua (GitHub Actions) — hasilnya muncul di Riwayat Job.", manual: false };
 		}
 	}
 	const job = await claimJob(env, username, jobId);
@@ -620,13 +622,10 @@ export async function autoInputRetryTick(env: Env, fetchFn?: Fetcher): Promise<b
 	if (maxRetries <= 0) return false;
 	const due = await dueRetryJobs(env, maxRetries, gapMin, 3);
 	for (const cand of due) {
-		if (!fetchFn) {
-			const px = await getProxy(env, cand.username);
-			if (px?.enabled && px.host && px.port) {
-				// retry user Jalur Kedua ditangani runner GitHub (claimNextProxyJob ambil job due-retry), bukan Worker.
-				await dispatchAutoInputProxy(env, cand.username);
-				continue;
-			}
+		if (!fetchFn && (await proxyForSite(env, cand.username, cand.website))) {
+			// retry website Jalur Kedua ditangani runner GitHub (claimNextProxyJob ambil job due-retry), bukan Worker.
+			await dispatchAutoInputProxy(env, cand.username);
+			continue;
 		}
 		const job = await claimRetry(env, cand.id, maxRetries, gapMin);
 		if (!job) continue; // sudah diambil tick lain
@@ -671,11 +670,10 @@ export async function autoInputTotals(env: Env, token: string) {
 export async function autoInputTotalsRefresh(env: Env, token: string, id: number, fetchFn?: Fetcher) {
 	const s = await gate(env, token);
 	if (!(await getEnabled(env, s.username))) return { success: false, message: AUTO_OFF_TOTALS_MSG };
-	const pxRef = await getProxy(env, s.username);
-	if (pxRef?.enabled && pxRef.host && pxRef.port) return { success: false, message: AUTO_PROXY_TOTALS_MSG };
 	const row = await getTotalsRow(env, s.username, Number(id));
 	if (!row) throw new Error("Baris tidak ditemukan.");
 	const w = mustOwnWebsite(s.profile, row.website);
+	if (await proxyForSite(env, s.username, w)) return { success: false, message: AUTO_PROXY_TOTALS_MSG };
 	// Baris pasaran MANUAL: baca lagi Last Result TERKINI (admin mungkin baru menghitung), bukan periode lama.
 	const manual = await getManualJob(env, s.username, row.jobId);
 	if (manual) return manualTotalsCheck(env, s.username, w, manual.market, manual.prizes, manual.resultDate, fetchFn);

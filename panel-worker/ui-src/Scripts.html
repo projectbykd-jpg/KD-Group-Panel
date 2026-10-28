@@ -5075,6 +5075,10 @@
           <label class="ai-field sm:col-span-2"><span>User proxy</span><input id="aiPxUser" type="text" autocomplete="off" value="${esc(p.user || '')}" placeholder="(kosong bila tanpa login)" class="${cls}"></label>
           <label class="ai-field sm:col-span-2"><span>Kata sandi proxy</span><input id="aiPxPass" type="password" autocomplete="new-password" placeholder="${p.hasPass ? 'Kosongkan = pakai yang tersimpan' : 'Kata sandi proxy'}" class="${cls}"></label>
         </div>
+        <div class="mt-2">
+          <div class="text-[11px] text-slate-400 mb-1"><i class="fa-solid fa-list-check mr-1"></i>Website yang pakai Jalur Kedua <b>(kosongkan = SEMUA)</b>. Website yang tidak dicentang tetap jalur normal (lebih cepat, Total langsung tampil).</div>
+          <div class="ai-chips">${((st && st.websites) || []).map(w => `<label class="ai-chip" style="cursor:pointer"><input type="checkbox" class="aiPxSite" value="${esc(w.website)}" ${(p.sites || []).includes(w.website) ? 'checked' : ''} style="margin-right:6px">${esc(w.website)}</label>`).join('') || '<span class="text-[11px] text-slate-400">Belum ada website.</span>'}</div>
+        </div>
         <div class="ai-site-actions mt-2">
           <button onclick="autoInputProxySave(${p.enabled ? 'true' : 'false'})" class="ai-btn primary"><i class="fa-solid fa-floppy-disk"></i>Simpan</button>
           <button onclick="autoInputProxyTest()" class="ai-btn" ${p.host ? '' : 'disabled'}><i class="fa-solid fa-vial"></i>Uji proxy (cek IP)</button>
@@ -5085,10 +5089,11 @@
     }
     function autoInputProxySave(enabled) {
       const v = id => (document.getElementById(id) || {}).value || '';
+      const sites = Array.from(document.querySelectorAll('.aiPxSite:checked')).map(el => el.value);
       google.script.run
         .withSuccessHandler(res => { if (apiFailed(res)) { toast(apiMessage(res)); return; } toast(res.enabled ? 'Jalur Kedua AKTIF' : 'Pengaturan proxy disimpan'); loadAutoInputPage(true); })
         .withFailureHandler(err => toast((err && err.message) || 'Gagal menyimpan'))
-        .autoInputSaveProxy(currentSessionToken, { enabled: !!enabled, scheme: v('aiPxScheme'), host: v('aiPxHost'), port: v('aiPxPort'), user: v('aiPxUser'), pass: v('aiPxPass') });
+        .autoInputSaveProxy(currentSessionToken, { enabled: !!enabled, scheme: v('aiPxScheme'), host: v('aiPxHost'), port: v('aiPxPort'), user: v('aiPxUser'), pass: v('aiPxPass'), sites: sites });
     }
     function autoInputProxyTest() {
       showActionPopup('LOADING', 'Menguji proxy', 'Menyambung lewat proxy dan menanyakan IP yang terlihat dari luar...', 'fa-vial');

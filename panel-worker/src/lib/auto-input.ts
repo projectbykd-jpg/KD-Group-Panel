@@ -128,6 +128,8 @@ async function ensureAutoInputTablesOnce(env: Env): Promise<void> {
 		],
 		// Pasaran yang TIDAK di-auto untuk akun ini (JSON array nama pasaran ternormalisasi). Kosong = semua pasaran auto.
 		auto_input_config: [["disabled_markets", "TEXT NOT NULL DEFAULT '[]'"]],
+		// sites = daftar website (JSON) yang memakai Jalur Kedua. Kosong '[]' = SEMUA website akun (perilaku lama).
+		auto_input_proxy: [["sites", "TEXT NOT NULL DEFAULT '[]'"]],
 	});
 }
 
@@ -195,7 +197,7 @@ export async function getConfig(env: Env, username: string): Promise<{ enabled: 
 	const row = await getTurso(env)
 		.prepare(
 			`SELECT c.enabled AS enabled, c.disabled_markets AS disabled_markets, p.username AS p_user, p.enabled AS p_enabled, p.scheme AS p_scheme, p.host AS p_host,
-			        p.port AS p_port, p.proxy_user AS p_proxy_user, p.proxy_pass AS p_proxy_pass
+			        p.port AS p_port, p.proxy_user AS p_proxy_user, p.proxy_pass AS p_proxy_pass, p.sites AS p_sites
 			 FROM (SELECT ? AS u) x
 			 LEFT JOIN auto_input_config c ON c.username = x.u
 			 LEFT JOIN auto_input_proxy p ON p.username = x.u`,
@@ -216,6 +218,7 @@ export async function getConfig(env: Env, username: string): Promise<{ enabled: 
 				port: Number(row.p_port) || 0,
 				user: String(row.p_proxy_user || ""),
 				pass: String(row.p_proxy_pass || ""),
+				sites: parseProxySites(row.p_sites),
 			}
 		: null;
 	return { enabled: !!Number(row?.enabled ?? 0), disabledMarkets, proxy };
@@ -242,12 +245,32 @@ export interface UserProxy {
 	port: number;
 	user: string;
 	pass: string;
+	/** Website yang memakai Jalur Kedua (huruf besar). Kosong = SEMUA website akun. */
+	sites: string[];
+}
+
+/** JSON array string -> daftar kode website huruf besar (buang yang kosong/duplikat). */
+export function parseProxySites(raw: unknown): string[] {
+	let arr: unknown = [];
+	try {
+		arr = typeof raw === "string" ? JSON.parse(raw || "[]") : raw;
+	} catch {
+		arr = [];
+	}
+	return [...new Set((Array.isArray(arr) ? arr : []).map((x) => String(x).trim().toUpperCase()).filter(Boolean))].slice(0, 50);
+}
+
+/** Jalur Kedua dipakai untuk website ini? (aktif + terisi + termasuk daftar sites, atau sites kosong = semua). */
+export function proxyUsesSite(px: UserProxy | null | undefined, website: string): boolean {
+	if (!px?.enabled || !px.host || !px.port) return false;
+	if (!px.sites.length) return true;
+	return px.sites.includes(String(website).trim().toUpperCase());
 }
 
 export async function getProxy(env: Env, username: string): Promise<UserProxy | null> {
 	await ensureAutoInputTables(env);
 	const r = await getTurso(env)
-		.prepare(`SELECT enabled, scheme, host, port, proxy_user, proxy_pass FROM auto_input_proxy WHERE username = ?`)
+		.prepare(`SELECT enabled, scheme, host, port, proxy_user, proxy_pass, sites FROM auto_input_proxy WHERE username = ?`)
 		.bind(username)
 		.first<Record<string, unknown>>();
 	if (!r) return null;
@@ -258,21 +281,23 @@ export async function getProxy(env: Env, username: string): Promise<UserProxy | 
 		port: Number(r.port) || 0,
 		user: String(r.proxy_user || ""),
 		pass: String(r.proxy_pass || ""),
+		sites: parseProxySites(r.sites),
 	};
 }
 
 /** Simpan jalur kedua. pass kosong = pertahankan yang lama (form tidak mengirim ulang rahasia). */
-export async function saveProxy(env: Env, username: string, p: { enabled: boolean; scheme: "http" | "socks5"; host: string; port: number; user: string; pass: string }): Promise<void> {
+export async function saveProxy(env: Env, username: string, p: { enabled: boolean; scheme: "http" | "socks5"; host: string; port: number; user: string; pass: string; sites?: string[] }): Promise<void> {
 	await ensureAutoInputTables(env);
 	const old = await getProxy(env, username);
 	const pass = p.pass !== "" ? p.pass : old?.pass ?? "";
+	const sites = JSON.stringify(parseProxySites(p.sites ?? old?.sites ?? []));
 	await getTurso(env)
 		.prepare(
-			`INSERT INTO auto_input_proxy (username, enabled, scheme, host, port, proxy_user, proxy_pass, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			`INSERT INTO auto_input_proxy (username, enabled, scheme, host, port, proxy_user, proxy_pass, sites, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(username) DO UPDATE SET enabled = excluded.enabled, scheme = excluded.scheme, host = excluded.host, port = excluded.port,
-			   proxy_user = excluded.proxy_user, proxy_pass = excluded.proxy_pass, updated_at = excluded.updated_at`,
+			   proxy_user = excluded.proxy_user, proxy_pass = excluded.proxy_pass, sites = excluded.sites, updated_at = excluded.updated_at`,
 		)
-		.bind(username, p.enabled ? 1 : 0, p.scheme, p.host, p.port, p.user, pass, tsNow())
+		.bind(username, p.enabled ? 1 : 0, p.scheme, p.host, p.port, p.user, pass, sites, tsNow())
 		.run();
 }
 
@@ -925,11 +950,19 @@ export async function claimNextProxyJob(
 	username: string,
 	maxRetries: number,
 	gapMin: number,
+	/** Website yang pakai Jalur Kedua (huruf besar). Kosong = semua website (runner melayani semuanya). */
+	sites: string[] = [],
 ): Promise<{ job: JobRow; retry: boolean; tag: string } | null> {
 	await ensureAutoInputTables(env);
 	await expireRunning(env);
 	const db = getTurso(env);
-	const q = await db.prepare(`SELECT id FROM auto_input_job WHERE username = ? AND status = 'QUEUED' ORDER BY id ASC LIMIT 1`).bind(username).first<{ id: number }>();
+	// Filter website: hanya job untuk website yang dipilih pakai Jalur Kedua (website lain dijalankan di jalur normal Worker).
+	const siteList = [...new Set(sites.map((w) => w.trim().toUpperCase()).filter(Boolean))];
+	const siteSql = siteList.length ? ` AND website IN (${siteList.map(() => "?").join(",")})` : "";
+	const q = await db
+		.prepare(`SELECT id FROM auto_input_job WHERE username = ? AND status = 'QUEUED'${siteSql} ORDER BY id ASC LIMIT 1`)
+		.bind(username, ...siteList)
+		.first<{ id: number }>();
 	if (q?.id) {
 		const job = await claimJob(env, username, Number(q.id));
 		if (job) return { job, retry: false, tag: "" };
@@ -937,10 +970,10 @@ export async function claimNextProxyJob(
 	if (maxRetries > 0) {
 		const due = await db
 			.prepare(
-				`SELECT id FROM auto_input_job WHERE username = ? AND status = 'FAILED' AND hidden = 0 AND attempts < ?
+				`SELECT id FROM auto_input_job WHERE username = ? AND status = 'FAILED' AND hidden = 0 AND attempts < ?${siteSql}
 				 AND updated_at >= ? AND updated_at <= ? AND created_at >= ? AND NOT ${noRetrySql()} ORDER BY updated_at ASC, id ASC LIMIT 1`,
 			)
-			.bind(username, maxRetries, tsPlusMinutes(-RETRY_WINDOW_MIN), tsPlusMinutes(-gapMin), tsPlusMinutes(-RETRY_WINDOW_MIN))
+			.bind(username, maxRetries, ...siteList, tsPlusMinutes(-RETRY_WINDOW_MIN), tsPlusMinutes(-gapMin), tsPlusMinutes(-RETRY_WINDOW_MIN))
 			.first<{ id: number }>();
 		if (due?.id) {
 			const job = await claimRetry(env, Number(due.id), maxRetries, gapMin);

@@ -787,7 +787,7 @@ describe("autoInputAfterSend (DB)", () => {
 			const r = await autoInputSaveProxy(env, op, { enabled: true, scheme: "http", host: "gate.example.net", port: 8000, user: "kuda", pass: "RAHASIA-pw-123" });
 			expect(r).toMatchObject({ success: true, enabled: true });
 			const st = (await autoInputGetState(env, op)) as unknown as St;
-			expect(st.proxy).toEqual({ enabled: true, scheme: "http", host: "gate.example.net", port: 8000, user: "kuda", hasPass: true });
+			expect(st.proxy).toEqual({ enabled: true, scheme: "http", host: "gate.example.net", port: 8000, user: "kuda", hasPass: true, sites: [] });
 			expect(JSON.stringify(st)).not.toContain("RAHASIA-pw-123");
 			await autoInputSaveProxy(env, op, { enabled: false, scheme: "http", host: "gate.example.net", port: 8000, user: "kuda", pass: "" });
 			const row = turso.current!.raw.prepare(`SELECT enabled, proxy_pass FROM auto_input_proxy WHERE username='Op'`).get() as { enabled: number; proxy_pass: string };
@@ -806,6 +806,31 @@ describe("autoInputAfterSend (DB)", () => {
 			expect(await adminFetcherFor(env, "Op", own)).toBe(own);
 			await autoInputSaveProxy(env, op, { enabled: false, host: "gate.example.net", port: 8000, user: "kuda", pass: "" });
 			expect(await adminFetcherFor(env, "Op")).toBeUndefined();
+		});
+		it("per-website: hanya website terpilih yang lewat runner; website lain tetap jalur normal Worker", async () => {
+			const ctx = fakeEnv();
+			env = ctx.env;
+			const hash = await hashPassword("pw");
+			ctx.db.prepare(`INSERT INTO users (username, username_lc, password_hash, role, status, websites) VALUES ('Op', 'op', ?, 'OPERATOR', 'AKTIF', 'HUGOTOGEL,FOLATOTO')`).run(hash);
+			op = ((await checkLogin(env, "Op", "pw", "")) as { sessionToken: string }).sessionToken;
+			await saveSession(env, "Op", "FOLATOTO", "https://agwl12.suksesbogil.com/", "PHPSESSID=folafolafola1");
+			// Jalur Kedua hanya untuk FOLATOTO
+			await autoInputSaveProxy(env, op, { enabled: true, host: "gate.example.net", port: 1080, scheme: "socks5", user: "k", pass: "p", sites: ["FOLATOTO"] });
+			const st = (await autoInputGetState(env, op)) as any;
+			expect(st.proxy.sites).toEqual(["FOLATOTO"]);
+			// job FOLATOTO -> dialihkan (runner); job HUGOTOGEL -> jalur normal (runQueuedJob mencoba admin, bukan delegasi)
+			const jFola = (await startJob(env, "Op", "FOLATOTO", { ok: true, market: "OREGON06", prizes: ["1"], date: "2026-10-28", key: "KF" })) as { id: number };
+			const jHugo = (await startJob(env, "Op", "HUGOTOGEL", { ok: true, market: "OREGON06", prizes: ["1"], date: "2026-10-28", key: "KH" })) as { id: number };
+			const rFola = await runQueuedJob(env, "Op", jFola.id);
+			expect(rFola.detail).toMatch(/Jalur Kedua/);
+			expect((await getJobById(env, "Op", jFola.id))!.status).toBe("QUEUED"); // dibiarkan utk runner
+			const rHugo = await runQueuedJob(env, "Op", jHugo.id); // HUGOTOGEL tak punya sesi -> jalur normal: DILEWATI "PHPSESSID belum disimpan"
+			expect(rHugo.detail).toMatch(/PHPSESSID belum disimpan/);
+			expect(rHugo.detail).not.toMatch(/Jalur Kedua/);
+			// runner hanya dapat job FOLATOTO (bukan HUGOTOGEL)
+			const nx = (await autoInputProxyNext(env, "Op")) as any;
+			expect(nx.job.website).toBe("FOLATOTO");
+			expect(nx.job.id).toBe(jFola.id);
 		});
 		it("uji proxy bertahap: tiap langkah dilaporkan; cek-IP gagal tetapi website admin terjangkau = berhasil; sandi tidak bocor", async () => {
 			await autoInputSaveProxy(env, op, { enabled: false, host: "gate.example.net", port: 8000, user: "kuda", pass: "RAHASIA-pw-123" });
