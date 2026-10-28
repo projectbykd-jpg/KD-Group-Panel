@@ -4,7 +4,7 @@ const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: im
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1, tursoGeneration: () => 0 }));
 
 import { autoInputAfterSend, autoInputRetryTick, autoInputTotals, autoInputTotalsCheck, autoInputTotalsRefresh, runQueuedJob, type AutoInputNotice } from "../src/api/auto-input";
-import { autoInputDeleteProxy, autoInputGetState, autoInputProxyDone, autoInputProxyNext, autoInputSaveProxy, autoInputSetMarkets, autoInputTest, autoInputTestProxy } from "../src/api/auto-input";
+import { autoInputDeleteProxy, autoInputGetState, autoInputProxyDone, autoInputProxyNext, autoInputProxyTestStatus, autoInputSaveProxy, autoInputSetMarkets, autoInputTest, autoInputTestProxy } from "../src/api/auto-input";
 import { checkLogin } from "../src/api/auth";
 import { hashPassword } from "../src/lib/crypto";
 import { getDisabledMarkets, setGlobalOffMarkets, cleanMarketList, hideJobs, pruneAutoInputJobs, pendingFailureAlerts, ackFailureAlerts, claimJob, parseCookieInput, adminFetcherFor, adminUserAgent, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled, startJob, claimNextProxyJob, getJobById } from "../src/lib/auto-input";
@@ -893,10 +893,24 @@ describe("autoInputAfterSend (DB)", () => {
 			expect((await autoInputProxyNext(env, "Vp")) as any).toMatchObject({ ok: true, done: true, job: null });
 			void vp;
 		});
-		it("Uji (tanpa kirim) diblok untuk user proxy dgn pesan jelas", async () => {
+		it("Uji (tanpa kirim) user proxy -> buat job UJI (dry-run), runner dapat dryRun:true, status BERHASIL dipoll", async () => {
 			await saved();
-			const r = await autoInputTest(env, op, "HUGOTOGEL", "OREGON06");
-			expect(r).toMatchObject({ success: false, message: expect.stringMatching(/Jalur Kedua AKTIF/) });
+			const t = (await autoInputTest(env, op, "HUGOTOGEL", "OREGON06")) as any;
+			expect(t).toMatchObject({ success: true, pending: true });
+			expect(typeof t.jobId).toBe("number");
+			// status awal: masih menunggu
+			expect((await autoInputProxyTestStatus(env, op, t.jobId)) as any).toMatchObject({ pending: true });
+			// runner klaim: dapat flag dryRun
+			const nx = (await autoInputProxyNext(env, "Op")) as any;
+			expect(nx.job.id).toBe(t.jobId);
+			expect(nx.job.dryRun).toBe(true);
+			// runner lapor sukses dry-run
+			await autoInputProxyDone(env, { user: "Op", jobId: t.jobId, ok: "1", stage: "cek", detail: "login OK sebagai (pihaacs3), form terbaca" });
+			const st = (await autoInputProxyTestStatus(env, op, t.jobId)) as any;
+			expect(st).toMatchObject({ pending: false, success: true });
+			expect(st.message).toMatch(/UJI Jalur Kedua BERHASIL/);
+			// job uji tercatat SKIPPED (tidak memicu retry) & tidak menyimpan Total
+			expect((await getJobById(env, "Op", t.jobId))!.status).toBe("SKIPPED");
 		});
 		it("Total 'Ambil ulang' & cek diblok untuk user proxy", async () => {
 			await saved();

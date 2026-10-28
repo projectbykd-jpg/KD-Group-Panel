@@ -149,9 +149,10 @@ async function main() {
 		const session = { website: String(job.website), baseUrl: String(job.baseUrl), phpsessid: String(job.phpsessid), ua: String(job.ua || "") };
 		const plan = { ok: true as const, market: String(job.market), prizes: (job.prizes as string[]) ?? [], date: String(job.date), key: "" };
 		const retry = !!job.retry;
+		const dryRun = !!job.dryRun; // job UJI Jalur Kedua: cek login + baca form, TIDAK Kirim/Hitung
 		let r: Awaited<ReturnType<typeof runAutoInput>>;
 		try {
-			r = await runAutoInput({ session, plan, fetchFn, allowNextDay: !!out.allowNextDay, resumePeriod: retry ? String(job.period || "") || undefined : undefined });
+			r = await runAutoInput({ session, plan, fetchFn, dryRun, allowNextDay: !!out.allowNextDay, resumePeriod: !dryRun && retry ? String(job.period || "") || undefined : undefined });
 		} catch (e) {
 			r = { ok: false, stage: "cek", detail: "Runner error: " + (e instanceof Error ? e.message : String(e)).slice(0, 160), period: "" };
 		}

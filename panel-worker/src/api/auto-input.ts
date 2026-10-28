@@ -304,6 +304,7 @@ export async function autoInputProxyNext(env: Env, user: string) {
 		job: {
 			id: claimed.job.id,
 			retry: claimed.retry,
+			dryRun: claimed.job.resultKey.startsWith("UJI:"), // job uji: runAutoInput dryRun (tanpa Kirim/Hitung)
 			attempts: claimed.job.attempts,
 			website: claimed.job.website,
 			baseUrl: sess.baseUrl,
@@ -325,8 +326,16 @@ export async function autoInputProxyDone(env: Env, data: Record<string, unknown>
 	const job = await getJobById(env, u, jobId);
 	if (!job) return { ok: false, message: "Job tidak ditemukan." };
 	if (job.status !== "RUNNING") return { ok: true, message: "Job sudah final — laporan diabaikan (idempoten)." };
-	const [maxRetries, gapMin] = await Promise.all([getSys(env, "sys_auto_input_retry_max"), getSys(env, "sys_auto_input_retry_gap_min")]);
 	const okRun = String(data.ok) === "1" || data.ok === true;
+	const detailBaseRaw = String(data.detail ?? "").slice(0, 440);
+	// Job UJI Jalur Kedua (dry-run): catat sebagai SKIPPED (tidak memicu retry/peringatan), prefiks jelas supaya mudah dibaca & dipoll.
+	if (job.resultKey.startsWith("UJI:")) {
+		const msg = `UJI Jalur Kedua ${okRun ? "BERHASIL" : "GAGAL"} — ${job.website}: ${detailBaseRaw}`;
+		await finishJob(env, jobId, "SKIPPED", "uji", msg, "");
+		await logActivity(env, u, "AUTO PREDIKSI JALUR KEDUA", msg, okRun ? "BERHASIL" : "GAGAL", "").catch(() => {});
+		return { ok: true };
+	}
+	const [maxRetries, gapMin] = await Promise.all([getSys(env, "sys_auto_input_retry_max"), getSys(env, "sys_auto_input_retry_gap_min")]);
 	const stage = String(data.stage ?? (okRun ? "selesai" : "cek")).slice(0, 20);
 	const period = String(data.period ?? "");
 	const detailBase = String(data.detail ?? "").slice(0, 480);
@@ -376,8 +385,13 @@ export async function autoInputTest(env: Env, token: string, website: string, ma
 	if (!sess?.phpsessid) return { success: false, message: `PHPSESSID ${w} belum disimpan.` };
 	const mk = String(market ?? "").trim().toUpperCase();
 	if (!mk) return { success: false, message: "Isi nama pasaran untuk diuji (mis. OREGON06)." };
-	const pxUji = await getProxy(env, s.username);
-	if (pxUji?.enabled && pxUji.host && pxUji.port) return { success: false, message: "Jalur Kedua AKTIF: input & pembacaan admin dijalankan otomatis lewat GitHub saat KIRIM SEMUA (hasilnya di Riwayat Job). Tombol 'Uji (tanpa kirim)' langsung dari panel tidak tersedia untuk Jalur Kedua — cek koneksi proxy dengan tombol 'Uji proxy (cek IP)'." };
+	// Jalur Kedua AKTIF: Worker tidak bisa menjangkau admin. Buat JOB UJI (dry-run) & picu runner GitHub — hasilnya dipoll browser.
+	if (!fetchFn && (await proxyActive(env, s.username))) {
+		const started = await startJob(env, s.username, w, { ok: true, market: mk, prizes: ["0000", "0000", "0000"], date: dateKeyNow(), key: `UJI:${Date.now()}` });
+		if ("existing" in started) return { success: false, message: "Uji sebelumnya masih berjalan — tunggu sebentar lalu coba lagi." };
+		await dispatchAutoInputProxy(env, s.username);
+		return { success: true, pending: true, jobId: started.id, message: `Uji ${w} ${mk} dikirim ke GitHub (lewat proxy). Menunggu hasil… (dry-run: cek login + baca form, TIDAK mengubah apa pun di admin)` };
+	}
 	const r = await runAutoInput({
 		session: sess,
 		plan: { ok: true, market: mk, prizes: ["0000", "0000", "0000"], date: dateKeyNow(), key: "TEST" },
@@ -386,6 +400,16 @@ export async function autoInputTest(env: Env, token: string, website: string, ma
 		allowNextDay: await allowNextDay(env),
 	});
 	return { success: r.ok, message: r.detail, preview: r.preview };
+}
+
+/** Polling hasil job UJI Jalur Kedua (dibuat autoInputTest saat proxy aktif). pending=true selama runner belum lapor. */
+export async function autoInputProxyTestStatus(env: Env, token: string, jobId: number) {
+	const s = await gate(env, token);
+	const job = await getJobById(env, s.username, Number(jobId));
+	if (!job) return { success: false, pending: false, message: "Uji tidak ditemukan." };
+	if (job.status === "QUEUED" || job.status === "RUNNING") return { success: false, pending: true, message: "Menunggu runner GitHub…" };
+	const okUji = /UJI Jalur Kedua BERHASIL/.test(job.detail);
+	return { success: okUji, pending: false, message: job.detail };
 }
 
 // ---------------------------------------------------------------------------

@@ -34,6 +34,7 @@ import { cronFail, isUnexpectedError, pruneErrorLog, recordError } from "./lib/e
 import { logTotoEvent, totoDispatchTick, totoMacauRun } from "./lib/toto-macau";
 import {
 	autoInputProxyNext,
+	autoInputProxyTestStatus,
 	autoInputProxyDone,
 	autoInputClearJob,
 	autoInputHideJobs,
@@ -263,6 +264,7 @@ const ROUTES: Record<string, Handler> = {
 	autoInputTotoRun: (env, b) => autoInputTotoRun(env, s(b.token)),
 	autoInputAckAlerts: (env, b) => autoInputAckAlerts(env, s(b.token), Array.isArray(b.ids) ? (b.ids as unknown[]).map(Number) : []),
 	autoInputTest: (env, b) => autoInputTest(env, s(b.token), s(b.website), s(b.market)),
+	autoInputProxyTestStatus: (env, b) => autoInputProxyTestStatus(env, s(b.token), Number(b.jobId)),
 
 	// prediksi
 	getPredictionStatusData: (env, b) => getPredictionStatusData(env, s(b.token)),

@@ -5431,11 +5431,34 @@
       showActionPopup('LOADING', 'Menguji ' + w.website, 'Membaca halaman Nomor Keluar ' + market + '...', 'fa-vial');
       google.script.run
         .withSuccessHandler(res => {
+          if (res && res.pending && res.jobId) {
+            // Jalur Kedua: uji dry-run dijalankan runner GitHub lewat proxy — poll hasilnya.
+            showActionPopup('LOADING', 'Menguji ' + w.website + ' (lewat GitHub)', (apiMessage(res) || '') + ' — biasanya 30–90 detik.', 'fa-vial');
+            aiProxyTestPoll(res.jobId, 0);
+            return;
+          }
           const ok = !!(res && res.success);
           showActionPopup(ok ? 'DONE' : 'ERROR', ok ? 'Uji lolos' : 'Uji gagal', apiMessage(res), ok ? 'fa-check' : 'fa-triangle-exclamation');
         })
         .withFailureHandler(err => showActionPopup('ERROR', 'Uji gagal', (err && err.message) || 'Gagal', 'fa-triangle-exclamation'))
         .autoInputTest(currentSessionToken, w.website, market);
+    }
+    // Poll hasil job UJI Jalur Kedua (dijalankan runner GitHub). ~40 x 3 dtk = 2 menit.
+    function aiProxyTestPoll(jobId, tries) {
+      if (tries > 40) {
+        showActionPopup('ERROR', 'Uji belum ada hasil', 'Runner GitHub belum melapor dalam ~2 menit. Buka tab Actions di GitHub (workflow "Auto Prediksi — Jalur Kedua") untuk melihat lognya, lalu coba lagi. Pastikan token GitHub (Admin › Integrasi) & secret CRON_KEY benar.', 'fa-triangle-exclamation');
+        return;
+      }
+      setTimeout(() => {
+        google.script.run
+          .withSuccessHandler(res => {
+            if (res && res.pending) { aiProxyTestPoll(jobId, tries + 1); return; }
+            const ok = !!(res && res.success);
+            showActionPopup(ok ? 'DONE' : 'ERROR', ok ? 'Uji Jalur Kedua BERHASIL' : 'Uji Jalur Kedua GAGAL', apiMessage(res), ok ? 'fa-check' : 'fa-triangle-exclamation');
+          })
+          .withFailureHandler(() => aiProxyTestPoll(jobId, tries + 1))
+          .autoInputProxyTestStatus(currentSessionToken, jobId);
+      }, 3000);
     }
 
     function showSendResult(result) {

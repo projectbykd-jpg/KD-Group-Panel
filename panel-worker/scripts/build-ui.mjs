@@ -57,6 +57,7 @@ const ARG_MAP = {
 	autoInputHideJobs: ["token", "ids"],
 	autoInputDismissToto: ["token", "ids"],
 	autoInputTest: ["token", "website", "market"],
+	autoInputProxyTestStatus: ["token", "jobId"],
 	autoInputRun: ["token", "jobId"],
 	autoInputTotals: ["token"],
 	autoInputTotalsRefresh: ["token", "id"],

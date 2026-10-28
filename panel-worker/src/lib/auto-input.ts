@@ -524,6 +524,8 @@ export interface JobRow {
 	market: string;
 	prizes: string[];
 	resultDate: string;
+	/** Kunci unik result (anti input ganda). Prefiks "UJI:" = job uji Jalur Kedua (dry-run, tidak mengubah admin). */
+	resultKey: string;
 	status: JobStatus;
 	stage: string;
 	detail: string;
@@ -549,6 +551,7 @@ function rowToJob(r: Record<string, unknown>): JobRow {
 		market: String(r.market ?? ""),
 		prizes,
 		resultDate: String(r.result_date ?? ""),
+		resultKey: String(r.result_key ?? ""),
 		status: String(r.status ?? "RUNNING") as JobStatus,
 		stage: String(r.stage ?? ""),
 		detail: String(r.detail ?? ""),
