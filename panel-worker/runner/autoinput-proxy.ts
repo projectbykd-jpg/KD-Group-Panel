@@ -15,7 +15,7 @@ import { execFile } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runAutoInput } from "../src/lib/auto-input-run";
+import { findMarketCode, readPrediksiLastTotals, runAutoInput } from "../src/lib/auto-input-run";
 
 const PUBLIC_URL = (process.env.PUBLIC_URL || "").replace(/\/+$/, "");
 const CRON_KEY = process.env.CRON_KEY || "";
@@ -150,6 +150,24 @@ async function main() {
 		const plan = { ok: true as const, market: String(job.market), prizes: (job.prizes as string[]) ?? [], date: String(job.date), key: "" };
 		const retry = !!job.retry;
 		const dryRun = !!job.dryRun; // job UJI Jalur Kedua: cek login + baca form, TIDAK Kirim/Hitung
+		const totalsOnly = !!job.totalsOnly; // job TOTALS: pasaran off-input -> hanya baca Last Result Total (tanpa Kirim/Hitung)
+		if (totalsOnly) {
+			// Baca Total pasaran off-input lewat proxy: buka menu Prediksi -> Last Result -> Submit -> baca baris Result.
+			try {
+				const code = await findMarketCode(fetchFn, session, plan.market);
+				const rt = await readPrediksiLastTotals({ f: fetchFn, sess: session, code, market: plan.market });
+				await api("aiproxy_done", {
+					user: USER, jobId: Number(job.id), ok: "1", stage: "prediksi", period: String(rt.last.period),
+					numbers: rt.last.numbers.join("/"), omset: rt.totals.omset, referal: rt.totals.referal, menang: rt.totals.menang,
+				}).catch((e) => console.error(`::warning::Gagal lapor TOTALS ${job.id}: ${(e as Error).message}`));
+				console.log(`[runner] ${session.website} ${plan.market} (Total) -> omset ${rt.totals.omset}`);
+			} catch (e) {
+				await api("aiproxy_done", { user: USER, jobId: Number(job.id), ok: "0", stage: "prediksi", detail: (e instanceof Error ? e.message : String(e)).slice(0, 300) }).catch(() => {});
+				console.log(`[runner] ${session.website} ${plan.market} (Total) -> GAGAL`);
+			}
+			processed++;
+			continue;
+		}
 		let r: Awaited<ReturnType<typeof runAutoInput>>;
 		try {
 			r = await runAutoInput({ session, plan, fetchFn, dryRun, allowNextDay: !!out.allowNextDay, resumePeriod: !dryRun && retry ? String(job.period || "") || undefined : undefined });

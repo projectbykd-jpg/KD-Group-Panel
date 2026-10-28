@@ -937,10 +937,22 @@ describe("autoInputAfterSend (DB)", () => {
 			// job uji tercatat SKIPPED (tidak memicu retry) & tidak menyimpan Total
 			expect((await getJobById(env, "Op", t.jobId))!.status).toBe("SKIPPED");
 		});
-		it("Total 'Ambil ulang' & cek diblok untuk user proxy", async () => {
+		it("Total pasaran off-input (Jalur 2): autoInputTotalsCheck buat job TOTALS -> runner baca Last Result -> tersimpan", async () => {
 			await saved();
 			await setEnabled(env, "Op", true);
-			expect(await autoInputTotalsCheck(env, op, { website: "HUGOTOGEL", market: "OREGON06", prizes: ["1234"], date: "2026-10-28" })).toMatchObject({ success: false, message: expect.stringMatching(/Jalur Kedua AKTIF/) });
+			const r = (await autoInputTotalsCheck(env, op, { website: "HUGOTOGEL", market: "OREGON06", prizes: ["1234", "5678", "9012"], date: "2026-10-28" })) as any;
+			expect(r).toMatchObject({ success: true, pending: true });
+			expect(typeof r.jobId).toBe("number");
+			const nx = (await autoInputProxyNext(env, "Op")) as any;
+			expect(nx.job.id).toBe(r.jobId);
+			expect(nx.job.totalsOnly).toBe(true);
+			// runner lapor Total terbaca
+			await autoInputProxyDone(env, { user: "Op", jobId: r.jobId, ok: "1", stage: "prediksi", period: "20261028-77", numbers: "1234/5678/9012", omset: "12,345", referal: "0", menang: "500" });
+			// baris Total tersimpan & terlihat di menu Result
+			const totals = (await autoInputTotals(env, op)) as any;
+			expect(JSON.stringify(totals)).toContain("12,345");
+			// carrier job ditutup (bukan QUEUED lagi)
+			expect((await getJobById(env, "Op", r.jobId))!.status).toBe("SKIPPED");
 		});
 	});
 

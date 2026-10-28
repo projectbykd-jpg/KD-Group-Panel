@@ -4774,6 +4774,13 @@
       list.forEach(c => {
         google.script.run
           .withSuccessHandler(res => {
+            // Jalur Kedua: pembacaan Total dikerjakan runner GitHub (async). Jangan blokir KIRIM SEMUA -> pantau di latar.
+            if (res && res.pending && res.jobId) {
+              spSet(c.website, 'auto', 'run', 'Baca Total (Jalur 2)…', apiMessage(res));
+              aiProxyWatchResult(c.website, c.market, 0);
+              fin();
+              return;
+            }
             // afterFail = job Input/Hitung website ini GAGAL: Total tetap dibaca, tapi sel tidak boleh terlihat "beres"
             if (res && res.success) { got.push(c.website + (res.differs ? ' (Last Result beda)' : '')); spSet(c.website, 'auto', afterFail || res.differs ? 'warn' : 'ok', (afterFail ? 'Gagal · ' : '') + (res.differs ? 'Total lama' : 'Total ✓'), apiMessage(res)); }
             else { bad.push(c.website + ': ' + apiMessage(res)); spSet(c.website, 'auto', 'fail', 'Total gagal', apiMessage(res)); }

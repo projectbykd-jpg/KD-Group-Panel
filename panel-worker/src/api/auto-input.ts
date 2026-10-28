@@ -314,6 +314,7 @@ export async function autoInputProxyNext(env: Env, user: string) {
 			id: claimed.job.id,
 			retry: claimed.retry,
 			dryRun: claimed.job.resultKey.startsWith("UJI:"), // job uji: runAutoInput dryRun (tanpa Kirim/Hitung)
+			totalsOnly: claimed.job.resultKey.startsWith("TOTALS:"), // job baca-Total pasaran off-input: hanya readPrediksiLastTotals
 			attempts: claimed.job.attempts,
 			website: claimed.job.website,
 			baseUrl: sess.baseUrl,
@@ -337,6 +338,25 @@ export async function autoInputProxyDone(env: Env, data: Record<string, unknown>
 	if (job.status !== "RUNNING") return { ok: true, message: "Job sudah final — laporan diabaikan (idempoten)." };
 	const okRun = String(data.ok) === "1" || data.ok === true;
 	const detailBaseRaw = String(data.detail ?? "").slice(0, 440);
+	// Job TOTALS (baca Total pasaran off-input lewat Jalur Kedua): runner melaporkan omset/referal/menang + Last Result; Worker mencatat
+	// seperti manualTotalsCheck (baris manual DONE/SKIPPED + simpan Total). Job carrier ditutup SKIPPED.
+	if (job.resultKey.startsWith("TOTALS:")) {
+		const period = String(data.period ?? "");
+		const totals = okRun && data.omset != null ? { omset: String(data.omset), referal: String(data.referal ?? "0"), menang: String(data.menang ?? "0") } : null;
+		const numbers = String(data.numbers ?? "").split("/").map((x) => x.trim()).filter(Boolean);
+		const why = okRun ? "" : detailBaseRaw || "Total gagal dibaca.";
+		const cmp = Math.min(job.prizes.length, numbers.length);
+		const differs = !!totals && (!cmp || job.prizes.slice(0, cmp).some((n, i) => numbers[i] !== n));
+		const lastTxt = totals ? ` Last Result periode ${period} angka ${numbers.join("/")}.` : "";
+		const warn = differs ? ` ⚠ Berbeda dari result yang dikirim (${job.prizes.join("/")}) — angka baru belum diinput/dihitung di admin? Tekan Ambil ulang.` : "";
+		const detail = withTotalsText(`Total dibaca lewat Jalur Kedua (Last Result → Submit): ${job.market} ${job.prizes.join("/")}.${lastTxt}${warn}`, totals, why);
+		const key = `manual:${normMarket(job.market)}:${job.resultDate}:${job.prizes.join("/")}`;
+		const manualId = await recordManualTotalsJob(env, { username: u, website: job.website, market: job.market, prizes: job.prizes, resultDate: job.resultDate, key, ok: !!totals, detail, period });
+		await saveTotals(env, { id: manualId, username: u, website: job.website, market: job.market, prizes: job.prizes, resultDate: job.resultDate }, period, totals, why, differs ? `Last Result admin ${numbers.join("/")} ≠ result dikirim ${job.prizes.join("/")} — cek sebelum menyalin` : "").catch(() => {});
+		await finishJob(env, jobId, "SKIPPED", "prediksi", detail, period); // tutup carrier
+		await logActivity(env, u, "AUTO PREDIKSI", `[${job.website}] ${detail}`, totals ? "BERHASIL" : "GAGAL", "").catch(() => {});
+		return { ok: true };
+	}
 	// Job UJI Jalur Kedua (dry-run): catat sebagai SKIPPED (tidak memicu retry/peringatan), prefiks jelas supaya mudah dibaca & dipoll.
 	if (job.resultKey.startsWith("UJI:")) {
 		const msg = `UJI Jalur Kedua ${okRun ? "BERHASIL" : "GAGAL"} — ${job.website}: ${detailBaseRaw}`;
@@ -543,12 +563,18 @@ export async function autoInputTotalsCheck(env: Env, token: string, data: Record
 	const s = await gate(env, token);
 	// Penjaga sisi server: browser lama (halaman belum di-refresh) bisa saja masih memanggil ini sesudah saklar dimatikan.
 	if (!(await getEnabled(env, s.username))) return { success: false, website: String(data?.website ?? ""), message: AUTO_OFF_TOTALS_MSG };
-	if (await proxyForSite(env, s.username, String(data?.website ?? ""))) return { success: false, website: String(data?.website ?? ""), message: AUTO_PROXY_TOTALS_MSG };
 	const w = mustOwnWebsite(s.profile, String(data?.website ?? ""));
 	const market = String(data?.market ?? "").trim().slice(0, 60);
 	const prizes = (Array.isArray(data?.prizes) ? data.prizes : []).map((x) => String(x).trim()).filter((x) => /^\d{1,8}$/.test(x)).slice(0, 3);
 	const date = String(data?.date ?? "").trim().slice(0, 20);
 	if (!market || !prizes.length) throw new Error("Pasaran/angka result tidak lengkap.");
+	// Jalur Kedua: Worker tak bisa menjangkau admin (agwl). Baca Total lewat runner GitHub juga -> buat job TOTALS, browser poll hasilnya.
+	if (!fetchFn && (await proxyForSite(env, s.username, w))) {
+		const started = await startJob(env, s.username, w, { ok: true, market, prizes, date, key: `TOTALS:${normMarket(market)}:${date}:${Date.now()}` });
+		if ("existing" in started) return { success: false, website: w, message: "Pembacaan Total sebelumnya masih berjalan — tunggu sebentar." };
+		await dispatchAutoInputProxy(env, s.username);
+		return { success: true, pending: true, jobId: started.id, website: w, message: `Baca Total ${w} ${market} lewat Jalur Kedua (GitHub)…` };
+	}
 	return manualTotalsCheck(env, s.username, w, market, prizes, date, fetchFn);
 }
 
