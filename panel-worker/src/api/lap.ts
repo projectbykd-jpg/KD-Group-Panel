@@ -10,7 +10,7 @@ import { logActivity } from "../lib/activity";
 import { tsNow, tsPlusMinutes } from "../lib/time";
 import { getTurso } from "../lib/turso"; // tabel lap_* ada di Turso, bukan D1
 import { rawJson } from "../lib/respond";
-import { cookieHeader, getSessions, parsePhpSessId, siteBrand } from "../lib/auto-input";
+import { cookieHeader, getProxy, getSessions, parsePhpSessId, proxyUsesSite, siteBrand } from "../lib/auto-input";
 import type { UserProfile } from "../lib/db";
 import {
 	LapCreds,
@@ -946,14 +946,18 @@ export async function lapJobStart(env: Env, jobId: string, key: string) {
 	const kind = p.kind || "admin";
 	// Job per website: kredensial website itu (Setting, atau cookie Auto Prediksi bila Setting kosong).
 	const site = kind === "admin" && p.website ? (await lapAdminSites(env, row.username, [String(p.website)]))[0] : null;
+	// Jalur Kedua (proxy) untuk Lap Admin: hanya bila website ini ditandai pakai Jalur Kedua di menu Auto Prediksi.
+	// Mozart (Playwright) TIDAK memakai proxy (SOCKS5+auth tak didukung Chromium) -> selalu null.
+	const px = kind === "mozart" ? null : await getProxy(env, row.username).catch(() => null);
+	const proxy = px && proxyUsesSite(px, String(p.website || "")) ? { scheme: px.scheme, host: px.host, port: px.port, user: px.user, pass: px.pass } : null;
 	return {
 		success: true,
 		creds:
 			kind === "mozart"
 				? { linkMozart: c.linkMozart, cookieMozart: c.cookieMozart }
 				: site
-					? { linkAdmin: site.linkAdmin, cookieAdmin: site.cookieAdmin }
-					: { linkAdmin: c.linkAdmin, cookieAdmin: c.cookieAdmin },
+					? { linkAdmin: site.linkAdmin, cookieAdmin: site.cookieAdmin, proxy }
+					: { linkAdmin: c.linkAdmin, cookieAdmin: c.cookieAdmin, proxy },
 		params: { kind, startDate: p.startDate, endDate: p.endDate },
 	};
 }

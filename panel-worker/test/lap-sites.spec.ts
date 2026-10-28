@@ -75,10 +75,10 @@ describe("Lap Admin otomatis untuk setiap website akun", () => {
 		expect(dispatched.map((d) => d.queue_key)).toHaveLength(2);
 		const [hugo, fola] = r.jobs;
 		const key = (id: string) => params(id).key as string;
-		const sh = (await lapJobStart(env, hugo.jobId, key(hugo.jobId))) as { creds: { linkAdmin: string; cookieAdmin: string } };
-		expect(sh.creds).toEqual({ linkAdmin: "https://ag.suksesbogil.com", cookieAdmin: "PHPSESSID=hugoauto00000000aaaa" });
-		const sf = (await lapJobStart(env, fola.jobId, key(fola.jobId))) as { creds: { linkAdmin: string; cookieAdmin: string } };
-		expect(sf.creds).toEqual({ linkAdmin: "https://agwl12.suksesbogil.com", cookieAdmin: "PHPSESSID=folaset0000000000bbbb" });
+		const sh = (await lapJobStart(env, hugo.jobId, key(hugo.jobId))) as { creds: { linkAdmin: string; cookieAdmin: string; proxy: unknown } };
+		expect(sh.creds).toEqual({ linkAdmin: "https://ag.suksesbogil.com", cookieAdmin: "PHPSESSID=hugoauto00000000aaaa", proxy: null });
+		const sf = (await lapJobStart(env, fola.jobId, key(fola.jobId))) as { creds: { linkAdmin: string; cookieAdmin: string; proxy: unknown } };
+		expect(sf.creds).toEqual({ linkAdmin: "https://agwl12.suksesbogil.com", cookieAdmin: "PHPSESSID=folaset0000000000bbbb", proxy: null });
 		// klik lagi selama masih berjalan -> tidak memicu job ganda per website
 		await lapRunAdmin(env, tok, "2026-10-24", "2026-10-24");
 		expect(dispatched).toHaveLength(2);
