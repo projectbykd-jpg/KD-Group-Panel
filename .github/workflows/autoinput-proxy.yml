@@ -1,0 +1,55 @@
+name: Auto Prediksi — Jalur Kedua (proxy user)
+
+# Dipicu oleh panel (dispatchAutoInputProxy di src/api/auto-input.ts) saat user yang
+# MENYALAKAN "Jalur Kedua" menekan KIRIM SEMUA SISTEM, atau saat ada job yang perlu
+# dicoba ulang. SENGAJA cuma workflow_dispatch — tidak ada jadwal.
+#
+# KENAPA: Cloudflare Worker TIDAK bisa HTTPS ke admin lewat proxy (startTls di atas
+# terowongan CONNECT/SOCKS5 selalu ditutup — terbukti lewat diagnosa). Node biasa di
+# sini punya TLS stack normal + curl mendukung SOCKS5, jadi runner menjalankan
+# runAutoInput yang SAMA dengan Worker, hanya fetch-nya lewat proxy user (IP tetap
+# yang terdaftar di admin). Logika bisnis tidak diduplikasi.
+#
+# Runner minta job & lapor hasil ke Worker lewat /__cron (auth CRON_KEY). PHPSESSID &
+# sandi proxy mengalir ke runner ini — itu izin yang diberikan pemilik saat memilih
+# Jalur Kedua; runner tidak pernah menulis rahasia ke log.
+on:
+  workflow_dispatch:
+    inputs:
+      user:
+        description: "Username panel yang Auto Prediksi-nya dijalankan lewat Jalur Kedua"
+        required: true
+        type: string
+
+concurrency:
+  group: autoinput-proxy-${{ github.event.inputs.user }}
+  cancel-in-progress: false # jangan tabrak run utk user yg sama, antre saja
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install deps panel-worker
+        working-directory: panel-worker
+        run: npm ci
+      - name: Jalankan Auto Prediksi lewat proxy user
+        working-directory: panel-worker
+        env:
+          # Repository secret CRON_KEY -- nilai SAMA dgn yang dipasang ke Worker oleh deploy.yml.
+          CRON_KEY: ${{ secrets.CRON_KEY }}
+          PUBLIC_URL: "https://panel-worker.projectbykd.workers.dev"
+          AUTOINPUT_USER: ${{ github.event.inputs.user }}
+        run: |
+          set -eu
+          if [ -z "${CRON_KEY:-}" ]; then
+            echo "::error::Repository secret CRON_KEY belum diisi (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+          # Bundle runner (hanya src kita; semua paket dibiarkan dimuat dari node_modules -> hindari bug bundling ws/libsql).
+          npx esbuild runner/autoinput-proxy.ts --bundle --platform=node --format=esm --packages=external --external:cloudflare:sockets --outfile=runner/dist.mjs
+          node runner/dist.mjs

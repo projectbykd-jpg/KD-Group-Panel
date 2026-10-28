@@ -33,6 +33,8 @@ import { adminDailyReportSend, adminErrorAlertTest, adminErrorSelfTest, adminErr
 import { cronFail, isUnexpectedError, pruneErrorLog, recordError } from "./lib/error-log";
 import { logTotoEvent, totoDispatchTick, totoMacauRun } from "./lib/toto-macau";
 import {
+	autoInputProxyNext,
+	autoInputProxyDone,
 	autoInputClearJob,
 	autoInputHideJobs,
 	autoInputDismissToto,
@@ -704,6 +706,18 @@ export default {
 				}
 				// Auto Check Toto Macau/5D: SATU website per panggilan (<= 32 panggilan jaringan), dipanggil BERULANG dari
 				// GitHub Actions (toto-macau.yml). Parameter: user (batasi ke satu akun), force=1 (abaikan jeda), exclude=SITE1,SITE2 (sudah diperiksa).
+				// Jalur Kedua (proxy): runner GitHub Actions (autoinput-proxy.yml) minta job berikutnya & lapor hasil.
+				// Semua lewat query param (detail < 500 char) supaya endpoint tetap GET sederhana. Auth: CRON_KEY (di atas).
+				if (job === "aiproxy_next") {
+					out.result = await autoInputProxyNext(env, (url.searchParams.get("user") || "").trim());
+				}
+				if (job === "aiproxy_done") {
+					const g = (k: string) => url.searchParams.get(k) ?? undefined;
+					out.result = await autoInputProxyDone(env, {
+						user: g("user"), jobId: g("jobId"), ok: g("ok"), stage: g("stage"), period: g("period"),
+						detail: g("detail"), note: g("note"), retry: g("retry"), omset: g("omset"), referal: g("referal"), menang: g("menang"),
+					});
+				}
 				if (job === "totomacau") {
 					const qUser = (url.searchParams.get("user") || "").trim();
 					const exclude = (url.searchParams.get("exclude") || "").split(",").map((x) => x.trim()).filter(Boolean);

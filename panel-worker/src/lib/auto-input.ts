@@ -906,6 +906,47 @@ export async function claimRetry(env: Env, jobId: number, maxRetries: number, ga
 	return row ? rowToJob(row) : null;
 }
 
+/**
+ * Jalur Kedua (proxy): ambil SATU job berikutnya yang harus dijalankan runner GitHub untuk user ini -- QUEUED dulu (terlama),
+ * lalu FAILED yang sudah waktunya dicoba ulang. Mengunci job jadi RUNNING secara atomik (sama seperti claimJob/claimRetry),
+ * jadi dua runner paralel tidak pernah menjalankan job yang sama. null = tidak ada job.
+ */
+export async function getJobById(env: Env, username: string, id: number): Promise<JobRow | null> {
+	await ensureAutoInputTables(env);
+	const row = await getTurso(env).prepare(`SELECT * FROM auto_input_job WHERE id = ? AND username = ?`).bind(id, username).first<Record<string, unknown>>();
+	return row ? rowToJob(row) : null;
+}
+
+export async function claimNextProxyJob(
+	env: Env,
+	username: string,
+	maxRetries: number,
+	gapMin: number,
+): Promise<{ job: JobRow; retry: boolean; tag: string } | null> {
+	await ensureAutoInputTables(env);
+	await expireRunning(env);
+	const db = getTurso(env);
+	const q = await db.prepare(`SELECT id FROM auto_input_job WHERE username = ? AND status = 'QUEUED' ORDER BY id ASC LIMIT 1`).bind(username).first<{ id: number }>();
+	if (q?.id) {
+		const job = await claimJob(env, username, Number(q.id));
+		if (job) return { job, retry: false, tag: "" };
+	}
+	if (maxRetries > 0) {
+		const due = await db
+			.prepare(
+				`SELECT id FROM auto_input_job WHERE username = ? AND status = 'FAILED' AND hidden = 0 AND attempts < ?
+				 AND updated_at >= ? AND updated_at <= ? AND created_at >= ? AND NOT ${noRetrySql()} ORDER BY updated_at ASC, id ASC LIMIT 1`,
+			)
+			.bind(username, maxRetries, tsPlusMinutes(-RETRY_WINDOW_MIN), tsPlusMinutes(-gapMin), tsPlusMinutes(-RETRY_WINDOW_MIN))
+			.first<{ id: number }>();
+		if (due?.id) {
+			const job = await claimRetry(env, Number(due.id), maxRetries, gapMin);
+			if (job) return { job, retry: true, tag: `[Percobaan ulang ${job.attempts}/${maxRetries}] ` };
+		}
+	}
+	return null;
+}
+
 export interface FailedAlert {
 	id: number;
 	website: string;

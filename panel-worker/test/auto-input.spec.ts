@@ -4,10 +4,10 @@ const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: im
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1, tursoGeneration: () => 0 }));
 
 import { autoInputAfterSend, autoInputRetryTick, autoInputTotals, autoInputTotalsCheck, autoInputTotalsRefresh, runQueuedJob, type AutoInputNotice } from "../src/api/auto-input";
-import { autoInputDeleteProxy, autoInputGetState, autoInputSaveProxy, autoInputSetMarkets, autoInputTestProxy } from "../src/api/auto-input";
+import { autoInputDeleteProxy, autoInputGetState, autoInputProxyDone, autoInputProxyNext, autoInputSaveProxy, autoInputSetMarkets, autoInputTest, autoInputTestProxy } from "../src/api/auto-input";
 import { checkLogin } from "../src/api/auth";
 import { hashPassword } from "../src/lib/crypto";
-import { getDisabledMarkets, setGlobalOffMarkets, cleanMarketList, hideJobs, pruneAutoInputJobs, pendingFailureAlerts, ackFailureAlerts, claimJob, parseCookieInput, adminFetcherFor, adminUserAgent, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled } from "../src/lib/auto-input";
+import { getDisabledMarkets, setGlobalOffMarkets, cleanMarketList, hideJobs, pruneAutoInputJobs, pendingFailureAlerts, ackFailureAlerts, claimJob, parseCookieInput, adminFetcherFor, adminUserAgent, adminBaseProblem, defaultAdminBase, clearRetryable, resetAutoInputTablesFlag, getSessions, listJobs, parsePhpSessId, parseResultDate, planAutoInput, saveSession, setEnabled, startJob, claimNextProxyJob, getJobById } from "../src/lib/auto-input";
 import type { Fetcher } from "../src/lib/auto-input-run";
 import { frameSources, parseAngkaPage, readTopRow, parseHitungPage, runAutoInput, buildPayload, parseForms, parseLastResult, parsePrediksiTotals, prediksiEchoProblem } from "../src/lib/auto-input-run";
 import { processText } from "../src/lib/parser";
@@ -840,6 +840,68 @@ describe("autoInputAfterSend (DB)", () => {
 			expect(await autoInputTestProxy(env, op, bad)).toMatchObject({ success: false, message: expect.stringMatching(/407/) });
 			await autoInputDeleteProxy(env, op);
 			expect(((await autoInputGetState(env, op)) as unknown as St).proxy).toMatchObject({ enabled: false, host: "", hasPass: false });
+		});
+	});
+
+	describe("Jalur Kedua: eksekusi dialihkan ke runner GitHub", () => {
+		let op: string;
+		const saved = async () => {
+			const ctx = fakeEnv();
+			env = ctx.env;
+			ctx.db.prepare(`INSERT INTO users (username, username_lc, password_hash, role, status, websites) VALUES ('Op', 'op', ?, 'OPERATOR', 'AKTIF', 'HUGOTOGEL')`).run(await hashPassword("pw"));
+			op = ((await checkLogin(env, "Op", "pw", "")) as { sessionToken: string }).sessionToken;
+			await saveSession(env, "Op", "HUGOTOGEL", "https://ag.suksesbogil.com/", "PHPSESSID=abcdefghijklmnop");
+			await autoInputSaveProxy(env, op, { enabled: true, scheme: "socks5", host: "gate.example.net", port: 1080, user: "kuda", pass: "pw" });
+		};
+		it("runQueuedJob TIDAK menjalankan admin untuk user proxy -- job tetap QUEUED, pesan 'Jalur Kedua'", async () => {
+			await saved();
+			const started = await startJob(env, "Op", "HUGOTOGEL", { ok: true, market: "OREGON06", prizes: ["1234", "5678", "9012"], date: "2026-10-28", key: "K1" });
+			const id = (started as { id: number }).id;
+			const r = await runQueuedJob(env, "Op", id); // tanpa fetchFn -> jalur produksi
+			expect(r.detail).toMatch(/Jalur Kedua \(GitHub Actions\)/);
+			expect((await getJobById(env, "Op", id))!.status).toBe("QUEUED"); // dibiarkan utk runner
+		});
+		it("klaim -> jalan -> lapor: next memberi sesi+proxy & mengunci RUNNING; done menulis DONE + Total; idempoten", async () => {
+			await saved();
+			const started = await startJob(env, "Op", "HUGOTOGEL", { ok: true, market: "OREGON06", prizes: ["1234", "5678", "9012"], date: "2026-10-28", key: "K2" });
+			const id = (started as { id: number }).id;
+			const nx = (await autoInputProxyNext(env, "Op")) as any;
+			expect(nx.ok).toBe(true);
+			expect(nx.job.id).toBe(id);
+			expect(nx.job).toMatchObject({ website: "HUGOTOGEL", phpsessid: "PHPSESSID=abcdefghijklmnop", market: "OREGON06" });
+			expect(nx.proxy).toMatchObject({ scheme: "socks5", host: "gate.example.net", port: 1080, user: "kuda", pass: "pw" });
+			expect((await getJobById(env, "Op", id))!.status).toBe("RUNNING"); // terkunci
+			const done = await autoInputProxyDone(env, { user: "Op", jobId: id, ok: "1", stage: "selesai", period: "20261028-01", detail: "Hitung OK", omset: "21,700", referal: "0", menang: "0" });
+			expect(done).toMatchObject({ ok: true });
+			const job = (await getJobById(env, "Op", id))!;
+			expect(job.status).toBe("DONE");
+			expect(job.detail).toMatch(/\[Omset 21,700 · Referal 0 · Menang 0\]/);
+			const totals = (await autoInputTotals(env, op)) as any;
+			expect(JSON.stringify(totals)).toContain("21,700");
+			// lapor kedua kali diabaikan (job sudah final)
+			expect(await autoInputProxyDone(env, { user: "Op", jobId: id, ok: "0", detail: "x" })).toMatchObject({ ok: true, message: expect.stringMatching(/idempoten/) });
+			expect((await getJobById(env, "Op", id))!.status).toBe("DONE");
+			// tidak ada job lagi
+			expect((await autoInputProxyNext(env, "Op")) as any).toMatchObject({ done: true, job: null });
+		});
+		it("next untuk user TANPA proxy aktif = done:true (tidak membocorkan apa pun)", async () => {
+			const ctx = fakeEnv();
+			env = ctx.env;
+			ctx.db.prepare(`INSERT INTO users (username, username_lc, password_hash, role, status, websites) VALUES ('Vp', 'vp', ?, 'OPERATOR', 'AKTIF', 'HUGOTOGEL')`).run(await hashPassword("pw"));
+			const vp = ((await checkLogin(env, "Vp", "pw", "")) as { sessionToken: string }).sessionToken;
+			await startJob(env, "Vp", "HUGOTOGEL", { ok: true, market: "OREGON06", prizes: ["1"], date: "2026-10-28", key: "K3" });
+			expect((await autoInputProxyNext(env, "Vp")) as any).toMatchObject({ ok: true, done: true, job: null });
+			void vp;
+		});
+		it("Uji (tanpa kirim) diblok untuk user proxy dgn pesan jelas", async () => {
+			await saved();
+			const r = await autoInputTest(env, op, "HUGOTOGEL", "OREGON06");
+			expect(r).toMatchObject({ success: false, message: expect.stringMatching(/Jalur Kedua AKTIF/) });
+		});
+		it("Total 'Ambil ulang' & cek diblok untuk user proxy", async () => {
+			await saved();
+			await setEnabled(env, "Op", true);
+			expect(await autoInputTotalsCheck(env, op, { website: "HUGOTOGEL", market: "OREGON06", prizes: ["1234"], date: "2026-10-28" })).toMatchObject({ success: false, message: expect.stringMatching(/Jalur Kedua AKTIF/) });
 		});
 	});
 

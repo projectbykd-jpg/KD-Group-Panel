@@ -1,7 +1,7 @@
 // Endpoint menu "Auto Prediksi" + kaitan ke alur KIRIM SEMUA SISTEM (send.ts).
 // Logika inti: lib/auto-input.ts (rencana, sesi, antrean) & lib/auto-input-run.ts (eksekutor).
 import { getSys, getSysCached } from "../lib/settings";
-import { ghToken, investTurboRepo, loadIntegrations } from "../lib/integrations";
+import { autoInputProxyRepo, ghToken, investTurboRepo, loadIntegrations } from "../lib/integrations";
 import { ackTotoAlerts, dismissTotoRows, listTotoEvents, totoDispatchAt, totoWindowInfo, pruneTotoMacau, listTotoLog, logTotoEvent, pendingTotoAlerts, TOTO_MAX_ATTEMPTS, totoMacauRun } from "../lib/toto-macau";
 import { requireSession } from "./auth";
 import { saveMaster, loadMasterData } from "../lib/master-data";
@@ -48,7 +48,7 @@ import {
 	setStage,
 	startJob,
 } from "../lib/auto-input";
-import { adminFetcherFor, deleteProxy, getProxy, saveProxy } from "../lib/auto-input";
+import { adminFetcherFor, claimNextProxyJob, deleteProxy, getJobById, getProxy, saveProxy } from "../lib/auto-input";
 import { cleanProxyInput, probeTunnel, proxyFetcher, tlsClientHello } from "../lib/proxy-fetch";
 import { findMarketCode, readPrediksiLastTotals, readPrediksiTotals, runAutoInput, type Fetcher } from "../lib/auto-input-run";
 
@@ -245,6 +245,104 @@ export async function autoInputTestProxy(env: Env, token: string, fetchFn?: Fetc
 	return { success: !!ip || adminOk, ip: ip || undefined, message: `${head} ${lines.join(" | ")}` };
 }
 
+// ---------------------------------------------------------------------------
+// Jalur Kedua (proxy) — jembatan ke runner GitHub Actions (autoinput-proxy.yml)
+//
+// Worker TIDAK bisa menjalankan HTTPS ke admin lewat proxy (Cloudflare Workers tidak mendukung TLS di atas terowongan
+// CONNECT/SOCKS5 — terbukti lewat diagnosa: TLS mentah dibalas server, tapi startTls selalu ditutup). Maka untuk user yang
+// menyalakan Jalur Kedua, eksekusi Auto Prediksi dipindah ke runner Node di GitHub Actions yang jalan dari IP proxy user dan
+// punya TLS stack normal. Runner memanggil dua endpoint di bawah (via /__cron, auth CRON_KEY) dan MEMAKAI ULANG runAutoInput.
+// ---------------------------------------------------------------------------
+const GH_PROXY_HEADERS = (t: string) => ({ Authorization: `Bearer ${t}`, Accept: "application/vnd.github+json", "User-Agent": "daygroup-panel", "X-GitHub-Api-Version": "2022-11-28" });
+
+/** Picu workflow autoinput-proxy.yml untuk 1 user. Dikunci KV ±90 dtk supaya pemanggilan per-website tidak memicu puluhan run. Gagal = non-fatal. */
+export async function dispatchAutoInputProxy(env: Env, user: string): Promise<void> {
+	const t = ghToken(env);
+	if (!t) return; // belum dikonfigurasi
+	const u = String(user).trim();
+	if (!u) return;
+	try {
+		const lockKey = `aiproxy:disp:${u.toLowerCase()}`;
+		if (await env.SESS.get(lockKey)) return; // sudah dipicu baru-baru ini
+		await env.SESS.put(lockKey, "1", { expirationTtl: 90 });
+		const resp = await fetch(`https://api.github.com/repos/${autoInputProxyRepo(env)}/actions/workflows/autoinput-proxy.yml/dispatches`, {
+			method: "POST",
+			headers: GH_PROXY_HEADERS(t),
+			body: JSON.stringify({ ref: "main", inputs: { user: u } }),
+		});
+		if (resp.status !== 204) console.error("dispatchAutoInputProxy gagal:", resp.status, (await resp.text()).slice(0, 200));
+	} catch (e) {
+		console.error("dispatchAutoInputProxy error:", e instanceof Error ? e.message : e);
+	}
+}
+
+/**
+ * Runner meminta SATU job berikutnya untuk dijalankan (QUEUED lalu due-retry). Mengembalikan sesi (PHPSESSID) + rencana +
+ * konfigurasi proxy user. CATATAN KEAMANAN: PHPSESSID & sandi proxy MEMANG dikirim ke runner (lewat endpoint ber-CRON_KEY) —
+ * itulah izin yang diberikan pemilik saat memilih Jalur Kedua; runner tidak pernah menuliskannya ke log.
+ */
+export async function autoInputProxyNext(env: Env, user: string) {
+	const u = String(user).trim();
+	if (!u) return { ok: false, message: "Query 'user' wajib diisi." };
+	const px = await getProxy(env, u);
+	if (!px?.enabled || !px.host || !px.port) return { ok: true, done: true, job: null, message: "Jalur Kedua tidak aktif untuk user ini." };
+	const [maxRetries, gapMin] = await Promise.all([getSys(env, "sys_auto_input_retry_max"), getSys(env, "sys_auto_input_retry_gap_min")]);
+	const claimed = await claimNextProxyJob(env, u, maxRetries, gapMin);
+	if (!claimed) return { ok: true, done: true, job: null };
+	const sess = await getSession(env, u, claimed.job.website);
+	if (!sess?.phpsessid) {
+		await finishJob(env, claimed.job.id, "FAILED", "cek", "PHPSESSID belum disimpan — input manual.");
+		return { ok: true, done: false, job: null, note: `PHPSESSID ${claimed.job.website} kosong, job dilewati.` };
+	}
+	return {
+		ok: true,
+		done: false,
+		maxRetries,
+		gapMin,
+		allowNextDay: await allowNextDay(env),
+		proxy: { scheme: px.scheme, host: px.host, port: px.port, user: px.user, pass: px.pass },
+		job: {
+			id: claimed.job.id,
+			retry: claimed.retry,
+			attempts: claimed.job.attempts,
+			website: claimed.job.website,
+			baseUrl: sess.baseUrl,
+			phpsessid: sess.phpsessid,
+			ua: sess.ua ?? "",
+			market: claimed.job.market,
+			prizes: claimed.job.prizes,
+			date: claimed.job.resultDate,
+			period: claimed.job.period,
+		},
+	};
+}
+
+/** Runner melaporkan hasil SATU job. Worker yang menulis status final + simpan Total + log (logika tetap di Worker). Idempoten. */
+export async function autoInputProxyDone(env: Env, data: Record<string, unknown>) {
+	const u = String(data.user ?? "").trim();
+	const jobId = Number(data.jobId);
+	if (!u || !Number.isInteger(jobId) || jobId <= 0) return { ok: false, message: "user/jobId tidak valid." };
+	const job = await getJobById(env, u, jobId);
+	if (!job) return { ok: false, message: "Job tidak ditemukan." };
+	if (job.status !== "RUNNING") return { ok: true, message: "Job sudah final — laporan diabaikan (idempoten)." };
+	const [maxRetries, gapMin] = await Promise.all([getSys(env, "sys_auto_input_retry_max"), getSys(env, "sys_auto_input_retry_gap_min")]);
+	const okRun = String(data.ok) === "1" || data.ok === true;
+	const stage = String(data.stage ?? (okRun ? "selesai" : "cek")).slice(0, 20);
+	const period = String(data.period ?? "");
+	const detailBase = String(data.detail ?? "").slice(0, 480);
+	const note = String(data.note ?? "");
+	const totals = okRun && data.omset != null ? { omset: String(data.omset), referal: String(data.referal ?? "0"), menang: String(data.menang ?? "0") } : null;
+	const retry = String(data.retry) === "1" || data.retry === true;
+	const tag = retry ? `[Percobaan ulang ${job.attempts}/${maxRetries}] ` : "";
+	const left = maxRetries - job.attempts;
+	const retryNote = okRun ? "" : retry ? (left > 0 ? ` (dicoba lagi otomatis ±${gapMin} menit)` : " (percobaan otomatis habis — CEK MANUAL)") : "";
+	const shown = okRun ? withTotalsText(tag + detailBase, totals, note) : tag + detailBase + retryNote;
+	await finishJob(env, jobId, okRun ? "DONE" : "FAILED", okRun ? "selesai" : stage, shown, period);
+	if (okRun) await saveTotals(env, { id: jobId, username: u, website: job.website, market: job.market, prizes: job.prizes, resultDate: job.resultDate }, period, totals, note).catch(() => {});
+	await logActivity(env, u, "AUTO PREDIKSI", `[${job.website}] ${job.market} ${job.prizes.join("/")} — ${shown}`, okRun ? "BERHASIL" : "GAGAL", "").catch(() => {});
+	return { ok: true };
+}
+
 const idList = (v: unknown): number[] => (Array.isArray(v) ? v : []).map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 300);
 
 /** Checkbox + "Hapus terpilih" di Riwayat Job: sembunyikan job milik sendiri (sudah beres / ditangani manual). */
@@ -278,6 +376,8 @@ export async function autoInputTest(env: Env, token: string, website: string, ma
 	if (!sess?.phpsessid) return { success: false, message: `PHPSESSID ${w} belum disimpan.` };
 	const mk = String(market ?? "").trim().toUpperCase();
 	if (!mk) return { success: false, message: "Isi nama pasaran untuk diuji (mis. OREGON06)." };
+	const pxUji = await getProxy(env, s.username);
+	if (pxUji?.enabled && pxUji.host && pxUji.port) return { success: false, message: "Jalur Kedua AKTIF: input & pembacaan admin dijalankan otomatis lewat GitHub saat KIRIM SEMUA (hasilnya di Riwayat Job). Tombol 'Uji (tanpa kirim)' langsung dari panel tidak tersedia untuk Jalur Kedua — cek koneksi proxy dengan tombol 'Uji proxy (cek IP)'." };
 	const r = await runAutoInput({
 		session: sess,
 		plan: { ok: true, market: mk, prizes: ["0000", "0000", "0000"], date: dateKeyNow(), key: "TEST" },
@@ -315,6 +415,7 @@ export interface ManualCheck {
 }
 
 /** Pesan bila Total diminta saat saklar Auto Prediksi OFF: tidak ada permintaan apa pun ke admin website. */
+const AUTO_PROXY_TOTALS_MSG = "Jalur Kedua AKTIF: pembacaan Total lewat panel tidak tersedia (admin hanya bisa dijangkau dari GitHub lewat proxy). Total pasaran yang di-auto tetap terbaca otomatis dari Riwayat Job saat KIRIM SEMUA.";
 const AUTO_OFF_TOTALS_MSG = "Auto Prediksi sedang OFF, jadi Total Omset/Referal/Menang tidak dibaca. Nyalakan 'Aktifkan' di menu Auto Prediksi bila ingin dibaca lagi.";
 
 /**
@@ -362,7 +463,16 @@ export async function autoInputAfterSend(
 			results.push({ website, status: "ANTRI", detail: "Menunggu dijalankan", manual: false, jobId: started.id });
 		}
 	}
+	// Jalur Kedua: picu runner GitHub begitu job dibuat (tidak menunggu browser memanggil autoInputRun per website) supaya
+	// job tidak yatim bila tab ditutup. Dikunci KV, jadi aman walau autoInputRun juga memicu. ghToken kosong -> diam (no-op).
+	if (await proxyActive(env, profile.username)) await dispatchAutoInputProxy(env, profile.username);
 	return { results, plan: { market: plan.market, prizes: plan.prizes, date: plan.date } };
+}
+
+/** true bila user menyalakan Jalur Kedua & mengisinya lengkap (semua admin-call-nya harus lewat runner GitHub, bukan Worker). */
+async function proxyActive(env: Env, username: string): Promise<boolean> {
+	const px = await getProxy(env, username).catch(() => null);
+	return !!(px?.enabled && px.host && px.port);
 }
 
 /** Website (yang punya PHPSESSID) untuk pembacaan Total pasaran manual. Galat apa pun -> daftar kosong: tidak boleh mengganggu KIRIM SEMUA. */
@@ -387,6 +497,8 @@ export async function autoInputTotalsCheck(env: Env, token: string, data: Record
 	const s = await gate(env, token);
 	// Penjaga sisi server: browser lama (halaman belum di-refresh) bisa saja masih memanggil ini sesudah saklar dimatikan.
 	if (!(await getEnabled(env, s.username))) return { success: false, website: String(data?.website ?? ""), message: AUTO_OFF_TOTALS_MSG };
+	const pxTot = await getProxy(env, s.username);
+	if (pxTot?.enabled && pxTot.host && pxTot.port) return { success: false, website: String(data?.website ?? ""), message: AUTO_PROXY_TOTALS_MSG };
 	const w = mustOwnWebsite(s.profile, String(data?.website ?? ""));
 	const market = String(data?.market ?? "").trim().slice(0, 60);
 	const prizes = (Array.isArray(data?.prizes) ? data.prizes : []).map((x) => String(x).trim()).filter((x) => /^\d{1,8}$/.test(x)).slice(0, 3);
@@ -431,6 +543,17 @@ async function manualTotalsCheck(env: Env, username: string, w: string, market: 
 
 /** Menjalankan SATU job antre (tanpa autentikasi -- dipanggil setelah gate). */
 export async function runQueuedJob(env: Env, username: string, jobId: number, fetchFn?: Fetcher): Promise<AutoInputOutcome> {
+	// Jalur Kedua AKTIF: Worker TIDAK bisa menjangkau admin (IP Cloudflare berpindah; TLS lewat proxy tidak didukung Worker).
+	// Eksekusi dialihkan ke runner GitHub Actions (autoinput-proxy.yml) yang jalan dari IP proxy user. Job dibiarkan QUEUED
+	// supaya diklaim runner. fetchFn (test) menang: biarkan jalur normal saat diuji.
+	if (!fetchFn) {
+		const px = await getProxy(env, username);
+		if (px?.enabled && px.host && px.port) {
+			await dispatchAutoInputProxy(env, username);
+			const j = await getJobById(env, username, jobId);
+			return { website: j?.website ?? "-", status: "DILEWATI", detail: "Diproses lewat Jalur Kedua (GitHub Actions) — hasilnya muncul di Riwayat Job.", manual: false };
+		}
+	}
 	const job = await claimJob(env, username, jobId);
 	if (!job) return { website: "-", status: "SUDAH", detail: "Job tidak ditemukan atau sudah berjalan.", manual: false };
 	const website = job.website;
@@ -465,6 +588,14 @@ export async function autoInputRetryTick(env: Env, fetchFn?: Fetcher): Promise<b
 	if (maxRetries <= 0) return false;
 	const due = await dueRetryJobs(env, maxRetries, gapMin, 3);
 	for (const cand of due) {
+		if (!fetchFn) {
+			const px = await getProxy(env, cand.username);
+			if (px?.enabled && px.host && px.port) {
+				// retry user Jalur Kedua ditangani runner GitHub (claimNextProxyJob ambil job due-retry), bukan Worker.
+				await dispatchAutoInputProxy(env, cand.username);
+				continue;
+			}
+		}
 		const job = await claimRetry(env, cand.id, maxRetries, gapMin);
 		if (!job) continue; // sudah diambil tick lain
 		const n = job.attempts;
@@ -508,6 +639,8 @@ export async function autoInputTotals(env: Env, token: string) {
 export async function autoInputTotalsRefresh(env: Env, token: string, id: number, fetchFn?: Fetcher) {
 	const s = await gate(env, token);
 	if (!(await getEnabled(env, s.username))) return { success: false, message: AUTO_OFF_TOTALS_MSG };
+	const pxRef = await getProxy(env, s.username);
+	if (pxRef?.enabled && pxRef.host && pxRef.port) return { success: false, message: AUTO_PROXY_TOTALS_MSG };
 	const row = await getTotalsRow(env, s.username, Number(id));
 	if (!row) throw new Error("Baris tidak ditemukan.");
 	const w = mustOwnWebsite(s.profile, row.website);

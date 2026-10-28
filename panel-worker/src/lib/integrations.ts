@@ -37,6 +37,8 @@ export const INT_DEFS: IntDef[] = [
 		hint: "Repo yang berisi news-turbo.yml.", check: REPO },
 	{ key: "int_invest_turbo_repo", group: "GitHub Actions", label: "Repo workflow Invest turbo", def: "projectbykd-jpg/KD-Group-Panel",
 		hint: "Repo yang berisi invest-turbo.yml.", check: REPO },
+	{ key: "int_autoinput_proxy_repo", group: "GitHub Actions", label: "Repo workflow Auto Prediksi Jalur Kedua", def: "projectbykd-jpg/KD-Group-Panel",
+		hint: "Repo yang berisi autoinput-proxy.yml (runner Jalur Kedua: menjalankan Auto Prediksi lewat proxy user dari GitHub Actions).", check: REPO },
 	{ key: "int_public_url", group: "Alamat Panel", label: "Alamat publik panel", def: "https://panel-worker.projectbykd.workers.dev", fromEnv: (e) => e.PUBLIC_URL,
 		hint: "Alamat yang dipanggil balik oleh scraper GitHub. Ubah hanya bila panel pindah domain.", check: HTTPS },
 	{ key: "int_linktree_login_url", group: "LinkTree (kirim hasil)", label: "URL login LinkTree", def: "http://ec2-13-250-131-148.ap-southeast-1.compute.amazonaws.com:8069/index",
@@ -105,6 +107,7 @@ export const ghToken = (env: Env) => intVal("int_gh_token", env);
 export const ghRepo = (env: Env) => intVal("int_gh_repo", env);
 export const newsTurboRepo = (env: Env) => intVal("int_news_turbo_repo", env);
 export const investTurboRepo = (env: Env) => intVal("int_invest_turbo_repo", env);
+export const autoInputProxyRepo = (env: Env) => intVal("int_autoinput_proxy_repo", env);
 export const publicUrl = (env: Env) => intVal("int_public_url", env).replace(/\/+$/, "");
 export const newsSiteUrl = () => intVal("int_news_site_url").replace(/\/+$/, "");
 export const strukBaseUrl = () => intVal("int_struk_base_url");

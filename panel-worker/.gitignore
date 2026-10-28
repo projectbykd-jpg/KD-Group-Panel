@@ -165,3 +165,6 @@ dist
 .env*
 !.env.example
 .wrangler/
+
+# Jalur Kedua: bundel runner hasil esbuild (di-build di GitHub Actions)
+runner/dist.mjs
