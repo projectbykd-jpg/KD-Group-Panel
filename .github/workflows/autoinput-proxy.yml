@@ -30,16 +30,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # TANPA setup-node & TANPA npm install: runner dibundel MANDIRI (semua inline, @libsql di-stub karena runner tak
+      # menyentuh database) -> ubuntu-latest sudah punya Node + npx preinstall. Ini memangkas ~8-10 dtk "nyala" GitHub.
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: panel-worker/package-lock.json
-      - name: Install (hanya dependency runtime -- runner cuma butuh @libsql/client)
-        working-directory: panel-worker
-        # --omit=dev: lewati wrangler/vitest/playwright/dll (tidak dipakai runner) -> install jauh lebih cepat drpd npm ci penuh.
-        run: npm ci --omit=dev --prefer-offline --no-audit --no-fund
       - name: Jalankan Auto Prediksi lewat proxy user
         working-directory: panel-worker
         env:
@@ -49,11 +42,12 @@ jobs:
           AUTOINPUT_USER: ${{ github.event.inputs.user }}
         run: |
           set -eu
+          echo "[diag] node $(node --version)"
           if [ -z "${CRON_KEY:-}" ]; then
             echo "::error::Repository secret CRON_KEY belum diisi (Settings > Secrets and variables > Actions)."
             exit 1
           fi
-          # Bundle runner dgn esbuild standalone (versi dipin, di-cache npx) -- tidak perlu memasang esbuild lewat npm.
-          # --packages=external: src kita dibundel, @libsql/client dimuat dari node_modules (hindari bug bundling ws).
-          npx -y esbuild@0.28.1 runner/autoinput-proxy.ts --bundle --platform=node --format=esm --packages=external --external:cloudflare:sockets --outfile=runner/dist.mjs
+          # Bundel MANDIRI: @libsql/client/web di-stub (runner tak pakai database) -> tak ada ws/libsql -> tak butuh npm install.
+          npx -y esbuild@0.28.1 runner/autoinput-proxy.ts --bundle --platform=node --format=esm \
+            --alias:@libsql/client/web=./runner/libsql-stub.mjs --external:cloudflare:sockets --outfile=runner/dist.mjs
           node runner/dist.mjs
