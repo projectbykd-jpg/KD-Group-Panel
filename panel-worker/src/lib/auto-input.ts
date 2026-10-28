@@ -128,8 +128,8 @@ async function ensureAutoInputTablesOnce(env: Env): Promise<void> {
 		],
 		// Pasaran yang TIDAK di-auto untuk akun ini (JSON array nama pasaran ternormalisasi). Kosong = semua pasaran auto.
 		auto_input_config: [["disabled_markets", "TEXT NOT NULL DEFAULT '[]'"]],
-		// sites = daftar website (JSON) yang memakai Jalur Kedua. Kosong '[]' = SEMUA website akun (perilaku lama).
-		auto_input_proxy: [["sites", "TEXT NOT NULL DEFAULT '[]'"]],
+		// sites = website (JSON) yang pakai Jalur Kedua untuk AUTO PREDIKSI (kosong = semua). lap_sites = untuk LAP ADMIN (kosong = TIDAK ada / jalur normal).
+		auto_input_proxy: [["sites", "TEXT NOT NULL DEFAULT '[]'"], ["lap_sites", "TEXT NOT NULL DEFAULT '[]'"]],
 	});
 }
 
@@ -197,7 +197,7 @@ export async function getConfig(env: Env, username: string): Promise<{ enabled: 
 	const row = await getTurso(env)
 		.prepare(
 			`SELECT c.enabled AS enabled, c.disabled_markets AS disabled_markets, p.username AS p_user, p.enabled AS p_enabled, p.scheme AS p_scheme, p.host AS p_host,
-			        p.port AS p_port, p.proxy_user AS p_proxy_user, p.proxy_pass AS p_proxy_pass, p.sites AS p_sites
+			        p.port AS p_port, p.proxy_user AS p_proxy_user, p.proxy_pass AS p_proxy_pass, p.sites AS p_sites, p.lap_sites AS p_lap_sites
 			 FROM (SELECT ? AS u) x
 			 LEFT JOIN auto_input_config c ON c.username = x.u
 			 LEFT JOIN auto_input_proxy p ON p.username = x.u`,
@@ -219,6 +219,7 @@ export async function getConfig(env: Env, username: string): Promise<{ enabled: 
 				user: String(row.p_proxy_user || ""),
 				pass: String(row.p_proxy_pass || ""),
 				sites: parseProxySites(row.p_sites),
+				lapSites: parseProxySites(row.p_lap_sites),
 			}
 		: null;
 	return { enabled: !!Number(row?.enabled ?? 0), disabledMarkets, proxy };
@@ -245,8 +246,16 @@ export interface UserProxy {
 	port: number;
 	user: string;
 	pass: string;
-	/** Website yang memakai Jalur Kedua (huruf besar). Kosong = SEMUA website akun. */
+	/** Website yang memakai Jalur Kedua untuk AUTO PREDIKSI (huruf besar). Kosong = SEMUA website akun. */
 	sites: string[];
+	/** Website yang memakai Jalur Kedua untuk LAP ADMIN (huruf besar). Kosong = tidak ada (jalur normal). Diatur terpisah di menu Lap Admin. */
+	lapSites: string[];
+}
+
+/** Lap Admin pakai Jalur Kedua untuk website ini? (proxy terisi + website ada di lap_sites). TIDAK bergantung pada saklar Auto Prediksi. */
+export function lapProxyUsesSite(px: UserProxy | null | undefined, website: string): boolean {
+	if (!px?.host || !px.port) return false;
+	return px.lapSites.includes(String(website).trim().toUpperCase());
 }
 
 /** JSON array string -> daftar kode website huruf besar (buang yang kosong/duplikat). */
@@ -270,7 +279,7 @@ export function proxyUsesSite(px: UserProxy | null | undefined, website: string)
 export async function getProxy(env: Env, username: string): Promise<UserProxy | null> {
 	await ensureAutoInputTables(env);
 	const r = await getTurso(env)
-		.prepare(`SELECT enabled, scheme, host, port, proxy_user, proxy_pass, sites FROM auto_input_proxy WHERE username = ?`)
+		.prepare(`SELECT enabled, scheme, host, port, proxy_user, proxy_pass, sites, lap_sites FROM auto_input_proxy WHERE username = ?`)
 		.bind(username)
 		.first<Record<string, unknown>>();
 	if (!r) return null;
@@ -282,6 +291,7 @@ export async function getProxy(env: Env, username: string): Promise<UserProxy | 
 		user: String(r.proxy_user || ""),
 		pass: String(r.proxy_pass || ""),
 		sites: parseProxySites(r.sites),
+		lapSites: parseProxySites(r.lap_sites),
 	};
 }
 
@@ -298,6 +308,19 @@ export async function saveProxy(env: Env, username: string, p: { enabled: boolea
 			   proxy_user = excluded.proxy_user, proxy_pass = excluded.proxy_pass, sites = excluded.sites, updated_at = excluded.updated_at`,
 		)
 		.bind(username, p.enabled ? 1 : 0, p.scheme, p.host, p.port, p.user, pass, sites, tsNow())
+		.run();
+}
+
+/** Simpan pilihan website yang pakai Jalur Kedua untuk LAP ADMIN (terpisah dari Auto Prediksi). Tidak menyentuh field proxy lain. */
+export async function saveLapProxySites(env: Env, username: string, sites: string[]): Promise<void> {
+	await ensureAutoInputTables(env);
+	const clean = JSON.stringify(parseProxySites(sites));
+	await getTurso(env)
+		.prepare(
+			`INSERT INTO auto_input_proxy (username, lap_sites, updated_at) VALUES (?, ?, ?)
+			 ON CONFLICT(username) DO UPDATE SET lap_sites = excluded.lap_sites, updated_at = excluded.updated_at`,
+		)
+		.bind(username, clean, tsNow())
 		.run();
 }
 

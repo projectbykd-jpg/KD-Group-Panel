@@ -1951,7 +1951,33 @@
         ${help}
         ${tabs}
         ${panels}
+        ${lapProxyBlock(c, sites)}
         ${mozart}${saveBar}`);
+    }
+    // Jalur Kedua (proxy) untuk LAP ADMIN — terpisah dari Auto Prediksi; default JALUR NORMAL (jalur pertama TIDAK dihilangkan).
+    function lapProxyBlock(c, sites) {
+      const pl = (c && c.proxyLap) || {};
+      const esc = escapeHtml;
+      if (!pl.configured) {
+        return `<div class="lap-setting-section">
+          <div class="lap-setting-title"><i class="fa-solid fa-route"></i>Jalur Kedua (Proxy) untuk Lap Admin</div>
+          <div class="text-[11px] text-slate-400">Belum ada proxy. Untuk website IP-locked (mis. agwl), atur proxy dulu di <b>menu Auto Prediksi › Sesi Website › kartu 'Jalur Kedua (Proxy)'</b> (host/port/user/sandi). Setelah itu kembali ke sini untuk memilih website Lap Admin mana yang memakainya. Website yang tidak dipilih tetap <b>jalur normal</b> seperti biasa.</div>
+        </div>`;
+      }
+      const chips = (sites || []).map(x => `<label class="ai-chip" style="cursor:pointer"><input type="checkbox" class="lapPxSite" value="${esc(x.website)}" ${(pl.lapSites || []).includes(x.website) ? 'checked' : ''} style="margin-right:6px">${esc(x.brand || x.website)}</label>`).join('') || '<span class="text-[11px] text-slate-400">Belum ada website.</span>';
+      return `<div class="lap-setting-section">
+        <div class="lap-setting-title"><i class="fa-solid fa-route"></i>Jalur Kedua (Proxy) untuk Lap Admin</div>
+        <div class="text-[11px] text-slate-400 mb-2">Proxy: <b>${esc(pl.scheme || '')}://${esc(pl.host || '')}:${esc(String(pl.port || ''))}</b> (diatur di menu Auto Prediksi). Centang website yang <b>tarik datanya lewat proxy</b> (IP tetap, untuk agwl). Yang <b>tidak dicentang tetap JALUR NORMAL</b> (lebih cepat). Lap Mozart tidak lewat proxy.</div>
+        <div class="ai-chips">${chips}</div>
+        <div class="mt-2"><button type="button" onclick="lapSaveProxySites()" class="bg-sky-500/90 hover:bg-sky-500 text-slate-950 font-bold px-4 py-2 rounded-lg text-xs"><i class="fa-solid fa-floppy-disk mr-1"></i>SIMPAN JALUR 2 LAP ADMIN</button></div>
+      </div>`;
+    }
+    function lapSaveProxySites() {
+      const sites = Array.from(document.querySelectorAll('.lapPxSite:checked')).map(el => el.value);
+      google.script.run
+        .withSuccessHandler(res => { if (apiFailed(res)) { toast(apiMessage(res)); return; } toast(sites.length ? 'Lap Admin: Jalur 2 untuk ' + sites.join(', ') : 'Lap Admin: semua jalur normal'); })
+        .withFailureHandler(err => toast((err && err.message) || 'Gagal menyimpan'))
+        .lapSaveProxySites(currentSessionToken, sites);
     }
     // Ganti tab website TANPA menggambar ulang: isian yang belum disimpan di tab lain tetap ada & ikut tersimpan.
     function lapSettingTab(w) {

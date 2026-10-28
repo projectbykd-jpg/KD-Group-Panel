@@ -5,7 +5,7 @@ vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1, tursoGen
 
 import { lapGetConfig, lapGetResults, lapJobResult, lapJobStart, lapJobs, lapRunAdmin, lapSaveConfig } from "../src/api/lap";
 import { checkLogin } from "../src/api/auth";
-import { resetAutoInputTablesFlag, saveSession } from "../src/lib/auto-input";
+import { resetAutoInputTablesFlag, saveLapProxySites, saveProxy, saveSession } from "../src/lib/auto-input";
 import { hashPassword } from "../src/lib/crypto";
 import { resetLapAdminSiteForTest } from "../src/lib/lap";
 import { fakeD1, fakeEnv } from "./helpers/fake-env";
@@ -65,6 +65,21 @@ describe("Lap Admin otomatis untuk setiap website akun", () => {
 		]);
 	});
 
+	it("Jalur Kedua Lap Admin (terpisah): hanya website di lap_sites yang dapat proxy; jalur pertama tetap utk lainnya", async () => {
+		const tok = await login(["HUGO", "FOLA"]);
+		await saveSession(env, "Op", "HUGO", "https://ag.suksesbogil.com/", "PHPSESSID=hugoauto00000000aaaa");
+		await lapSaveConfig(env, tok, { adminSites: [{ website: "FOLA", cookieAdmin: "PHPSESSID=folaset0000000000bbbb" }] });
+		// proxy diatur (host/port) tanpa menyalakan Auto Prediksi; Lap Admin pakai proxy HANYA utk FOLA.
+		await saveProxy(env, "Op", { enabled: false, scheme: "socks5", host: "gate.example.net", port: 1080, user: "u", pass: "p", sites: [] });
+		await saveLapProxySites(env, "Op", ["FOLA"]);
+		const r = (await lapRunAdmin(env, tok, "2026-10-24", "2026-10-24")) as { jobs: { website: string; jobId: string }[] };
+		const byWeb = Object.fromEntries(r.jobs.map((j) => [j.website, j.jobId]));
+		const key = (id: string) => params(id).key as string;
+		const sf = (await lapJobStart(env, byWeb.FOLA, key(byWeb.FOLA))) as { creds: { proxy: unknown } };
+		expect(sf.creds.proxy).toEqual({ scheme: "socks5", host: "gate.example.net", port: 1080, user: "u", pass: "p" });
+		const sh = (await lapJobStart(env, byWeb.HUGO, key(byWeb.HUGO))) as { creds: { proxy: unknown } };
+		expect(sh.creds.proxy).toBeNull(); // HUGO tetap jalur normal
+	});
 	it("TARIK DATA menarik SEMUA website sekaligus (1 job per website); job membawa kredensial website-nya; hasil terpisah & berlabel", async () => {
 		const tok = await login(["HUGO", "FOLA"]);
 		await saveSession(env, "Op", "HUGO", "https://ag.suksesbogil.com/", "PHPSESSID=hugoauto00000000aaaa");

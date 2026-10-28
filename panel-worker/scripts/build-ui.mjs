@@ -92,6 +92,7 @@ const ARG_MAP = {
 	wdListedRemove: ["token", "id"],
 	lapGetConfig: ["token"],
 	lapSaveConfig: ["token", "data"],
+	lapSaveProxySites: ["token", "sites"],
 	adminGetSystemSettings: ["token"],
 	adminErrorList: ["token", "options"],
 	adminErrorSet: ["token", "ids", "status"],

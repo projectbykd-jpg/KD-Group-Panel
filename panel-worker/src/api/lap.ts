@@ -10,7 +10,7 @@ import { logActivity } from "../lib/activity";
 import { tsNow, tsPlusMinutes } from "../lib/time";
 import { getTurso } from "../lib/turso"; // tabel lap_* ada di Turso, bukan D1
 import { rawJson } from "../lib/respond";
-import { cookieHeader, getProxy, getSessions, parsePhpSessId, proxyUsesSite, siteBrand } from "../lib/auto-input";
+import { cookieHeader, getProxy, getSessions, lapProxyUsesSite, parsePhpSessId, saveLapProxySites, siteBrand } from "../lib/auto-input";
 import type { UserProfile } from "../lib/db";
 import {
 	LapCreds,
@@ -83,7 +83,21 @@ export async function lapGetConfig(env: Env, token: string) {
 	const sites = lapUserSites(s.profile);
 	await lapMigrateLegacyAdmin(env, s.username, sites);
 	const creds = await lapLoadCreds(env, s.username);
-	return { success: true, config: { ...credsForClient(creds), adminSites: await adminSitesForClient(env, s.username, sites) } };
+	// Jalur Kedua untuk Lap Admin (terpisah dari Auto Prediksi). proxyConfigured = host/port sudah diisi di kartu Jalur Kedua (menu Auto Prediksi).
+	const px = await getProxy(env, s.username).catch(() => null);
+	const proxyLap = { configured: !!(px?.host && px?.port), host: px?.host ?? "", port: px?.port || "", scheme: px?.scheme ?? "", lapSites: px?.lapSites ?? [], websites: sites };
+	return { success: true, config: { ...credsForClient(creds), adminSites: await adminSitesForClient(env, s.username, sites), proxyLap } };
+}
+
+/** Simpan website mana yang pakai Jalur Kedua (proxy) untuk LAP ADMIN. Hanya nama website milik akun. Jalur normal tetap default utk yang tidak dipilih. */
+export async function lapSaveProxySites(env: Env, token: string, sites: unknown) {
+	const s = await requireSession(env, token, { ignoreMaintenance: true, menu: LAP_MENU_KEYS });
+	// Lap Admin memakai KODE PENDEK website (mis. "HUGO") — sama dengan yang dikirim ke scraper (c.website) & diadu di lapProxyUsesSite.
+	const own = (await adminSitesForClient(env, s.username, lapUserSites(s.profile))).map((x) => String(x.website).toUpperCase());
+	const clean = (Array.isArray(sites) ? sites : []).map((x) => String(x).trim().toUpperCase()).filter((x) => own.includes(x));
+	await saveLapProxySites(env, s.username, clean);
+	await logActivity(env, s.username, "LAP ADMIN JALUR KEDUA", clean.length ? "Pakai proxy untuk: " + clean.join(", ") : "Semua website jalur normal", "BERHASIL", "");
+	return { success: true, lapSites: clean };
 }
 
 export async function lapGetResults(env: Env, token: string, modules: unknown, website?: unknown) {
@@ -949,7 +963,7 @@ export async function lapJobStart(env: Env, jobId: string, key: string) {
 	// Jalur Kedua (proxy) untuk Lap Admin: hanya bila website ini ditandai pakai Jalur Kedua di menu Auto Prediksi.
 	// Mozart (Playwright) TIDAK memakai proxy (SOCKS5+auth tak didukung Chromium) -> selalu null.
 	const px = kind === "mozart" ? null : await getProxy(env, row.username).catch(() => null);
-	const proxy = px && proxyUsesSite(px, String(p.website || "")) ? { scheme: px.scheme, host: px.host, port: px.port, user: px.user, pass: px.pass } : null;
+	const proxy = px && lapProxyUsesSite(px, String(p.website || "")) ? { scheme: px.scheme, host: px.host, port: px.port, user: px.user, pass: px.pass } : null;
 	return {
 		success: true,
 		creds:

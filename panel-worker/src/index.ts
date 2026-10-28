@@ -90,6 +90,7 @@ import { ensurePerfIndexes } from "./lib/db";
 import { pgaPendingStatus, pgaPendingSync } from "./api/pga-pending";
 import { wdListedCheck, wdListedGetList, wdListedRemove, wdListedSync } from "./api/wd-listed";
 import {
+	lapSaveProxySites,
 	lapAdminStatus,
 	lapGetConfig,
 	lapGetResults,
@@ -311,6 +312,7 @@ const ROUTES: Record<string, Handler> = {
 	// laporan harian
 	lapGetConfig: (env, b) => lapGetConfig(env, s(b.token)),
 	lapSaveConfig: (env, b) => lapSaveConfig(env, s(b.token), (b.data ?? {}) as Record<string, unknown>),
+	lapSaveProxySites: (env, b) => lapSaveProxySites(env, s(b.token), b.sites),
 	assistantGetConfig: (env, b) => assistantGetConfig(env, s(b.token)),
 	assistantClearGaps: (env, b) => assistantClearGaps(env, s(b.token)),
 	assistantSaveConfig: (env, b) => assistantSaveConfig(env, s(b.token), b.dedicated),
