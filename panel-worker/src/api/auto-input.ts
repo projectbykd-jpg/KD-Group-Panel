@@ -235,14 +235,22 @@ export async function autoInputTestProxy(env: Env, token: string, fetchFn?: Fetc
 			lines.push(`HTTPS varian startTls tanpa opsi: GAGAL — ${(e instanceof Error ? e.message : String(e)).slice(0, 120)}`);
 		}
 	}
+	// Catatan WAJIB: baris "HTTPS … dari Worker" memang selalu GAGAL (Cloudflare Worker tak mendukung TLS lewat proxy) — itu NORMAL,
+	// bukan masalah proxy Anda. Yang penting: IP benar + "TLS mentah" dibalas (= proxy meneruskan HTTPS). Auto Prediksi jalan lewat GitHub.
+	const tlsForwards = lines.some((l) => l.startsWith("TLS mentah") && /balasan \d+ byte/.test(l));
 	const head = ip
-		? `Proxy bekerja. IP yang terlihat dari luar: ${ip}. Pastikan sama dengan IP yang didaftarkan di admin website.`
+		? `Proxy OK. IP yang terlihat dari luar: ${ip} — pastikan sama dengan yang didaftarkan di admin.`
 		: adminOk
 			? "Proxy bisa menjangkau website admin."
-			: anyOk
-				? "Proxy tersambung tetapi belum bisa memakai HTTPS ke tujuan."
-				: "Proxy gagal.";
-	return { success: !!ip || adminOk, ip: ip || undefined, message: `${head} ${lines.join(" | ")}` };
+			: tlsForwards
+				? "Proxy meneruskan HTTPS dengan benar (lihat 'TLS mentah')."
+				: anyOk
+					? "Proxy tersambung tetapi belum bisa memakai HTTPS ke tujuan."
+					: "Proxy gagal.";
+	const note = tlsForwards
+		? " CATATAN: baris 'HTTPS … GAGAL' di bawah berjalan dari Cloudflare Worker yang memang TIDAK mendukung TLS lewat proxy — itu WAJAR, bukan masalah proxy Anda. Auto Prediksi TIDAK memakai jalur ini; ia jalan lewat GitHub. Untuk menguji jalur sebenarnya, pakai tombol 'Uji (tanpa kirim)' di kartu website."
+		: "";
+	return { success: !!ip || adminOk || tlsForwards, ip: ip || undefined, message: `${head}${note} | ${lines.join(" | ")}` };
 }
 
 // ---------------------------------------------------------------------------
