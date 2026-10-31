@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: import("node:sqlite").DatabaseSync } }));
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1, tursoGeneration: () => 0 }));
 
-import { lapAdminWebsite, lapGetResults, lapJobResult, lapJobStart, lapJobs } from "../src/api/lap";
+import { lapAdminWebsite, lapGetResults, lapJobResult, lapJobStart, lapJobs, lapMotionImport } from "../src/api/lap";
 import { resetAutoInputTablesFlag, saveSession } from "../src/lib/auto-input";
 import { checkLogin } from "../src/api/auth";
 import { hashPassword } from "../src/lib/crypto";
@@ -150,6 +150,43 @@ describe("callback scraper (key job dari log publik GitHub Actions)", () => {
 		const row = turso.current!.raw.prepare(`SELECT data FROM lap_result WHERE username='Op' AND module='register'`).get() as { data: string };
 		expect(row.data).toContain("asli");
 		expect(row.data).not.toContain("PALSU");
+	});
+});
+
+describe("Lap Motion: baris Motion kembar tidak menggelembungkan Transaksi Paid/Create", () => {
+	const summary = () => {
+		const r = turso.current!.raw.prepare(`SELECT data FROM lap_result WHERE username='Op' AND module='_motionMeta'`).get() as { data: string };
+		return JSON.parse(r.data)[0].summary as Record<string, number>;
+	};
+	// Motion kadang mengirim baris yang sama berkali-kali (paginasi mengulang halaman).
+	const paidRow = (ref: string) => ({ reference_no: ref, paid_at: "2026-10-02 10:00:00", created_at: "2026-10-02 09:00:00", amount: 1000, paid_status: 1 });
+	const createRow = (ref: string) => ({ reference_no: ref, created_at: "2026-10-02 09:00:00", amount: 1000 });
+
+	it("menghitung transaksi UNIK (ref) saja, bukan tiap baris mentah", async () => {
+		const token = await login('["lap-motion"]');
+		const paid = [paidRow("R1"), paidRow("R2"), paidRow("R1"), paidRow("R2"), paidRow("R3")]; // 3 unik, 5 baris
+		const create = [createRow("R1"), createRow("R2"), createRow("R3"), createRow("R1")]; // 3 unik, 4 baris
+		const res = (await lapMotionImport(env, token, "2026-10-01", "2026-10-05", paid, create, undefined)) as { success: boolean };
+		expect(res.success).toBe(true);
+		const s = summary();
+		expect(s.totalTransaksiPaid).toBe(3);
+		expect(s.totalNominalPaidAt).toBe(3000);
+		expect(s.totalTransaksiCreate).toBe(3);
+		expect(s.totalNominalCreatedAt).toBe(3000);
+		// Daftar rincian (DP PGA) juga tidak boleh berisi baris kembar.
+		const dp = turso.current!.raw.prepare(`SELECT data FROM lap_result WHERE username='Op' AND module='motionDpPga'`).get() as { data: string };
+		expect(JSON.parse(dp.data).length).toBe(3);
+	});
+
+	it("baris benar-benar beda (ref sama kosong, user/nominal beda) tetap dihitung semua", async () => {
+		const token = await login('["lap-motion"]');
+		const paid = [
+			{ paid_at: "2026-10-02 10:00:00", created_at: "2026-10-02 09:00:00", amount: 1000, user: "aaa", paid_status: 1 },
+			{ paid_at: "2026-10-02 10:00:00", created_at: "2026-10-02 09:00:00", amount: 1000, user: "bbb", paid_status: 1 },
+		];
+		const res = (await lapMotionImport(env, token, "2026-10-01", "2026-10-05", paid, [], undefined)) as { success: boolean };
+		expect(res.success).toBe(true);
+		expect(summary().totalTransaksiPaid).toBe(2);
 	});
 });
 

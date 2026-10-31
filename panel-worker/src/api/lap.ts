@@ -238,6 +238,31 @@ async function splitMotionBySite(env: Env, username: string, sites: string[], pa
 	return parts;
 }
 
+/**
+ * Motion kadang MENGIRIM baris yang sama berkali-kali: paginasi API deposit-nya
+ * mengulang halaman yang sudah diambil kalau server diam-diam membatasi `limit`
+ * (atau karena beberapa halaman diminta berbarengan dengan offset yang sama).
+ * Kalau duplikat ini tidak dibuang, "Transaksi Paid/Create" & nominalnya
+ * MENGGELEMBUNG (mis. 2.189 transaksi asli bisa terbaca ~3.000). Transaksi unik
+ * dikenali dari reference_no/invoice_no (kalau kosong: gabungan
+ * tanggal+nominal+user), jadi baris yang BENAR-BENAR kembar terbuang tapi dua
+ * transaksi berbeda yang kebetulan mirip tidak ikut hilang. Dedup WITHIN satu
+ * daftar saja (paid, create, wd terpisah) — satu transaksi memang muncul di
+ * "create" DAN "paid", itu bukan duplikat.
+ */
+function dedupMotion(list: Rec[]): Rec[] {
+	const seen = new Set<string>();
+	const out: Rec[] = [];
+	for (const it of list) {
+		const ref = String(it.reference_no || it.invoice_no || it.unique_id || "").trim().toUpperCase();
+		const key = ref || [it.created_at, it.paid_at, it.payout_at, it.amount, it.net_amount, extractPureUsername(it)].map((x) => String(x ?? "")).join("|");
+		if (seen.has(key)) continue;
+		seen.add(key);
+		out.push(it);
+	}
+	return out;
+}
+
 export async function lapMotionImport(
 	env: Env,
 	token: string,
@@ -270,9 +295,9 @@ export async function lapMotionImport(
 			return { success: true, dp, pending, wd, hasDepo: Array.isArray(depoPaidRows) || Array.isArray(depoCreateRows), hasWd: Array.isArray(wdRows), perSite, shared: false };
 		}
 	}
-	const listPaid = (Array.isArray(depoPaidRows) ? depoPaidRows : []) as Rec[];
-	const listCreate = (Array.isArray(depoCreateRows) ? depoCreateRows : []) as Rec[];
-	const listWd = (Array.isArray(wdRows) ? wdRows : []) as Rec[];
+	const listPaid = dedupMotion((Array.isArray(depoPaidRows) ? depoPaidRows : []) as Rec[]);
+	const listCreate = dedupMotion((Array.isArray(depoCreateRows) ? depoCreateRows : []) as Rec[]);
+	const listWd = dedupMotion((Array.isArray(wdRows) ? wdRows : []) as Rec[]);
 
 	// ---- proses (port persis logika lama, minus jalur data_optional API yang
 	// cuma tersedia lewat fetch server-side -- di sini semua total dihitung
