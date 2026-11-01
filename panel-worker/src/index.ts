@@ -31,12 +31,13 @@ import {
 } from "./api/admin";
 import { adminDailyReportSend, adminErrorAlertTest, adminErrorSelfTest, adminErrorDelete, adminErrorList, adminErrorSet, clientErrorReport } from "./api/error-log";
 import { cronFail, isUnexpectedError, pruneErrorLog, recordError } from "./lib/error-log";
-import { logTotoEvent, totoDispatchTick, totoMacauRun } from "./lib/toto-macau";
+import { listTotoProxyUsers, logTotoEvent, totoDispatchTick, totoMacauRun, totoProxyDone, totoProxyNext } from "./lib/toto-macau";
 import {
 	autoInputProxyNext,
 	autoInputProxyTestStatus,
 	autoInputJobStatus,
 	autoInputProxyDone,
+	dispatchTotoMacauProxy,
 	autoInputClearJob,
 	autoInputHideJobs,
 	autoInputDismissToto,
@@ -729,6 +730,27 @@ export default {
 					const exclude = (url.searchParams.get("exclude") || "").split(",").map((x) => x.trim()).filter(Boolean);
 					out.toto = await totoMacauRun(env, { only: qUser ? [qUser] : undefined, exclude, force: url.searchParams.get("force") === "1", maxSites: 1 });
 				}
+				// Jalur Kedua Toto Macau (website proxy, tak terjangkau Worker): runner totomacau-proxy.yml minta daftar user,
+				// daftar website due + proxy, lalu lapor baris admin (POST). Worker cocokkan Panel-Z + tulis DB. Auth: CRON_KEY (di atas).
+				if (job === "totoproxy_users") {
+					out.result = { ok: true, users: await listTotoProxyUsers(env) };
+				}
+				if (job === "totoproxy_next") {
+					out.result = await totoProxyNext(env, (url.searchParams.get("user") || "").trim(), { force: url.searchParams.get("force") === "1" });
+				}
+				if (job === "totoproxy_done") {
+					let body: Record<string, unknown> = {};
+					try {
+						body = (await request.json()) as Record<string, unknown>;
+					} catch {
+						/* body kosong/invalid -> divalidasi di totoProxyDone */
+					}
+					out.result = await totoProxyDone(env, {
+						user: (body.user as string) ?? url.searchParams.get("user") ?? undefined,
+						website: (body.website as string) ?? url.searchParams.get("website") ?? undefined,
+						rows: body.rows,
+					});
+				}
 				// Pemicu workflow toto-macau.yml (untuk cron-job.org, sama seperti job=githubnews).
 				if (job === "githubtoto") {
 					await dispatchTotoMacau(env);
@@ -874,7 +896,7 @@ export default {
 				return false;
 			});
 			// Auto Check Toto Macau/5D: cron ini hanya MEMICU workflow GitHub Actions (1 panggilan GitHub); prosesnya di Actions. Bila memicu, pump Invest menunggu tick berikutnya.
-			const totoDispatched = retried ? false : await totoDispatchTick(env, () => dispatchTotoMacau(env)).catch(async (e) => {
+			const totoDispatched = retried ? false : await totoDispatchTick(env, async () => { await dispatchTotoMacau(env); await dispatchTotoMacauProxy(env).catch(() => {}); /* website Jalur Kedua: runner proxy cari user sendiri */ }).catch(async (e) => {
 						await cronFail(env, "toto dispatch tick")(e);
 						await logTotoEvent(env, "", "info", "ERR", "Pemicu cron galat: " + (e instanceof Error ? e.message : String(e)).slice(0, 200)); // terlihat di LOG KEGIATAN, tidak diam-diam
 						return false;

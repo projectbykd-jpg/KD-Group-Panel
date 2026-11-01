@@ -1,0 +1,61 @@
+name: Auto Check TOTO MACAU — Jalur Kedua (proxy user)
+
+# Toto Macau untuk website yang MENYALAKAN "Jalur Kedua". Worker TIDAK bisa HTTPS ke admin agwl lewat proxy (startTls di
+# atas CONNECT/SOCKS5 selalu ditutup), jadi runner Node di sini yang MEMBACA admin lewat proxy user (IP tetap yang
+# terdaftar di admin), lalu mengirim baris mentahnya ke Worker. Worker yang mencocokkan ke Panel-Z & menulis database
+# (reconcileWebsite) — logika bisnis tidak diduplikasi.
+#
+# Pemicu: (1) cron Cloudflare tiap menit memicu workflow ini (lewat dispatchTotoMacauProxy, TANPA user) HANYA di sekitar jam
+# draw / saat ada baris menunggu — sama dengan toto-macau.yml; runner mencari sendiri semua user Jalur Kedua (totoproxy_users).
+# (2) tombol "CEK & ISI SEKARANG" di menu Auto Prediksi (dengan user) untuk memaksa sekarang. (3) jadwal di bawah sebagai
+# cadangan (jadwal GitHub sering telat). Kunci per-website di database mencegah dobel proses, jadi dobel pemicu aman.
+#
+# PHPSESSID & sandi proxy mengalir ke runner ini (lewat /__cron, auth CRON_KEY) — itu izin yang diberikan pemilik saat
+# memilih Jalur Kedua; runner tidak pernah menulis rahasia ke log.
+on:
+  schedule:
+    # jam draw WIB 00,13,15,16,19,21,22,23 = UTC 17,06,08,09,12,14,15,16 (sama dengan toto-macau.yml)
+    - cron: "10,20,30,40,50 6,8,9,12,14,15,16,17 * * *"
+    - cron: "40 * * * *"
+  workflow_dispatch:
+    inputs:
+      user:
+        description: "Batasi ke satu username panel (kosongkan = semua user Jalur Kedua)"
+        required: false
+        type: string
+      force:
+        description: "1 = abaikan jeda antar putaran (tombol panel)"
+        required: false
+        type: string
+
+concurrency:
+  group: totomacau-proxy-${{ github.event.inputs.user }}
+  cancel-in-progress: false # jangan tabrak run utk user yg sama, antre saja
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # TANPA setup-node & TANPA npm install: runner dibundel MANDIRI (semua inline, @libsql di-stub karena runner tak
+      # menyentuh database) -> ubuntu-latest sudah punya Node + npx preinstall. Ini memangkas ~8-10 dtk "nyala" GitHub.
+      - uses: actions/checkout@v4
+      - name: Baca admin Toto Macau lewat proxy user
+        working-directory: panel-worker
+        env:
+          # Repository secret CRON_KEY -- nilai SAMA dgn yang dipasang ke Worker oleh deploy.yml.
+          CRON_KEY: ${{ secrets.CRON_KEY }}
+          PUBLIC_URL: "https://panel-worker.projectbykd.workers.dev"
+          TOTO_USER: ${{ github.event.inputs.user }}
+          TOTO_FORCE: ${{ github.event.inputs.force }}
+        run: |
+          set -eu
+          echo "[diag] node $(node --version)"
+          if [ -z "${CRON_KEY:-}" ]; then
+            echo "::error::Repository secret CRON_KEY belum diisi (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+          # Bundel MANDIRI: @libsql/client/web di-stub (runner tak pakai database) -> tak ada ws/libsql -> tak butuh npm install.
+          npx -y esbuild@0.28.1 runner/totomacau-proxy.ts --bundle --platform=node --format=esm \
+            --alias:@libsql/client/web=./runner/libsql-stub.mjs --external:cloudflare:sockets --outfile=runner/dist.mjs
+          node runner/dist.mjs

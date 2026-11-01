@@ -3,9 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const turso = vi.hoisted(() => ({ current: null as null | { d1: unknown; raw: import("node:sqlite").DatabaseSync } }));
 vi.mock("../src/lib/turso", () => ({ getTurso: () => turso.current!.d1, tursoGeneration: () => 0 }));
 
-import { ackTotoAlerts, dismissTotoRows, listTotoEvents, listTotoLog, logTotoEvent, parseTotoRows, passIntervalMin, pendingTotoAlerts, totoWindowState, pruneTotoMacau, resetTotoTablesFlag, totoDispatchAt, totoDispatchTick, totoMacauRun } from "../src/lib/toto-macau";
+import { ackTotoAlerts, dismissTotoRows, listTotoEvents, listTotoLog, logTotoEvent, parseTotoRows, passIntervalMin, pendingTotoAlerts, totoWindowState, pruneTotoMacau, resetTotoTablesFlag, totoDispatchAt, totoDispatchTick, totoMacauRun, totoProxyNext, totoProxyDone, listTotoProxyUsers } from "../src/lib/toto-macau";
+import { collectTotoAdminRows } from "../src/lib/toto-macau-admin";
 import { openPanelZ, panelZPageCount, parsePanelZRows, type PanelZHandle } from "../src/senders/panelz";
-import { defaultAdminBase, resetAutoInputTablesFlag, saveSession, setEnabled } from "../src/lib/auto-input";
+import { defaultAdminBase, resetAutoInputTablesFlag, saveProxy, saveSession, setEnabled } from "../src/lib/auto-input";
 import { getSys, resetSysCache, saveSys } from "../src/lib/settings";
 import { tsPlusMinutes } from "../src/lib/time";
 import { fakeD1, fakeEnv } from "./helpers/fake-env";
@@ -1148,5 +1149,149 @@ describe("rekonsiliasi admin <-> Panel-Z", () => {
 		} finally {
 			m17.splice(0, 3);
 		}
+	});
+});
+
+describe("Jalur Kedua (proxy) Toto Macau", () => {
+	let env: Env;
+	let raw: import("node:sqlite").DatabaseSync;
+
+	const addUser = (u: string, websites: string[] = ["HUGOTOGEL"]) =>
+		raw.prepare(`INSERT INTO users (username, username_lc, password_hash, websites, perm_panelz, role, status) VALUES (?, ?, 'x', ?, 1, 'OPERATOR', 'AKTIF')`).run(u, u.toLowerCase(), JSON.stringify(websites));
+	const addPanelZ = (w: string) => raw.prepare(`INSERT INTO site_accounts (website, pz_user, pz_pass, pz_user2, pz_pass2, pz_url) VALUES (?, 'u', 'p', 'u2', 'p2', 'https://pz.test')`).run(w);
+	const setMode = async (m: number) => {
+		await saveSys(env, { sys_totomacau_mode: m });
+		resetSysCache();
+	};
+	const enableProxySite = async (u: string, w: string, sites: string[] | undefined = [w]) => {
+		await setEnabled(env, u, true);
+		await saveSession(env, u, w, defaultAdminBase(w), "PHPSESSID=" + SID);
+		await saveProxy(env, u, { enabled: true, scheme: "socks5", host: "51.241.158.153", port: 1080, user: "pu", pass: "pp", sites });
+	};
+	// Panel-Z: baris 09 Oct kosong untuk -00, dan 08 Oct -00 kosong -> admin bisa mengisi.
+	let zRows: ZRow[];
+	let pushed: { id: string; angka: string }[];
+	const fakePanel = (async () => ({
+		html: zHtml(zRows),
+		push: async (id: string, angka: string) => {
+			pushed.push({ id, angka });
+			const r = zRows.find((x) => String(x.id) === id);
+			if (r) r.value = angka;
+			return "Berhasil dikirim";
+		},
+		reload: async () => zHtml(zRows),
+	})) as unknown as NonNullable<Parameters<typeof totoProxyDone>[2]>["panel"];
+
+	beforeEach(() => {
+		turso.current = fakeD1([]);
+		resetAutoInputTablesFlag();
+		resetTotoTablesFlag();
+		resetSysCache();
+		const f = fakeEnv();
+		env = f.env;
+		raw = f.db;
+		pushed = [];
+		zRows = [
+			{ id: 69, market: "TOTOMACAU-00", date: "2026-10-09", value: "" },
+			{ id: 71, market: "TOTOMACAU-00", date: "2026-10-08", value: "" },
+			{ id: 61, market: "TOTOMACAU-21-5D", date: "2026-10-09", value: "" },
+			{ id: 100, market: "TOTOMACAU-13", date: "2026-10-08", value: "4518" },
+		];
+	});
+
+	it("collectTotoAdminRows: baca m17 & m51 lewat fetcher (proxy), kembalikan baris mentah", async () => {
+		const m17: [string, string, string, string][] = [
+			["09-10-2026 00:10:19", "14226", "2412", "Yes"],
+			["08-10-2026 00:10:02", "14220", "7036", "Yes"],
+		];
+		const m51: [string, string, string, string][] = [["08-10-2026 21:30:37", "3614", "08346", "Yes"]];
+		const f = async (url: string) => new Response(url.includes("sar=m17") ? adminPage("Toto Macau", m17) : adminPage("Toto Macao 5D", m51), { status: 200 });
+		const sess = { website: "HUGOTOGEL", baseUrl: "https://ag.test/", phpsessid: "x", ua: "" };
+		const res = await collectTotoAdminRows(f, sess, "2026-10-06");
+		expect(res.m17.error).toBeUndefined();
+		expect(res.m17.rows?.map((r) => r.number)).toEqual(["2412", "7036"]);
+		expect(res.m51.rows?.map((r) => r.number)).toEqual(["08346"]);
+	});
+
+	it("collectTotoAdminRows: halaman bukan daftar game / tabel kosong -> error (bukan baris)", async () => {
+		const fWrong = async () => new Response("<html><body>Silakan login</body></html>", { status: 200 });
+		const res = await collectTotoAdminRows(fWrong, { website: "HUGOTOGEL", baseUrl: "https://ag.test/", phpsessid: "x", ua: "" }, "2026-10-06");
+		expect(res.m17.error).toBeTruthy();
+		expect(res.m17.rows).toBeUndefined();
+	});
+
+	it("totoProxyNext: website Jalur Kedua DUE + proxy dikembalikan; website non-proxy tidak", async () => {
+		await addUser("op", ["HUGOTOGEL", "FOLATOTO"]);
+		addPanelZ("HUGOTOGEL");
+		addPanelZ("FOLATOTO");
+		await enableProxySite("op", "HUGOTOGEL", ["HUGOTOGEL"]); // hanya HUGOTOGEL lewat proxy
+		await saveSession(env, "op", "FOLATOTO", defaultAdminBase("FOLATOTO"), "PHPSESSID=" + SID); // FOLATOTO non-proxy
+		await setMode(2);
+		const r = await totoProxyNext(env, "op", { force: true, nowMs: NOW });
+		expect(r.ok).toBe(true);
+		expect(r.done).toBeFalsy();
+		expect(r.proxy?.host).toBe("51.241.158.153");
+		expect(r.websites?.map((w) => w.website)).toEqual(["HUGOTOGEL"]); // FOLATOTO (non-proxy) tidak ikut
+		expect(r.websites?.[0].phpsessid).toContain(SID);
+		expect(r.websites?.[0].since).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+		expect(r.websites?.[0].today).toBe("2026-10-09");
+	});
+
+	it("totoProxyNext: user tanpa Jalur Kedua -> done:true (tidak ada website)", async () => {
+		await addUser("plain");
+		addPanelZ("HUGOTOGEL");
+		await setEnabled(env, "plain", true);
+		await saveSession(env, "plain", "HUGOTOGEL", defaultAdminBase("HUGOTOGEL"), "PHPSESSID=" + SID);
+		await setMode(2);
+		const r = await totoProxyNext(env, "plain", { force: true, nowMs: NOW });
+		expect(r.done).toBe(true);
+		expect(r.websites).toEqual([]);
+	});
+
+	it("totoProxyDone: baris admin dari runner diisi ke Panel-Z (reconcile lewat supplied rows)", async () => {
+		await addUser("op");
+		addPanelZ("HUGOTOGEL");
+		await enableProxySite("op", "HUGOTOGEL");
+		await setMode(2);
+		const supplied = {
+			m17: { rows: parseTotoRows(adminPage("Toto Macau", [["08-10-2026 00:10:02", "14220", "7036", "Yes"]])) },
+			m51: { rows: parseTotoRows(adminPage("Toto Macao 5D", [["09-10-2026 21:30:37", "3614", "08346", "Yes"]])) },
+		};
+		const r = await totoProxyDone(env, { user: "op", website: "HUGOTOGEL", rows: supplied, nowMs: NOW }, { panel: fakePanel });
+		expect(r.ok).toBe(true);
+		expect(pushed).toEqual(expect.arrayContaining([{ id: "71", angka: "7036" }, { id: "61", angka: "08346" }]));
+		expect(r.summary?.posted).toBe(2);
+		const log = Object.fromEntries((await listTotoLog(env, ["HUGOTOGEL"])).map((x) => [`${x.market} ${x.rowAt.slice(0, 10)}`, x.status]));
+		expect(log["TOTOMACAU-00 2026-10-08"]).toBe("SENT");
+		expect(log["TOTOMACAU-21-5D 2026-10-09"]).toBe("SENT");
+	});
+
+	it("totoProxyDone: website bukan milik user / bukan Jalur Kedua -> ditolak", async () => {
+		await addUser("op");
+		addPanelZ("HUGOTOGEL");
+		await enableProxySite("op", "HUGOTOGEL");
+		await setMode(2);
+		const r = await totoProxyDone(env, { user: "op", website: "LAINNYA", rows: {} }, { panel: fakePanel });
+		expect(r.ok).toBe(false);
+	});
+
+	it("totoProxyDone: baris admin error dari runner -> dicatat gagal, tidak crash", async () => {
+		await addUser("op");
+		addPanelZ("HUGOTOGEL");
+		await enableProxySite("op", "HUGOTOGEL");
+		await setMode(2);
+		const r = await totoProxyDone(env, { user: "op", website: "HUGOTOGEL", rows: { m17: { error: "Sesi admin habis" }, m51: { error: "Sesi admin habis" } }, nowMs: NOW }, { panel: fakePanel });
+		expect(r.ok).toBe(true);
+		expect(r.summary?.failed).toBeGreaterThan(0);
+		expect(pushed).toEqual([]);
+	});
+
+	it("listTotoProxyUsers: hanya user auto_input aktif dengan Jalur Kedua bersites", async () => {
+		await addUser("p1");
+		await addUser("p2");
+		await enableProxySite("p1", "HUGOTOGEL");
+		await setEnabled(env, "p2", true); // p2 aktif tapi tanpa proxy
+		await setMode(2);
+		expect(await listTotoProxyUsers(env)).toEqual(["p1"]);
 	});
 });

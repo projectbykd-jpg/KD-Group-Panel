@@ -22,75 +22,20 @@ import { hasMenu } from "./menus";
 import { getSiteAccounts, type PanelZCfg } from "./site";
 import { getProxy, getSessions, proxyUsesSite, type AdminSession } from "./auto-input";
 import { adminReq, htmlText, type Fetcher } from "./auto-input-run";
+import { ADMIN_MAX_PAGES, ADMIN_PAGE_SIZE, TOTO_GAMES, adminPagePath, parseTotoRows, type TotoAdminResult, type TotoGame, type TotoRow } from "./toto-macau-admin";
+// Re-ekspor agar pemakai lama (test, modul lain) tetap mengimpor dari "./toto-macau" seperti sebelum dipecah.
+export { TOTO_GAMES, parseTotoRows } from "./toto-macau-admin";
+export type { TotoGame, TotoRow } from "./toto-macau-admin";
 import { openPanelZ, parsePanelZRows, type PanelZHandle } from "../senders/panelz";
 import { logActivity } from "./activity";
 import { recordError } from "./error-log";
 
-export interface TotoGame {
-	game: "m17" | "m51";
-	/** nama game di tautan pagination admin (&game=...) */
-	name: string;
-	path: string;
-	title: RegExp;
-	digits: number;
-	/** jam (WIB) baris di tabel -> nama pasaran Panel-Z (lihat MARKET_TO_PANEL di parser.ts) */
-	slots: Record<number, string>;
-}
-export const TOTO_GAMES: TotoGame[] = [
-	{
-		game: "m17",
-		name: "Toto Macau",
-		path: "admin_angka.php?sar=m17&game=Toto%20Macau",
-		title: /Daftar\s+Nomor\s+Toto\s+Macau\b/i,
-		digits: 4,
-		slots: { 0: "TOTOMACAU-00", 13: "TOTOMACAU-13", 16: "TOTOMACAU-16", 19: "TOTOMACAU-19", 22: "TOTOMACAU-22", 23: "TOTOMACAU-23" },
-	},
-	{
-		game: "m51",
-		name: "Toto Macao 5D",
-		path: "admin_angka.php?sar=m51&game=Toto%20Macao%205D",
-		title: /Daftar\s+Nomor\s+Toto\s+Macao\s+5D\b/i,
-		digits: 5,
-		slots: { 15: "TOTOMACAU-15-5D", 21: "TOTOMACAU-21-5D" },
-	},
-];
-
 export const TOTO_FRESH_MIN = 120; // hanya baris yang terbit <= 2 jam lalu
 export const TOTO_MAX_ATTEMPTS = 3; // percobaan kirim ke Panel-Z per draw
 const SUBREQ_BUDGET = 30; // batas panggilan jaringan per putaran (batas 50 subrequest per invocation)
-const ADMIN_PAGE_SIZE = 20; // admin_angka.php menampilkan 20 baris per halaman (tombol [ >> ] = start=20&end=40 ...)
-const ADMIN_MAX_PAGES = 5;
 const PANELZ_PAGES_CAP = 12;
-
-export interface TotoRow {
-	no: number;
-	date: string; // yyyy-MM-dd
-	time: string; // HH:mm:ss
-	hour: number;
-	period: number;
-	number: string;
-	hitung: string;
-}
-
-/** Baca baris tabel. HTML admin TIDAK rapi (baris tanpa </tr>, <form> di dalam <tr>) -> dibaca per rangkaian <td>, bukan per <tr>. */
-export function parseTotoRows(html: string): TotoRow[] {
-	const out: TotoRow[] = [];
-	const re =
-		/<td[^>]*>\s*(\d{1,4})\s*<\/td>\s*<td[^>]*>\s*(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2}):(\d{2})\s*<\/td>\s*<td[^>]*>\s*(\d+)\s*<\/td>\s*<td[^>]*>\s*(\d+)\s*<\/td>\s*<td[^>]*>\s*([A-Za-z]+)\s*<\/td>/gi;
-	let m: RegExpExecArray | null;
-	while ((m = re.exec(html))) {
-		out.push({
-			no: Number(m[1]),
-			date: `${m[4]}-${m[3]}-${m[2]}`,
-			time: `${m[5]}:${m[6]}:${m[7]}`,
-			hour: Number(m[5]),
-			period: Number(m[8]),
-			number: m[9],
-			hitung: m[10].toLowerCase(),
-		});
-	}
-	return out;
-}
+// Definisi game, parser tabel, konstanta halaman, dan pembaca admin (parseTotoRows/adminPagePath/collectTotoAdminRows)
+// dipindah ke ./toto-macau-admin (murni) supaya runner Jalur Kedua bisa memakainya tanpa menyeret dependensi Worker.
 
 /** Menit sejak baris terbit (WIB). */
 function ageMin(row: TotoRow, nowMs: number): number {
@@ -399,7 +344,9 @@ export async function pruneTotoMacau(env: Env, days?: number): Promise<{ log: nu
 type Cand = { username: string; sess: AdminSession; f?: Fetcher };
 const dayOf = (nowMs: number, back = 0): string => new Date(nowMs + 7 * 3600_000 - back * 86400_000).toISOString().slice(0, 10);
 
-async function candidates(env: Env, only?: string[]): Promise<Map<string, Cand[]>> {
+// proxyMode "skip" (bawaan) = jalur Worker: LEWATI website Jalur Kedua (tak terjangkau Worker — proxy/TLS). proxyMode "only"
+// = jalur runner: HANYA website Jalur Kedua (diproses runner GitHub Actions lewat proxy user, lihat totoProxyNext/Reconcile).
+async function candidates(env: Env, only?: string[], proxyMode: "skip" | "only" = "skip"): Promise<Map<string, Cand[]>> {
 	const db = getTurso(env);
 	const en = await db.prepare(`SELECT username FROM auto_input_config WHERE enabled = 1 ORDER BY username`).all<{ username: string }>();
 	let names = (en.results ?? []).map((r) => String(r.username));
@@ -413,12 +360,11 @@ async function candidates(env: Env, only?: string[]): Promise<Map<string, Cand[]
 		if (p.role !== "ADMIN" && p.role !== "OPERATOR") continue;
 		// aturan yang sama dengan KIRIM KE PANEL-Z di menu Result
 		if (!p.permissions.panelz || !hasMenu(p, "result") || !hasMenu(p, "auto-input")) continue;
-		// Website Jalur Kedua TIDAK bisa dijangkau Worker (proxy/TLS) -> LEWATI dari Toto Macau Worker supaya tidak gagal berisik
-		// ("sesi habis"). Toto Macau untuk website Jalur Kedua akan ditangani terpisah (belum lewat Jalur 2).
 		const px = await getProxy(env, p.username).catch(() => null);
 		for (const s of await getSessions(env, p.username)) {
 			if (!s.phpsessid || !p.websites.includes(s.website)) continue;
-			if (proxyUsesSite(px, s.website)) continue; // Jalur Kedua: jangan coba lewat Worker
+			const isProxy = proxyUsesSite(px, s.website);
+			if (proxyMode === "skip" ? isProxy : !isProxy) continue;
 			(out.get(s.website) ?? out.set(s.website, []).get(s.website)!).push({ username: p.username, sess: s });
 		}
 	}
@@ -487,7 +433,7 @@ async function reconcileWebsite(
 	cands: Cand[],
 	pz: PanelZCfg,
 	mode: number,
-	deps: { f: Fetcher; panel: PanelOpen; nowMs: number; correct: boolean; lookback: number; maxCorrect: number },
+	deps: { f: Fetcher; panel: PanelOpen; nowMs: number; correct: boolean; lookback: number; maxCorrect: number; supplied?: TotoAdminResult },
 	budget: { used: number },
 	sum: TotoSummary,
 ): Promise<void> {
@@ -511,57 +457,76 @@ async function reconcileWebsite(
 	let reader = cands[0].username;
 
 	for (const game of TOTO_GAMES) {
-		let html = "";
-		let lastErr = "";
-		let ok = false;
-		for (const c of cands) {
-			budget.used++;
+		let all: Map<number, TotoRow>;
+		if (deps.supplied) {
+			// Jalur Kedua: baris admin sudah diambil runner GitHub Actions (curl-proxy, IP tetap user) & dikirim ke Worker;
+			// Worker TIDAK fetch admin sendiri (website Jalur Kedua memang tak terjangkau Worker). Panel-Z & DB tetap di Worker.
 			sum.net = true;
-			try {
-				html = await adminReq(c.f ?? deps.f, c.sess, game.path);
-				reader = c.username;
-				ok = true;
-				break;
-			} catch (e) {
-				lastErr = e instanceof Error ? e.message : String(e);
+			const sg = deps.supplied[game.game];
+			const rows = sg?.rows;
+			if (sg?.error || !rows || !rows.length) {
+				const why = sg?.error || "Tabel angka tidak terbaca lewat Jalur Kedua.";
+				buf.push(evStmt(env, website, "info", "ERR", `Admin ${gameLabel(game)} (Jalur Kedua): ${why}`));
+				await recordFailure(env, website, game.game, today, reader, why);
+				sum.failed++;
+				continue;
 			}
-		}
-		if (!ok) {
-			buf.push(evStmt(env, website, "info", "ERR", `Admin ${gameLabel(game)}: sesi habis / halaman tidak terbuka — tempel PHPSESSID baru di menu Auto Prediksi`));
-			await recordFailure(env, website, game.game, today, cands[0].username, `Sesi admin ${website} habis atau halaman tidak bisa dibuka — tempel PHPSESSID baru di menu Auto Prediksi (${lastErr})`);
-			sum.failed++;
-			continue;
-		}
-		if (!game.title.test(htmlText(html))) {
-			await recordFailure(env, website, game.game, today, reader, "Halaman yang terbuka bukan daftar nomor game ini (bentuk halaman berubah?).");
-			sum.failed++;
-			continue;
-		}
-		const rows = parseTotoRows(html);
-		buf.push(evStmt(env, website, "info", rows.length ? "INFO" : "ERR", `Admin ${gameLabel(game)}: ${rows.length} baris terbaca (akun ${reader})`));
-		if (!rows.length) {
-			await recordFailure(env, website, game.game, today, reader, "Tabel angka tidak terbaca (bentuk halaman berubah?).");
-			sum.failed++;
-			continue;
-		}
-		// halaman admin berikutnya ([ >> ]) selama baris paling lama di halaman terakhir masih dalam rentang
-		const readerCand = cands.find((c) => c.username === reader)!;
-		const sessOk = readerCand.sess;
-		const all = new Map(rows.map((r) => [r.period, r]));
-		let pageRows = rows;
-		for (let pg = 1; pg < ADMIN_MAX_PAGES; pg++) {
-			const oldest = pageRows.reduce((m, r) => (m && m < r.date ? m : r.date), "");
-			if (!oldest || oldest < since || pageRows.length < ADMIN_PAGE_SIZE) break;
-			budget.used++;
-			try {
-				pageRows = parseTotoRows(await adminReq(readerCand.f ?? deps.f, sessOk, `admin_angka.php?start=${pg * ADMIN_PAGE_SIZE}&end=${(pg + 1) * ADMIN_PAGE_SIZE}&sar=${game.game}&game=${encodeURIComponent(game.name)}`));
-			} catch (e) {
-				buf.push(evStmt(env, website, "info", "WARN", `Admin ${gameLabel(game)}: halaman ${pg + 1} gagal dibaca (${e instanceof Error ? e.message : String(e)}) — memakai halaman yang sudah terbaca`));
-				break;
+			all = new Map(rows.map((r) => [r.period, r]));
+			buf.push(evStmt(env, website, "info", "INFO", `Admin ${gameLabel(game)}: ${rows.length} baris terbaca (Jalur Kedua, akun ${reader})`));
+		} else {
+			let html = "";
+			let lastErr = "";
+			let ok = false;
+			for (const c of cands) {
+				budget.used++;
+				sum.net = true;
+				try {
+					html = await adminReq(c.f ?? deps.f, c.sess, game.path);
+					reader = c.username;
+					ok = true;
+					break;
+				} catch (e) {
+					lastErr = e instanceof Error ? e.message : String(e);
+				}
 			}
-			if (!pageRows.length) break;
-			for (const r of pageRows) if (!all.has(r.period)) all.set(r.period, r);
-			buf.push(evStmt(env, website, "info", "INFO", `Admin ${gameLabel(game)}: halaman ${pg + 1} dibaca (${pageRows.length} baris, terlama ${pageRows.reduce((m, r) => (m && m < r.date ? m : r.date), "")})`));
+			if (!ok) {
+				buf.push(evStmt(env, website, "info", "ERR", `Admin ${gameLabel(game)}: sesi habis / halaman tidak terbuka — tempel PHPSESSID baru di menu Auto Prediksi`));
+				await recordFailure(env, website, game.game, today, cands[0].username, `Sesi admin ${website} habis atau halaman tidak bisa dibuka — tempel PHPSESSID baru di menu Auto Prediksi (${lastErr})`);
+				sum.failed++;
+				continue;
+			}
+			if (!game.title.test(htmlText(html))) {
+				await recordFailure(env, website, game.game, today, reader, "Halaman yang terbuka bukan daftar nomor game ini (bentuk halaman berubah?).");
+				sum.failed++;
+				continue;
+			}
+			const rows = parseTotoRows(html);
+			buf.push(evStmt(env, website, "info", rows.length ? "INFO" : "ERR", `Admin ${gameLabel(game)}: ${rows.length} baris terbaca (akun ${reader})`));
+			if (!rows.length) {
+				await recordFailure(env, website, game.game, today, reader, "Tabel angka tidak terbaca (bentuk halaman berubah?).");
+				sum.failed++;
+				continue;
+			}
+			// halaman admin berikutnya ([ >> ]) selama baris paling lama di halaman terakhir masih dalam rentang
+			const readerCand = cands.find((c) => c.username === reader)!;
+			const sessOk = readerCand.sess;
+			const acc = new Map(rows.map((r) => [r.period, r]));
+			let pageRows = rows;
+			for (let pg = 1; pg < ADMIN_MAX_PAGES; pg++) {
+				const oldest = pageRows.reduce((m, r) => (m && m < r.date ? m : r.date), "");
+				if (!oldest || oldest < since || pageRows.length < ADMIN_PAGE_SIZE) break;
+				budget.used++;
+				try {
+					pageRows = parseTotoRows(await adminReq(readerCand.f ?? deps.f, sessOk, adminPagePath(game, pg)));
+				} catch (e) {
+					buf.push(evStmt(env, website, "info", "WARN", `Admin ${gameLabel(game)}: halaman ${pg + 1} gagal dibaca (${e instanceof Error ? e.message : String(e)}) — memakai halaman yang sudah terbaca`));
+					break;
+				}
+				if (!pageRows.length) break;
+				for (const r of pageRows) if (!acc.has(r.period)) acc.set(r.period, r);
+				buf.push(evStmt(env, website, "info", "INFO", `Admin ${gameLabel(game)}: halaman ${pg + 1} dibaca (${pageRows.length} baris, terlama ${pageRows.reduce((m, r) => (m && m < r.date ? m : r.date), "")})`));
+			}
+			all = acc;
 		}
 		for (const r of all.values()) {
 			if (dismissed.has(`${game.game}|${r.period}`)) continue; // ditangani manual oleh user
@@ -981,4 +946,155 @@ export async function totoMacauRun(env: Env, opts: { only?: string[]; exclude?: 
 /** Dipanggil cron tiap menit. true = ada panggilan jaringan. */
 export async function totoMacauTick(env: Env, deps: TotoDeps = {}): Promise<boolean> {
 	return (await totoMacauRun(env, deps)).net;
+}
+
+// ---------------------------------------------------------------------------
+// JALUR KEDUA (proxy) — website Jalur Kedua tak terjangkau Worker, jadi runner GitHub Actions (totomacau-proxy.yml) yang
+// MEMBACA admin lewat proxy user (IP tetap). Pembagian kerja SAMA dengan Auto Prediksi Jalur 2: runner = "tangan" (hanya
+// fetch admin lewat curl-proxy), Worker = "otak" (cocokkan Panel-Z + tulis DB). Panel-Z sendiri terjangkau Worker (login
+// basic-auth terpisah, bukan admin agwl), jadi hanya baca admin yang perlu proxy.
+//
+// Alur: runner minta daftar website due (totoProxyNext) -> fetch admin m17/m51 lewat proxy -> kirim baris mentah ke Worker
+// (totoProxyDone) -> Worker jalankan reconcileWebsite dengan baris itu (supplied) persis seperti website biasa.
+// ---------------------------------------------------------------------------
+const emptyTotoSummary = (): TotoSummary => ({ websites: 0, posted: 0, already: 0, pending: 0, conflict: 0, missing: 0, failed: 0, net: false, message: "", sites: [], more: false, corrected: 0, skippedBusy: 0 });
+
+/** Username (auto_input aktif) yang menyalakan Jalur Kedua dengan daftar website — kandidat Toto Macau lewat runner proxy. */
+export async function listTotoProxyUsers(env: Env): Promise<string[]> {
+	const mode = await getSys(env, "sys_totomacau_mode");
+	if (mode <= 0) return [];
+	const db = getTurso(env);
+	const en = await db.prepare(`SELECT username FROM auto_input_config WHERE enabled = 1 ORDER BY username`).all<{ username: string }>();
+	const out: string[] = [];
+	for (const r of en.results ?? []) {
+		const u = String(r.username);
+		const px = await getProxy(env, u).catch(() => null);
+		if (px?.enabled && px.host && px.port && (px.sites?.length ?? 0) > 0) out.push(u);
+	}
+	return out;
+}
+
+export interface TotoProxyWebsite {
+	website: string;
+	baseUrl: string;
+	phpsessid: string;
+	ua: string;
+	since: string;
+	today: string;
+}
+
+/** Runner meminta daftar website Jalur Kedua milik `user` yang DUE sekarang + konfigurasi proxy. Gating due SAMA dengan jalur Worker. */
+export async function totoProxyNext(env: Env, user: string, opts: { force?: boolean; nowMs?: number } = {}): Promise<{ ok: boolean; done?: boolean; message?: string; proxy?: { scheme: string; host: string; port: number; user: string; pass: string }; websites?: TotoProxyWebsite[] }> {
+	const u = String(user).trim();
+	if (!u) return { ok: false, message: "Query 'user' wajib diisi." };
+	const mode = await getSys(env, "sys_totomacau_mode");
+	if (mode <= 0) return { ok: true, done: true, websites: [], message: "Auto Check Toto Macau dimatikan (Pengaturan Sistem)." };
+	const px = await getProxy(env, u).catch(() => null);
+	if (!px?.enabled || !px.host || !px.port) return { ok: true, done: true, websites: [], message: "Jalur Kedua tidak aktif untuk user ini." };
+	await ensureTables(env);
+	const nowMs = opts.nowMs ?? Date.now();
+	const byWebsite = await candidates(env, [u], "only");
+	if (!byWebsite.size) return { ok: true, done: true, websites: [], message: "Tidak ada website Jalur Kedua yang memenuhi syarat." };
+	const accounts = await getSiteAccounts(env, [...byWebsite.keys()]);
+	const db = getTurso(env);
+	const marks = await db.prepare(`SELECT website, updated_at, status, detail FROM toto_macau_log WHERE game = 'pass' AND period = 0`).all<{ website: string; updated_at: string; status: string; detail: string }>();
+	const markMap = new Map((marks.results ?? []).map((m) => [String(m.website), { at: String(m.updated_at), running: m.status === "RUN", more: m.detail === "MORE" }]));
+	const hot = await hotWebsites(env, mode, nowMs);
+	const wcfg = await getTotoWindowCfg(env);
+	const baseInterval = passIntervalMin(nowMs, wcfg);
+	const lookback = await getSys(env, "sys_totomacau_lookback_days");
+	const since = dayOf(nowMs, lookback);
+	const today = dayOf(nowMs);
+	const due = [...byWebsite.keys()]
+		.filter((w) => {
+			const acc = accounts.get(w);
+			return !!acc && !!acc.panelz.url && !!acc.panelz.user;
+		})
+		.filter((w) => {
+			const m = markMap.get(w);
+			if (!m) return true;
+			if (m.running && m.at > tsPlusMinutes(-LEASE_MIN)) return false; // sedang diproses runner lain
+			if (m.more) return true;
+			if (!opts.force && !hot.has(w) && baseInterval <= 0) return false; // bukan waktunya
+			return m.at <= tsPlusMinutes(opts.force ? -(MIN_GAP_SEC_FORCE / 60) : -(hot.has(w) ? wcfg.fast : baseInterval));
+		})
+		.sort((x, y) => (markMap.get(x)?.at ?? "").localeCompare(markMap.get(y)?.at ?? ""))
+		.slice(0, 8);
+	const websites: TotoProxyWebsite[] = due.map((w) => {
+		const s = byWebsite.get(w)![0].sess;
+		return { website: w, baseUrl: s.baseUrl, phpsessid: s.phpsessid, ua: s.ua ?? "", since, today };
+	});
+	if (!websites.length) return { ok: true, done: true, websites: [], message: "Belum waktunya putaran berikutnya (atau semua baru saja diperiksa)." };
+	return { ok: true, done: false, proxy: { scheme: px.scheme, host: px.host, port: px.port, user: px.user, pass: px.pass }, websites };
+}
+
+/** Baris admin yang dikirim runner (data mentah, auth CRON_KEY) — tetap divalidasi/dikoreksi bentuknya sebelum dipakai. */
+function coerceTotoRow(r: unknown): TotoRow | null {
+	if (!r || typeof r !== "object") return null;
+	const x = r as Record<string, unknown>;
+	const period = Number(x.period);
+	const date = String(x.date ?? "");
+	const time = String(x.time ?? "");
+	if (!Number.isFinite(period) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+	const hour = Number.isFinite(Number(x.hour)) ? Number(x.hour) : Number(time.slice(0, 2)) || 0;
+	return { no: Number(x.no) || 0, date, time, hour, period, number: String(x.number ?? ""), hitung: String(x.hitung ?? "").toLowerCase() };
+}
+function parseSuppliedRows(raw: unknown): TotoAdminResult {
+	const obj = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+	const out: TotoAdminResult = {};
+	for (const game of TOTO_GAMES) {
+		const g = obj[game.game];
+		if (!g || typeof g !== "object") {
+			out[game.game] = { error: "Tidak ada data dari runner Jalur Kedua." };
+			continue;
+		}
+		const gg = g as { rows?: unknown; error?: unknown };
+		if (gg.error) {
+			out[game.game] = { error: String(gg.error).slice(0, 200) };
+			continue;
+		}
+		out[game.game] = { rows: Array.isArray(gg.rows) ? (gg.rows.map(coerceTotoRow).filter(Boolean) as TotoRow[]) : [] };
+	}
+	return out;
+}
+
+/** Runner melapor hasil baca admin SATU website Jalur Kedua; Worker cocokkan Panel-Z + tulis DB (reconcileWebsite). Idempoten lewat kunci per-website. */
+export async function totoProxyDone(env: Env, data: { user?: unknown; website?: unknown; rows?: unknown; nowMs?: number }, opts: { panel?: PanelOpen } = {}): Promise<{ ok: boolean; message?: string; summary?: { posted: number; already: number; pending: number; missing: number; conflict: number; failed: number } }> {
+	const u = String(data.user ?? "").trim();
+	const website = String(data.website ?? "").trim().toUpperCase();
+	if (!u || !website) return { ok: false, message: "user/website wajib diisi." };
+	const mode = await getSys(env, "sys_totomacau_mode");
+	if (mode <= 0) return { ok: true, message: "Auto Check Toto Macau dimatikan." };
+	await ensureTables(env);
+	// Jangan percaya begitu saja: pastikan website memang Jalur Kedua milik user ini & Panel-Z-nya terkonfigurasi.
+	const cands = (await candidates(env, [u], "only")).get(website);
+	if (!cands || !cands.length) return { ok: false, message: "Website bukan Jalur Kedua milik user ini (atau sesi tidak tersimpan)." };
+	const acc = (await getSiteAccounts(env, [website])).get(website);
+	if (!acc?.panelz.url || !acc.panelz.user) return { ok: false, message: "Panel-Z website ini belum dikonfigurasi." };
+	const supplied = parseSuppliedRows(data.rows);
+	const sum = emptyTotoSummary();
+	if (!(await acquireLease(env, website))) return { ok: true, message: "Website sedang diproses proses lain — tidak diperiksa dua kali.", summary: { posted: 0, already: 0, pending: 0, missing: 0, conflict: 0, failed: 0 } };
+	const nowMs = data.nowMs ?? Date.now();
+	const correct = mode === 2 && (await getSys(env, "sys_totomacau_correct")) === 1;
+	const lookback = await getSys(env, "sys_totomacau_lookback_days");
+	const maxCorrect = await getSys(env, "sys_totomacau_max_correct");
+	const budget = { used: 12 };
+	const before = { ...sum };
+	await logTotoEvent(env, website, "start", "INFO", `Mulai memeriksa ${website} (Jalur Kedua, mode ${mode})`);
+	let crashed = "";
+	try {
+		await reconcileWebsite(env, website, cands, acc.panelz, mode, { f: ((url, init) => fetch(url, init)) as Fetcher, panel: opts.panel ?? openPanelZ, nowMs, correct, lookback, maxCorrect, supplied }, budget, sum);
+	} catch (e) {
+		crashed = e instanceof Error ? e.message : String(e);
+	}
+	const d = (k: "posted" | "already" | "pending" | "conflict" | "missing" | "failed"): number => sum[k] - before[k];
+	await logTotoEvent(
+		env,
+		website,
+		"end",
+		crashed || d("failed") || d("conflict") ? "ERR" : d("posted") ? "OK" : "INFO",
+		crashed ? `Berhenti karena galat: ${crashed}` : `Selesai ${website} (Jalur Kedua): ${d("posted")} dikirim (${sum.corrected} dikoreksi), ${d("already")} sudah ada, ${d("pending")} belum terisi, ${d("missing")} menunggu baris, ${d("conflict")} beda, ${d("failed")} gagal`,
+		[releaseLease(env, website, sum.more && !crashed)],
+	);
+	return { ok: !crashed, message: crashed || "ok", summary: { posted: d("posted"), already: d("already"), pending: d("pending"), missing: d("missing"), conflict: d("conflict"), failed: d("failed") } };
 }

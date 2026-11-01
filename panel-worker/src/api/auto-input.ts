@@ -285,6 +285,26 @@ export async function dispatchAutoInputProxy(env: Env, user: string): Promise<vo
 	}
 }
 
+/** Picu workflow totomacau-proxy.yml (Toto Macau untuk website Jalur Kedua). user kosong = semua user Jalur Kedua (runner cari sendiri). Dikunci KV ±90 dtk. Gagal = non-fatal. */
+export async function dispatchTotoMacauProxy(env: Env, user?: string): Promise<void> {
+	const t = ghToken(env);
+	if (!t) return; // belum dikonfigurasi
+	const u = String(user ?? "").trim();
+	try {
+		const lockKey = `totoproxy:disp:${u.toLowerCase() || "_all"}`;
+		if (await env.SESS.get(lockKey)) return; // sudah dipicu baru-baru ini
+		await env.SESS.put(lockKey, "1", { expirationTtl: 90 });
+		const resp = await fetch(`https://api.github.com/repos/${autoInputProxyRepo(env)}/actions/workflows/totomacau-proxy.yml/dispatches`, {
+			method: "POST",
+			headers: GH_PROXY_HEADERS(t),
+			body: JSON.stringify({ ref: "main", inputs: u ? { user: u } : {} }),
+		});
+		if (resp.status !== 204) console.error("dispatchTotoMacauProxy gagal:", resp.status, (await resp.text()).slice(0, 200));
+	} catch (e) {
+		console.error("dispatchTotoMacauProxy error:", e instanceof Error ? e.message : e);
+	}
+}
+
 /**
  * Runner meminta SATU job berikutnya untuk dijalankan (QUEUED lalu due-retry). Mengembalikan sesi (PHPSESSID) + rencana +
  * konfigurasi proxy user. CATATAN KEAMANAN: PHPSESSID & sandi proxy MEMANG dikirim ke runner (lewat endpoint ber-CRON_KEY) —
@@ -799,11 +819,14 @@ export async function autoInputTotoRun(env: Env, token: string) {
 	const s = await gate(env, token);
 	try {
 		await dispatchTotoMacau(env, s.username);
+		// Website Jalur Kedua tidak bisa diproses Worker/toto-macau.yml -> picu juga runner proxy (totomacau-proxy.yml). Non-fatal.
+		await dispatchTotoMacauProxy(env, s.username).catch(() => {});
 		await logTotoEvent(env, "", "info", "INFO", `Tombol CEK & ISI SEKARANG ditekan oleh ${s.username} → GitHub Actions dipicu`);
 		await logActivity(env, s.username, "TOTO MACAU AUTO", "Cek & Isi Sekarang — dipicu lewat GitHub Actions", "BERHASIL", "").catch(() => {});
 		return { success: true, viaGithub: true, message: "Dipicu di GitHub Actions. Hasilnya masuk ±1–2 menit — daftar di kartu akan diperbarui otomatis." };
 	} catch (e) {
 		const why = e instanceof Error ? e.message : String(e);
+		await dispatchTotoMacauProxy(env, s.username).catch(() => {}); // website Jalur Kedua tetap dicoba lewat runner proxy
 		const sum = await totoMacauRun(env, { only: [s.username], force: true, maxSites: 1 });
 		await logActivity(env, s.username, "TOTO MACAU AUTO", "Cek & Isi Sekarang (langsung di Worker, 1 website) — " + sum.message, sum.failed || sum.conflict ? "GAGAL" : "BERHASIL", "").catch(() => {});
 		return { success: true, viaGithub: false, ...sum, message: `GitHub Actions tidak bisa dipicu (${why}). Dijalankan langsung untuk 1 website: ${sum.message}` };
